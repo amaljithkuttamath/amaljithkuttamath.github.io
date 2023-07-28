@@ -1,103 +1,258 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <title>Amaljith Kuttamath - Data Analyst Portfolio</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
-  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
-  <style>
-    /* Your custom styles go here */
-    
-  </style>
+    <title>Amaljith Kuttamath - Data Analyst Portfolio</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <style>
+        /* Your custom styles go here */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid black;
+        }
+
+        td {
+            padding: 10px;
+            text-align: left;
+        }
+
+        #timeline,
+        #chartInfo {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        #chartInfo {
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            margin-top: 20px;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        #chartInfo strong {
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        #chartInfo {
+            background-color: #f9f9f9;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.05);
+            font-size: 15px;
+        }
+
+        #chartInfo ul {
+            list-style-type: disc;
+            margin-left: 20px;
+        }
+
+        #skillsList ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        #skillsList li:hover {
+            color: #007BFF;
+            /* Change this color if you'd like a different hover color */
+        }
+    </style>
 </head>
+
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-    <a class="navbar-brand" href="#">Amaljith Kuttamath</a>
-  </nav>
-  <div class="container mt-5">
-    <div class="row">
-      <div class="col-lg-6">
-        <h2>About</h2>
-        <p>Detail-Oriented Analyst with a focus on delivering actionable insights. Strong engineering professional. A good learner with a high willingness to explore new things, and most importantly "Being positive because the only limits are those you have set upon yourself".</p>
-        <h2>Contact</h2>
-        <p><strong>Location:</strong> Fairfax, Virginia, US</p>
-        <p><strong>Phone:</strong> +17039696510</p>
-        <p><strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/amaljithk/">https://www.linkedin.com/in/amaljithk/</a></p>
-      </div>
-      <div class="col-lg-6">
-        <h2>Skills</h2>
-        <div id="barchart_material"></div>
-      </div>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <a class="navbar-brand" href="#">Amaljith Kuttamath</a>
+    </nav>
+    <div class="container mt-5">
+        <div class="row">
+            <div class="col-lg-6">
+                <h2>About</h2>
+                <p>Detail-Oriented Analyst with a focus on delivering actionable insights. Strong engineering
+                    professional. A good learner with a high willingness to explore new things, and most importantly
+                    "Being positive because the only limits are those you have set upon yourself".</p>
+                <h2>Contact</h2>
+                <p><strong>Location:</strong> Fairfax, Virginia, US</p>
+                <p><strong>Phone:</strong> +17039696510</p>
+                <p><strong>LinkedIn:</strong> <a
+                        href="https://www.linkedin.com/in/amaljithk/">https://www.linkedin.com/in/amaljithk/</a></p>
+            </div>
+            <div class="col-lg-6">
+                <h2>Skills</h2>
+                <div id="skillsList"></div>
+                <div id="barchart_material"></div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-lg-12">
+
+                <div id="timeline" style="height: 300px;"></div> <!-- Timeline will be rendered here -->
+                <div class="row mt-4">
+                    <div class="col-lg-12">
+                        <div id="chartInfo" class="p-4 border rounded"></div>
+                    </div>
+                </div>
+                <!-- <div id="chartInfo"></div> -->
+
+            </div>
+        </div>
     </div>
-    <div class="row">
-      <div class="col-lg-12">
-        <div id="timeline"></div> <!-- Timeline will be rendered here -->
-      </div>
-    </div>
-  </div>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-  <script type="text/javascript">
-    // Load the Google charts library
-    google.charts.load('current', {'packages':['timeline', 'bar']});
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+        // Load the Google charts library
 
-    // Define the callback function to create and populate the data table,
-    // instantiate the timeline chart, and draw it.
-    google.charts.setOnLoadCallback(drawCharts);
+        google.charts.load('current', { 'packages': ['timeline', 'bar'] });
 
-    function drawCharts() {
-      drawTimeline();
-      drawBarChart();
-    }
+        // Define the callback function to create and populate the data table,
+        // instantiate the timeline chart, and draw it.
 
-    function drawTimeline() {
-      var container = document.getElementById('timeline');
-      var chart = new google.visualization.Timeline(container);
-      var dataTable = new google.visualization.DataTable();
+        google.charts.setOnLoadCallback(drawCharts);
 
-      dataTable.addColumn({ type: 'string', id: 'Role' });
-      dataTable.addColumn({ type: 'string', id: 'Company' });
-      dataTable.addColumn({ type: 'date', id: 'Start' });
-      dataTable.addColumn({ type: 'date', id: 'End' });
+        function drawCharts() {
+            drawTimeline();
+            drawBarChart();
+        }
 
-      // Add your experiences here in the format ['Role', 'Company', new Date(year, month[, day]), new Date(year, month[, day])]
-      dataTable.addRows([
-        ['Intern', 'ISRO - Indian Space Research Organization', new Date(2015, 5), new Date(2015, 7)],
-        ['Software Engineer', 'Tata Consultancy Services', new Date(2017, 11), new Date(2019, 10)],
-        ['Co-Founder', 'RadianArc Technologies Pvt Ltd', new Date(2019, 10), new Date(2021, 3)],
-        ['Data Architect', 'INECTA - Microsoft Dynamics 365 Gold Certified Partner', new Date(2021, 3), new Date(2022, 8)],
-        ['Master\'s Degree', 'George Mason University', new Date(2022, 8), new Date(2023, 6)] // assuming you graduated in June 2023
-        // More rows here for more timeline items
-      ]);
+        function drawTimeline() {
+            var container = document.getElementById('timeline');
+            var chart = new google.visualization.Timeline(container);
+            var dataTable = new google.visualization.DataTable();
 
-      chart.draw(dataTable);
-    }
+            dataTable.addColumn({ type: 'string', id: 'Role' });
+            dataTable.addColumn({ type: 'string', id: 'Company' });
+            dataTable.addColumn({ type: 'date', id: 'Start' });
+            dataTable.addColumn({ type: 'date', id: 'End' });
 
-    function drawBarChart() {
-      var data = google.visualization.arrayToDataTable([
-        ['Skill', 'Proficiency', { role: 'style' }],
-        ['Python', 9, 'silver'],
-        ['R', 7, 'gold'],
-        ['SQL', 8, 'color: #e5e4e2'],
-        ['JavaScript', 6, 'color: #76A7FA'],
-        ['Tableau', 9, 'silver'],
-        ['PowerBI', 7, 'gold'],
-        ['Azure', 8, 'color: #e5e4e2'],
-        ['AWS', 6, 'color: #76A7FA']
-        // More skills here
-      ]);
+            // Add your experiences here in the format ['Role', 'Company', new Date(year, month[, day]), new Date(year, month[, day])]
+            var rows = [
+                ['Intern', 'ISRO - Indian Space Research Organization', new Date(2015, 5), new Date(2015, 7)],
+                ['Software Engineer', 'Tata Consultancy Services', new Date(2017, 11), new Date(2019, 10)],
+                ['Software Architect', 'RadianArc Technologies Pvt Ltd', new Date(2019, 10), new Date(2021, 3)],
+                ['Data Architect', 'INECTA - Microsoft Dynamics 365 Gold Certified Partner', new Date(2021, 3), new Date(2022, 8)],
+                ['Master Degree', 'George Mason University', new Date(2022, 8), new Date(2023, 6)] // assuming you graduated in June 2023
+                // More rows here for more timeline items
+            ];
+            google.visualization.events.addListener(chart, 'select', function () {
+                var selectedItem = chart.getSelection()[0];
+                if (selectedItem) {
+                    var role = dataTable.getValue(selectedItem.row, 0);
+                    var company = dataTable.getValue(selectedItem.row, 1);
+                    var descriptions = {
+                        'Data Architect': `Inecta [March 2021 - August 2022] IN, DELHI, Delhi
+    <ul>
+        <li>Designed and implemented an in-house web application for Business Central to provide integrations with Shopify, Stripe, Smartsheet, and processing EDI documents.</li>
+        <li>Reduced processing time and provided real-time visibility into sales and financial data.</li>
+        <li>Optimized the performance of ADF pipelines for Shopify API by 16X, and for EDI documents by 5X, using vectorizations and batch processing for Business Central API.</li>
+        <li>Successfully migrated from Power-BI to Dash-Plotly for rapid visualization of inventory data and critical KPIs, resulting in a shift from daily reporting to real-time reporting for stakeholders with reduced costs.</li>
+        <li>Demonstrated reporting project delivery through customer-facing demos, resulting in increased revenue for the company. Increased operational efficiency by 50%, resulting in a cost savings of 50%.</li>
+    </ul>`,
 
-      var options = {
-        chart: {
-          title: 'Skills Proficiency',
-        },
-        bars: 'horizontal' // Required for Material Bar Charts.
-      };
+                        'Software Architect': `Radianarc Technologies Pvt Ltd [October 2019 - March 2021] IN, TELANGANA, Hyderabad
+    <ul>
+        <li>Developed and implemented forecasting models for processed vibration data, resulting in a prediction accuracy of over 90% for determining machinery failure.</li>
+        <li>Developed a rule-engine to analyse and extract features required for determining the time to failure for machinery, resulting in a prediction accuracy of over 85%.</li>
+        <li>Integrated various systems for checking the health of IoT sensors, resulting in an uptime of over 95% for the sensors.</li>
+        <li>Developed an alert system for both in-house sensors and fault detection by the sensors, resulting in a reduction of machinery downtime by over 50%.</li>
+        <li>Developed unit and integration test cases for the system that yielded more than 70% code coverage, ensuring the accuracy and reliability of the system.</li>
+        <li>Conducted accuracy testing for models using physics-based synthetic data, resulting in a prediction accuracy of over 95%.</li>
+    </ul>`,
 
-      var chart = new google.charts.Bar(document.getElementById('barchart_material'));
+                        'Software Engineer': `Tata Consultancy Services [November 2017 - October 2019] IN, TAMILNADU, Chennai
+    <ul>
+        <li>Responsible for end-to-end application & Performance / Load testing on Load runner.</li>
+        <li>Introduced automation to the team, which reduced more than 30% of manual hours for test cases.</li>
+    </ul>`,
 
-      chart.draw(data, google.charts.Bar.convertOptions(options));
-    }
-  </script>
+                        'Intern': `Indian Space Research Organization [May 2015 - July 2015] IN, TELANGANA, Hyderabad
+    <ul>
+        <li>Frame-sync generation and detection logic implementation using TTL (time to live) ICs.</li>
+        <li>Interfacing 8751 microcontroller with HDSP display.</li>
+    </ul>`,
+                        'Master Degree': `George Mason University - Fairfax, Virginia [August 2022 – Present]
+    <ul>
+        <li>Master's degree program in Data Analytics Engineering (DAEN).</li>
+    </ul>`
+                    };
+
+
+                    document.getElementById("chartInfo").innerHTML = `
+            <strong>Role:</strong> ${role} <br>
+            <strong>Company:</strong> ${company} <br>
+            <strong>Description:</strong> ${descriptions[role]}
+        `;
+                }
+            });
+
+            dataTable.addRows(rows.reverse());
+            chart.draw(dataTable);
+        }
+
+        // function drawBarChart() {
+        //     var data = google.visualization.arrayToDataTable([
+        //         ['Skill', 'Proficiency', { role: 'style' }],
+        //         ['Python', 9, 'silver'],
+        //         ['R', 7, 'gold'],
+        //         ['SQL', 8, 'color: #e5e4e2'],
+        //         ['JavaScript', 6, 'color: #76A7FA'],
+        //         ['Tableau', 9, 'silver'],
+        //         ['PowerBI', 7, 'gold'],
+        //         ['Azure', 8, 'color: #e5e4e2'],
+        //         ['AWS', 6, 'color: #76A7FA']
+        //         // More skills here
+        //     ]);
+
+        //     var options = {
+        //         chart: {
+        //             title: 'Skills Proficiency',
+        //         },
+        //         bars: 'horizontal' // Required for Material Bar Charts.
+        //     };
+
+        //     var chart = new google.charts.Bar(document.getElementById('barchart_material'));
+
+        //     chart.draw(data, google.charts.Bar.convertOptions(options));
+
+        // }
+        function populateSkillsList() {
+            var skillsData = [
+                'NLP (Natural Language Processing)',
+                'Web Development',
+                'Data Visualization',
+                'ETL',
+                'Data Mining - Weka, KNIME',
+                'API Design and Frameworks - Django, Flask, Swagger/Open-API, Postman',
+                'Cloud Platform - Azure, AWS (Amazon Web Services)',
+                'Data Reporting Tools - Dash-Plotly, Azure Data Studio, Tableau, Microsoft Power BI, Google Data Studio',
+                'DBMS - Microsoft SQL Server, MySQL, PostgreSQL, MongoDB, SQLite, Influx DB',
+                'Big Data Technologies - Apache Spark [PySpark], Hive, Pig',
+                'Languages - Python, R, Bash Scripting, PowerShell, C/C++, HTML, SQL, ReactJS, JavaScript, MATLAB, KQL',
+                'Containerization and Orchestration Tools - Docker, Amazon Elastic Container Service (ECS)',
+                'Monitoring & Logging Tools - Prometheus, Grafana, Data Dog',
+                'Project Management - Jira, Microsoft Project, Confluence, Microsoft Teams, ClickUp, Notion'
+            ];
+
+            var list = '<ul>';
+            for (var i = 0; i < skillsData.length; i++) {
+                list += '<li>' + skillsData[i] + '</li>';
+            }
+            list += '</ul>';
+
+            document.getElementById("skillsList").innerHTML = list;
+        }
+
+        // Call the function to populate the list
+        populateSkillsList();
+
+
+    </script>
 </body>
-</html>
 
+</html>
