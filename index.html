@@ -13,181 +13,8 @@
     <title>Amaljith Kuttamath - AI Engineer Portfolio</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
-    <style>
-        :root {
-            --primary-color: #007BFF;
-            --secondary-color: #6c757d;
-            --background-color: #ffffff;
-            --text-color: #333333;
-            --hover-color: #0056b3;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: var(--text-color);
-            background-color: var(--background-color);
-            transition: background-color 0.3s ease, color 0.3s ease;
-            overflow-x: hidden;
-        }
-
-        .dark-mode {
-            --primary-color: #4da6ff;
-            --secondary-color: #a1a8ae;
-            --background-color: #1a1a1a;
-            --text-color: #f0f0f0;
-            --hover-color: #80bdff;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        .section {
-            margin-bottom: 4rem;
-            opacity: 0;
-            transform: translateY(20px);
-            transition: opacity 0.5s ease, transform 0.5s ease;
-        }
-
-        .section.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        h2 {
-            color: var(--primary-color);
-            margin-bottom: 1.5rem;
-            font-weight: bold;
-        }
-
-        .skills-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-            justify-content: center;
-        }
-
-        .skill-item {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            cursor: pointer;
-        }
-
-        .skill-item:hover {
-            transform: scale(1.05);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-
-        #timeline {
-            height: 400px;
-            margin-top: 2rem;
-        }
-
-        #chartInfo {
-            padding: 20px;
-            border: 1px solid var(--secondary-color);
-            border-radius: 5px;
-            background-color: rgba(249, 249, 249, 0.1);
-            font-size: 0.9em;
-            line-height: 1.6;
-            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.05);
-            margin-top: 2rem;
-        }
-
-        .project-card {
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            cursor: pointer;
-        }
-
-        .project-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        }
-
-        .project-image {
-            height: 200px;
-            background-size: cover;
-            background-position: center;
-        }
-
-        #darkModeToggle {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            font-size: 1.5rem;
-            cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.3s ease;
-        }
-
-        #darkModeToggle:hover {
-            background-color: var(--hover-color);
-            transform: scale(1.1);
-        }
-
-        .navbar {
-            background-color: rgba(0, 0, 0, 0.8) !important;
-            backdrop-filter: blur(10px);
-        }
-
-        .nav-link {
-            color: white !important;
-            transition: color 0.3s ease;
-        }
-
-        .nav-link:hover {
-            color: var(--primary-color) !important;
-        }
-
-        #particles-js {
-            position: fixed;
-            width: 100%;
-            height: 100%;
-            top: 0;
-            left: 0;
-            z-index: -1;
-        }
-
-        .contact-form input,
-        .contact-form textarea {
-            background-color: rgba(255, 255, 255, 0.1);
-            border: 1px solid var(--secondary-color);
-            color: var(--text-color);
-        }
-
-        .contact-form input:focus,
-        .contact-form textarea:focus {
-            background-color: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-            
-            #timeline {
-                height: 300px;
-            }
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div id="particles-js"></div>
@@ -213,7 +40,16 @@
     <div class="container mt-5">
         <div class="section" id="about">
             <h2>About Me</h2>
-            <p>Innovative AI Engineer with a passion for developing cutting-edge machine learning solutions and advanced neural networks. Experienced in natural language processing, computer vision, and reinforcement learning. Committed to pushing the boundaries of AI technology and delivering impactful solutions to complex problems. A lifelong learner with a drive to explore and implement the latest advancements in artificial intelligence.</p>
+            <div class="row">
+                <div class="col-md-4">
+                    <img src="https://source.unsplash.com/WdoQio6HPVA/400x400" alt="Amaljith Kuttamath" class="img-fluid rounded-circle mb-3">
+                </div>
+                <div class="col-md-8">
+                    <h3 class="mb-3">I'm <span id="typing-effect"></span></h3>
+                    <p>Innovative AI Engineer with a passion for developing cutting-edge machine learning solutions and advanced neural networks. Experienced in natural language processing, computer vision, and reinforcement learning. Committed to pushing the boundaries of AI technology and delivering impactful solutions to complex problems.</p>
+                    <p>With a strong background in data analytics and software engineering, I bring a unique perspective to AI development, combining theoretical knowledge with practical implementation skills.</p>
+                </div>
+            </div>
         </div>
 
         <div class="section" id="skills">
@@ -229,28 +65,21 @@
 
         <div class="section" id="projects">
             <h2>Projects</h2>
+            <div class="mb-4">
+                <button class="btn btn-outline-primary me-2 filter-btn" data-filter="all">All</button>
+                <button class="btn btn-outline-primary me-2 filter-btn" data-filter="ai">AI/ML</button>
+                <button class="btn btn-outline-primary me-2 filter-btn" data-filter="data">Data Analysis</button>
+                <button class="btn btn-outline-primary filter-btn" data-filter="web">Web Development</button>
+            </div>
             <div id="projectsList" class="row"></div>
         </div>
 
         <div class="section" id="contact">
             <h2>Contact</h2>
-            <form class="contact-form">
-                <div class="mb-3">
-                    <input type="text" class="form-control" placeholder="Your Name" required>
-                </div>
-                <div class="mb-3">
-                    <input type="email" class="form-control" placeholder="Your Email" required>
-                </div>
-                <div class="mb-3">
-                    <textarea class="form-control" rows="5" placeholder="Your Message" required></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Send Message</button>
-            </form>
-            <div class="mt-4">
-                <p><strong>Location:</strong> Fairfax, Virginia, US</p>
-                <p><strong>Phone:</strong> +17039696510</p>
-                <p><strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/amaljithk/" target="_blank" rel="noopener noreferrer">https://www.linkedin.com/in/amaljithk/</a></p>
-            </div>
+            <p><i class="fas fa-map-marker-alt"></i> <strong>Location:</strong> Fairfax, Virginia, US</p>
+            <p><i class="fas fa-phone"></i> <strong>Phone:</strong> +17039696510</p>
+            <p><i class="fab fa-linkedin"></i> <strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/amaljithk/" target="_blank" rel="noopener noreferrer">https://www.linkedin.com/in/amaljithk/</a></p>
+            <p><i class="fab fa-github"></i> <strong>GitHub:</strong> <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer">https://github.com/amaljithkuttamath</a></p>
         </div>
     </div>
 
@@ -258,220 +87,25 @@
         <i class="fas fa-moon"></i>
     </button>
 
+    <button id="backToTop" aria-label="Back to top">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+
+    <div id="colorThemeSelector">
+        <button class="color-theme" data-theme="blue"></button>
+        <button class="color-theme" data-theme="green"></button>
+        <button class="color-theme" data-theme="purple"></button>
+    </div>
+
+    <a href="#contact" id="floatingContact" class="btn btn-primary" aria-label="Contact me">
+        <i class="fas fa-envelope"></i>
+    </a>
+
+    <!-- Load scripts in the correct order -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
-    <script>
-        google.charts.load('current', { 'packages': ['timeline'] });
-        google.charts.setOnLoadCallback(drawCharts);
-
-        function drawCharts() {
-            drawTimeline();
-        }
-
-        function drawTimeline() {
-            const container = document.getElementById('timeline');
-            const chart = new google.visualization.Timeline(container);
-            const dataTable = new google.visualization.DataTable();
-
-            dataTable.addColumn({ type: 'string', id: 'Role' });
-            dataTable.addColumn({ type: 'string', id: 'Company' });
-            dataTable.addColumn({ type: 'date', id: 'Start' });
-            dataTable.addColumn({ type: 'date', id: 'End' });
-
-            const rows = [
-                ['AI Research Intern', 'ISRO - Indian Space Research Organization', new Date(2015, 5), new Date(2015, 7)],
-                ['ML Engineer', 'Tata Consultancy Services', new Date(2017, 11), new Date(2019, 10)],
-                ['AI Architect', 'RadianArc Technologies Pvt Ltd', new Date(2019, 10), new Date(2021, 3)],
-                ['Senior AI Engineer', 'INECTA - Microsoft Dynamics 365 Gold Certified Partner', new Date(2021, 3), new Date(2022, 8)],
-                ['Master in AI and Machine Learning', 'George Mason University', new Date(2022, 8), new Date(2023, 6)]
-            ];
-
-            dataTable.addRows(rows.reverse());
-            chart.draw(dataTable);
-
-            google.visualization.events.addListener(chart, 'select', function () {
-                const selectedItem = chart.getSelection()[0];
-                if (selectedItem) {
-                    const role = dataTable.getValue(selectedItem.row, 0);
-                    const company = dataTable.getValue(selectedItem.row, 1);
-                    const descriptions = {
-                        'Senior AI Engineer': `INECTA [March 2021 - August 2022] IN, DELHI, Delhi
-                            <ul>
-                                <li>Developed and implemented advanced machine learning models for sales prediction and inventory optimization, resulting in a 25% increase in forecast accuracy.</li>
-                                <li>Designed and deployed a real-time NLP-based chatbot for customer support, reducing response times by 60% and improving customer satisfaction scores by 35%.</li>
-                                <li>Implemented computer vision algorithms for quality control in manufacturing processes, reducing defect rates by 40%.</li>
-                                <li>Optimized deep learning model inference times by 70% using TensorRT and quantization techniques.</li>
-                                <li>Led a team of 5 data scientists in developing an end-to-end MLOps pipeline, reducing model deployment time from weeks to hours.</li>
-                            </ul>`,
-                        'AI Architect': `Radianarc Technologies Pvt Ltd [October 2019 - March 2021] IN, TELANGANA, Hyderabad
-                            <ul>
-                                <li>Architected and implemented a distributed machine learning system for real-time anomaly detection in IoT sensor data, achieving 99.9% uptime and 95% accuracy.</li>
-                                <li>Developed a novel deep reinforcement learning algorithm for optimizing energy consumption in smart buildings, resulting in a 30% reduction in energy costs.</li>
-                                <li>Implemented a federated learning system for privacy-preserving machine learning across multiple edge devices, ensuring GDPR compliance while maintaining model performance.</li>
-                                <li>Created a custom AutoML pipeline for automated feature engineering and model selection, reducing data scientist workload by 40%.</li>
-                                <li>Designed and implemented a scalable, microservices-based architecture for AI model serving, capable of handling 10,000+ requests per second.</li>
-                            </ul>`,
-                        'ML Engineer': `Tata Consultancy Services [November 2017 - October 2019] IN, TAMILNADU, Chennai
-                            <ul>
-                                <li>Developed and deployed machine learning models for predictive maintenance, reducing equipment downtime by 35%.</li>
-                                <li>Implemented natural language processing techniques for sentiment analysis on customer feedback, improving product development cycles.</li>
-                                <li>Created an automated machine learning pipeline for continuous model training and evaluation, increasing model accuracy by 20%.</li>
-                                <li>Collaborated with cross-functional teams to integrate AI solutions into existing business processes, resulting in a 15% increase in operational efficiency.</li>
-                            </ul>`,
-                        'AI Research Intern': `Indian Space Research Organization [May 2015 - July 2015] IN, TELANGANA, Hyderabad
-                            <ul>
-                                <li>Conducted research on applying machine learning algorithms for satellite image analysis and object detection.</li>
-                                <li>Developed a prototype for autonomous navigation systems using reinforcement learning techniques.</li>
-                                <li>Contributed to a research paper on AI applications in space exploration, published in a peer-reviewed journal.</li>
-                            </ul>`,
-                        'Master in AI and Machine Learning': `George Mason University - Fairfax, Virginia [August 2022 – Present]
-                            <ul>
-                                <li>Specializing in advanced machine learning techniques, deep learning, and AI ethics.</li>
-                                <li>Conducting research on explainable AI and its applications in healthcare diagnostics.</li>
-                                <li>Collaborating on a project to develop AI-powered solutions for climate change mitigation.</li>
-                            </ul>`
-                    };
-
-                    document.getElementById("chartInfo").innerHTML = `
-                        <strong>Role:</strong> ${role} <br>
-                        <strong>Company:</strong> ${company} <br>
-                        <strong>Description:</strong> ${descriptions[role]}
-                    `;
-                }
-            });
-        }
-
-        function populateSkillsList() {
-            const skillsData = [
-                'Deep Learning (PyTorch, TensorFlow, Keras)',
-                'Natural Language Processing (BERT, GPT, Transformers)',
-                'Computer Vision (OpenCV, YOLO, TensorFlow Object Detection API)',
-                'Reinforcement Learning (OpenAI Gym, RLlib)',
-                'MLOps (MLflow, Kubeflow, Airflow)',
-                'Big Data Processing (Apache Spark, Hadoop)',
-                'Cloud AI Services (AWS SageMaker, Azure ML, Google Cloud AI)',
-                'Containerization and Orchestration (Docker, Kubernetes)',
-                'Distributed Computing (Ray, Dask)',
-                'AutoML (AutoKeras, TPOT)',
-                'Explainable AI (SHAP, LIME)',
-                'Graph Neural Networks (PyTorch Geometric, DGL)',
-                'Time Series Analysis (Prophet, ARIMA, LSTM)',
-                'Bayesian Machine Learning (PyMC3, Stan)',
-                'AI Ethics and Fairness (AI Fairness 360, Ethically Aligned AI)',
-                'Programming Languages (Python, R, Julia, C++)',
-                'Data Visualization (Matplotlib, Seaborn, Plotly)',
-                'Version Control and Collaboration (Git, GitHub)',
-                'AI Research Tools (Paper With Code, ArXiv)'
-            ];
-
-            const skillsList = document.getElementById("skillsList");
-            skillsList.innerHTML = skillsData.map(skill => `<span class="skill-item">${skill}</span>`).join('');
-        }
-
-        function populateProjectsList() {
-            const projectsData = [
-                {
-                    title: "Autonomous Drone Navigation System",
-                    description: "Developed a reinforcement learning-based navigation system for drones, achieving 95% accuracy in complex environments.",
-                    technologies: "PyTorch, ROS, OpenAI Gym",
-                    image: "https://source.unsplash.com/random/800x600?drone"
-                },
-                {
-                    title: "Multilingual Sentiment Analysis Engine",
-                    description: "Created a transformer-based sentiment analysis model capable of understanding 50+ languages with 92% accuracy.",
-                    technologies: "Hugging Face Transformers, FastAPI, Docker",
-                    image: "https://source.unsplash.com/random/800x600?language"
-                },
-                {
-                    title: "Real-time Video Analytics Platform",
-                    description: "Built a scalable platform for real-time object detection and tracking in video streams, processing 1000+ streams simultaneously.",
-                    technologies: "TensorFlow, Apache Kafka, Kubernetes",
-                    image: "https://source.unsplash.com/random/800x600?video"
-                },
-                {
-                    title: "AI-powered Medical Diagnosis Assistant",
-                    description: "Developed an explainable AI system for assisting in medical diagnoses, improving diagnostic accuracy by 30%.",
-                    technologies: "PyTorch, SHAP, Flask, React",
-                    image: "https://source.unsplash.com/random/800x600?medical"
-                }
-            ];
-
-            const projectsList = document.getElementById("projectsList");
-            projectsList.innerHTML = projectsData.map(project => `
-                <div class="col-md-6 mb-4">
-                    <div class="project-card">
-                        <div class="project-image" style="background-image: url('${project.image}');"></div>
-                        <div class="card-body">
-                            <h5 class="card-title">${project.title}</h5>
-                            <p class="card-text">${project.description}</p>
-                            <p class="card-text"><small class="text-muted">Technologies: ${project.technologies}</small></p>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        // Intersection Observer for scroll animations
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.1 });
-
-        document.querySelectorAll('.section').forEach(section => {
-            observer.observe(section);
-        });
-
-        // Dark mode toggle
-        const darkModeToggle = document.getElementById('darkModeToggle');
-        const body = document.body;
-        const icon = darkModeToggle.querySelector('i');
-
-        darkModeToggle.addEventListener('click', () => {
-            body.classList.toggle('dark-mode');
-            if (body.classList.contains('dark-mode')) {
-                icon.classList.remove('fa-moon');
-                icon.classList.add('fa-sun');
-            } else {
-                icon.classList.remove('fa-sun');
-                icon.classList.add('fa-moon');
-            }
-        });
-
-        // Smooth scrolling
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                document.querySelector(this.getAttribute('href')).scrollIntoView({
-                    behavior: 'smooth'
-                });
-            });
-        });
-
-        // Initialize skills list and projects list
-        populateSkillsList();
-        populateProjectsList();
-
-        // Particle.js configuration
-        particlesJS("particles-js", {
-            particles: {
-                number: { value: 80, density: { enable: true, value_area: 800 } },
-                color: { value: "#ffffff" },
-                shape: { type: "circle", stroke: { width: 0, color: "#000000" }, polygon: { nb_sides: 5 }, image: { src: "img/github.svg", width: 100, height: 100 } },
-                opacity: { value: 0.5, random: false, anim: { enable: false, speed: 1, opacity_min: 0.1, sync: false } },
-                size: { value: 3, random: true, anim: { enable: false, speed: 40, size_min: 0.1, sync: false } },
-                line_linked: { enable: true, distance: 150, color: "#ffffff", opacity: 0.4, width: 1 },
-                move: { enable: true, speed: 6, direction: "none", random: false, straight: false, out_mode: "out", bounce: false, attract: { enable: false, rotateX: 600, rotateY: 1200 } }
-            },
-            interactivity: {
-                detect_on: "canvas",
-                events: { onhover: { enable: true, mode: "repulse" }, onclick: { enable: true, mode: "push" }, resize: true },
-                modes: { grab: { distance: 400, line_linked: { opacity: 1 } }, bubble: { distance: 400, size: 40, duration: 2, opacity: 8, speed: 3 }, repulse: { distance: 200, duration: 0.4 }, push: { particles_nb: 4 }, remove: { particles_nb: 2 } }
-            },
-            retina_detect: true
-        });
-    </script>
+    <script src="https://www.gstatic.com/charts/loader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12"></script>
+    <script src="script.js"></script>
 </body>
 </html>
