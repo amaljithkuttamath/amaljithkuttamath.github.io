@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
     <div id="particles-js"></div>
@@ -54,7 +55,66 @@
 
         <div class="section" id="skills">
             <h2>Skills</h2>
-            <div id="skillsList" class="skills-container"></div>
+            <div class="row">
+                <div class="col-md-6">
+                    <h3>Skills Graph</h3>
+                    <div id="skills-graph"></div>
+                    <div id="skill-info" class="mt-4"></div>
+                </div>
+                <div class="col-md-6">
+                    <h3>Skill Categories</h3>
+                    <div class="skill-category">
+                        <h4>AI/Machine Learning</h4>
+                        <ul>
+                            <li>Deep Learning</li>
+                            <li>Natural Language Processing</li>
+                            <li>Computer Vision</li>
+                            <li>Reinforcement Learning</li>
+                            <li>Neural Networks</li>
+                            <li>TensorFlow</li>
+                            <li>PyTorch</li>
+                            <li>Scikit-learn</li>
+                        </ul>
+                    </div>
+                    <div class="skill-category">
+                        <h4>Data Science</h4>
+                        <ul>
+                            <li>Data Analysis</li>
+                            <li>Statistical Modeling</li>
+                            <li>Data Visualization</li>
+                            <li>Big Data Processing</li>
+                            <li>Pandas</li>
+                            <li>NumPy</li>
+                            <li>SciPy</li>
+                            <li>Matplotlib</li>
+                        </ul>
+                    </div>
+                    <div class="skill-category">
+                        <h4>Programming Languages</h4>
+                        <ul>
+                            <li>Python</li>
+                            <li>R</li>
+                            <li>SQL</li>
+                            <li>Java</li>
+                            <li>C++</li>
+                            <li>JavaScript</li>
+                        </ul>
+                    </div>
+                    <div class="skill-category">
+                        <h4>Tools &amp; Technologies</h4>
+                        <ul>
+                            <li>Git</li>
+                            <li>Docker</li>
+                            <li>Kubernetes</li>
+                            <li>AWS</li>
+                            <li>Google Cloud Platform</li>
+                            <li>Jupyter Notebooks</li>
+                            <li>Apache Spark</li>
+                            <li>MongoDB</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="section" id="experience">
