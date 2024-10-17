@@ -11,6 +11,7 @@
         <meta property="og:image" content="https://raw.githubusercontent.com/amaljithkuttamath/amaljithkuttamath.github.io/main/image/amal.jpg">
         <meta property="og:url" content="https://amaljithkuttamath.github.io">
         <title>Amaljith Kuttamath - AI Engineer Portfolio</title>
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
         <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></noscript>
         <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
@@ -20,13 +21,47 @@
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css">
         <link rel="stylesheet" href="styles.css">
         <script src="https://d3js.org/d3.v7.min.js" defer></script>
+        <script type="application/ld+json">
+        {
+            "@context": "http://schema.org",
+            "@type": "Person",
+            "name": "Amaljith Kuttamath",
+            "jobTitle": "AI Engineer",
+            "description": "AI Engineer specializing in NLP, machine learning, and knowledge graphs in healthcare.",
+            "image": "https://raw.githubusercontent.com/amaljithkuttamath/amaljithkuttamath.github.io/main/image/amal.jpg",
+            "url": "https://amaljithkuttamath.github.io",
+            "sameAs": [
+                "https://www.linkedin.com/in/amaljithk"
+            ],
+            "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Arlington",
+                "addressRegion": "Virginia",
+                "addressCountry": "United States"
+            },
+            "email": "kuttamath.amaljith@gmail.com",
+            "telephone": "+17039696510",
+            "alumniOf": {
+                "@type": "CollegeOrUniversity",
+                "name": "University of Texas at Arlington"
+            },
+            "knowsAbout": [
+                "Artificial Intelligence",
+                "Natural Language Processing",
+                "Machine Learning",
+                "Knowledge Graphs",
+                "Healthcare Analytics"
+            ]
+        }
+        </script>
     </head>
     <body>
+        <div id="particles-js" aria-hidden="true"></div>
         <noscript>
             <p>This website requires JavaScript to function properly. Please enable JavaScript in your browser settings.</p>
         </noscript>
         <a href="#main-content" class="skip-link">Skip to main content</a>
-        <nav class="navbar navbar-expand-lg navbar-dark fixed-top">
+        <nav class="navbar navbar-expand-lg navbar-dark fixed-top" aria-label="Main navigation">
             <div class="container">
                 <a class="navbar-brand" href="#">Amaljith Kuttamath</a>
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -48,12 +83,12 @@
                 <div class="row align-items-center">
                     <div class="col-md-6" data-aos="fade-right">
                         <h1 class="display-4 fw-bold mb-4">Amaljith Kuttamath</h1>
-                        <h2 class="h3 mb-4">I'm <span id="typing-effect"></span></h2>
+                        <h2 class="h3 mb-4">I'm <span id="typing-effect" aria-live="polite"></span></h2>
                         <p class="lead mb-4">Transforming complex data into actionable insights through advanced AI and NLP techniques.</p>
                         <a href="#contact" class="btn btn-primary btn-lg">Get in Touch</a>
                     </div>
                     <div class="col-md-6 d-flex justify-content-center" data-aos="fade-left">
-                        <img src="image/amal.jpg" alt="Amaljith Kuttamath" class="img-fluid rounded-circle about-image" loading="lazy">
+                        <img src="image/amal.jpg" alt="Amaljith Kuttamath" class="img-fluid rounded-circle about-image" loading="lazy" width="300" height="300">
                     </div>
                 </div>
             </div>
@@ -65,8 +100,8 @@
                 <h2 class="text-center mb-5" data-aos="fade-up">About Me</h2>
                 <div class="row">
                     <div class="col-md-12" data-aos="fade-up">
-                        <p>AI Engineer with robust experience in AI research and development, specializing in natural language processing (NLP), machine learning (ML), and knowledge graphs. At Sorcero, I lead retrieval-augmented generation (RAG) applications on Google Cloud's Vertex AI, with a deep focus on medical records and oncology data. I excel in transforming complex data into actionable insights via advanced visualization and automation.</p>
-                        <p>My previous roles as a Technical Consultant and Solutions Architect have allowed me to deliver scalable AI/ML solutions in industries like finance and manufacturing. I possess a strong engineering foundation with a proven track record of developing and deploying solutions that achieve over 90% accuracy in predictive maintenance, anomaly detection, and time-series forecasting.</p>
+                        <p>As an AI Engineer with extensive experience in AI research and development, I specialize in natural language processing (NLP), machine learning (ML), and knowledge graphs. At Sorcero, I lead retrieval-augmented generation (RAG) applications on Google Cloud's Vertex AI, focusing deeply on medical records and oncology data. My expertise lies in transforming complex data into actionable insights through advanced visualization and automation techniques.</p>
+                        <p>My background as a Technical Consultant and Solutions Architect has equipped me to deliver scalable AI/ML solutions across various industries, including finance and manufacturing. With a strong engineering foundation, I have a proven track record of developing and deploying solutions that consistently achieve over 90% accuracy in critical areas such as predictive maintenance, anomaly detection, and time-series forecasting.</p>
                     </div>
                 </div>
             </div>
@@ -76,30 +111,39 @@
                 <h2 class="text-center mb-5" data-aos="fade-up">Skills</h2>
                 <div class="row mb-4">
                     <div class="col-md-12">
-                        <p class="text-center">Explore my skills by interacting with the graph below. Hover over nodes to see connections, and click on them for more details.</p>
+                        <p class="text-center" data-aos="fade-up" data-aos-delay="200">Explore my skills by interacting with the graph below. Hover over nodes to see connections, and click on them for more details.</p>
                     </div>
                 </div>
-                <div id="skills-graph" class="mt-5" data-aos="zoom-in"></div>
-                <div id="skill-details" class="mt-3 p-3 bg-white rounded shadow"></div>
+                <div id="skills-graph-container" class="position-relative" data-aos="zoom-in" data-aos-delay="400">
+                    <div id="skills-graph" class="mt-5"></div>
+                    <div id="graph-controls" class="position-absolute top-0 end-0 m-2">
+                        <button id="zoom-in" class="btn btn-sm btn-light me-1" title="Zoom In" aria-label="Zoom In"><i class="fas fa-search-plus" aria-hidden="true"></i></button>
+                        <button id="zoom-out" class="btn btn-sm btn-light me-1" title="Zoom Out" aria-label="Zoom Out"><i class="fas fa-search-minus" aria-hidden="true"></i></button>
+                        <button id="reset-zoom" class="btn btn-sm btn-light" title="Reset" aria-label="Reset Zoom"><i class="fas fa-undo" aria-hidden="true"></i></button>
+                    </div>
+                </div>
+                <div id="skill-details" class="mt-3 p-3 bg-white rounded shadow" aria-live="polite"></div>
             </div>
         </section>
-        <section id="projects" class="section bg-light">
+        <section id="projects" class="section">
             <div class="container">
                 <h2 class="text-center mb-5" data-aos="fade-up">Projects</h2>
-                <div class="mb-4">
-                    <div class="btn-group" role="group" aria-label="Project filters">
-                        <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="ai">AI</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="nlp">NLP</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="ml">Machine Learning</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="web">Web Development</button>
-                    </div>
-                </div>
-                <div class="row" id="projectsList">
-                    <!-- Project cards will be dynamically inserted here by JavaScript -->
+                <div class="row mb-4">
+            <input type="text" id="projectSearch" class="form-control mb-3" placeholder="Search projects..." aria-label="Search projects">
+            <div class="mb-4">
+                <div class="btn-group" role="group" aria-label="Project filters">
+                    <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="ai">AI</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="nlp">NLP</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="ml">Machine Learning</button>
+                    <button type="button" class="btn btn-outline-primary" data-filter="web">Web Development</button>
                 </div>
             </div>
-        </section>
+            <div class="row" id="projectsList">
+                <!-- Project cards will be dynamically inserted here by JavaScript -->
+            </div>
+        </div>
+    </section>
 
         <section id="contact" class="section bg-dark">
             <div class="container">
@@ -128,8 +172,8 @@
                     <div class="col-md-6" data-aos="fade-left">
                         <h3>Get in Touch</h3>
                         <p><i class="fas fa-map-marker-alt" aria-hidden="true"></i> <strong>Location:</strong> Arlington, Virginia, United States</p>
-                        <p><i class="fas fa-phone" aria-hidden="true"></i> <strong>Phone:</strong> +1 7039696510</p>
-                        <p><i class="fas fa-envelope" aria-hidden="true"></i> <strong>Email:</strong> kuttamath.amaljith@gmail.com</p>
+                        <p><i class="fas fa-phone" aria-hidden="true"></i> <strong>Phone:</strong> <a href="tel:+17039696510">+1 7039696510</a></p>
+                        <p><i class="fas fa-envelope" aria-hidden="true"></i> <strong>Email:</strong> <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a></p>
                         <p><i class="fab fa-linkedin" aria-hidden="true"></i> <strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">linkedin.com/in/amaljithk</a></p>
                         <p><i class="fas fa-globe" aria-hidden="true"></i> <strong>Website:</strong> <a href="https://amaljithkuttamath.github.io/" target="_blank" rel="noopener noreferrer">amaljithkuttamath.github.io</a></p>
                     </div>
@@ -170,11 +214,18 @@
             </div>
         </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12"></script>
-    <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js"></script>
-    <script src="script.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+        <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
+        <script src="https://d3js.org/d3.v7.min.js" defer></script>
+        <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" defer></script>
+        <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js" defer></script>
+        <script src="script.js" defer></script>
+        <script>
+            window.addEventListener('load', function() {
+                particlesJS.load('particles-js', 'particles.json', function() {
+                    console.log('particles.js loaded - callback');
+                });
+            });
+        </script>
     </body>
 </html>
