@@ -16,8 +16,8 @@
         <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></noscript>
         <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
         <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
-        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Playfair+Display:wght@400;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
-        <noscript><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet"></noscript>
+        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet"></noscript>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css">
         <link rel="stylesheet" href="styles.css">
         <script src="https://d3js.org/d3.v7.min.js" defer></script>
@@ -85,7 +85,11 @@
                         <h1 class="display-4 fw-bold mb-4">Amaljith Kuttamath</h1>
                         <h2 class="h3 mb-4">I'm <span id="typing-effect" aria-live="polite"></span></h2>
                         <p class="lead mb-4">Transforming complex data into actionable insights through advanced AI and NLP techniques.</p>
-                        <a href="#contact" class="btn btn-primary btn-lg">Get in Touch</a>
+                        <pre class="nerdy-quote text-muted">
+            "There are 10 types of people in this world:
+             Those who understand binary, and those who don't."
+        </pre>
+                        <a href="#contact" class="btn btn-primary btn-lg">Initialize Contact Protocol</a>
                     </div>
                     <div class="col-md-6 d-flex justify-content-center" data-aos="fade-left">
                         <img src="image/amal.jpg" alt="Amaljith Kuttamath" class="img-fluid rounded-circle about-image" loading="lazy" width="300" height="300">
@@ -97,21 +101,30 @@
     <main id="main-content">
         <section id="about" class="section">
             <div class="container">
-                <h2 class="text-center mb-5" data-aos="fade-up">About Me</h2>
+                <h2 class="text-center mb-5" data-aos="fade-up">About Me (v1.0)</h2>
                 <div class="row">
                     <div class="col-md-12" data-aos="fade-up">
                         <p>As an AI Engineer with extensive experience in AI research and development, I specialize in natural language processing (NLP), machine learning (ML), and knowledge graphs. At Sorcero, I lead retrieval-augmented generation (RAG) applications on Google Cloud's Vertex AI, focusing deeply on medical records and oncology data. My expertise lies in transforming complex data into actionable insights through advanced visualization and automation techniques.</p>
                         <p>My background as a Technical Consultant and Solutions Architect has equipped me to deliver scalable AI/ML solutions across various industries, including finance and manufacturing. With a strong engineering foundation, I have a proven track record of developing and deploying solutions that consistently achieve over 90% accuracy in critical areas such as predictive maintenance, anomaly detection, and time-series forecasting.</p>
+                        <p>In my free time, I enjoy solving Rubik's cubes, participating in hackathons, and exploring the latest advancements in quantum computing. My life motto: "Always code as if the person who ends up maintaining your code will be a violent psychopath who knows where you live."</p>
+                        <pre class="nerdy-ascii text-center">
+   _____          __  .__                                  
+  /  _  \   _____/  |_|  |__   ____   ____   ____   ____  
+ /  /_\  \ /    \   __\  |  \ /  _ \ /    \_/ __ \ /    \ 
+/    |    \   |  \  | |   Y  (  <_> )   |  \  ___/|   |  \
+\____|__  /___|  /__| |___|  /\____/|___|  /\___  >___|  /
+        \/     \/          \/            \/     \/     \/ 
+        </pre>
                     </div>
                 </div>
             </div>
         </section>
         <section id="skills" class="section bg-light">
             <div class="container">
-                <h2 class="text-center mb-5" data-aos="fade-up">Skills</h2>
+                <h2 class="text-center mb-5" data-aos="fade-up">Skills Matrix v2.0</h2>
                 <div class="row mb-4">
                     <div class="col-md-12">
-                        <p class="text-center" data-aos="fade-up" data-aos-delay="200">Explore my skills by interacting with the graph below. Hover over nodes to see connections, and click on them for more details.</p>
+                        <p class="text-center" data-aos="fade-up" data-aos-delay="200">Explore my neural network of skills by interacting with the graph below. Hover over nodes to see connections, and click on them to access detailed documentation.</p>
                     </div>
                 </div>
                 <div id="skills-graph-container" class="position-relative" data-aos="zoom-in" data-aos-delay="400">
@@ -127,9 +140,9 @@
         </section>
         <section id="projects" class="section">
             <div class="container">
-                <h2 class="text-center mb-5" data-aos="fade-up">Projects</h2>
+                <h2 class="text-center mb-5" data-aos="fade-up">Project Repository</h2>
                 <div class="row mb-4">
-            <input type="text" id="projectSearch" class="form-control mb-3" placeholder="Search projects..." aria-label="Search projects">
+            <input type="text" id="projectSearch" class="form-control mb-3" placeholder="grep projects..." aria-label="Search projects">
             <div class="mb-4">
                 <div class="btn-group" role="group" aria-label="Project filters">
                     <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
@@ -147,35 +160,39 @@
 
         <section id="contact" class="section bg-dark">
             <div class="container">
-                <h2 class="text-center mb-5" data-aos="fade-up">Contact</h2>
+                <h2 class="text-center mb-5" data-aos="fade-up">Establish Connection</h2>
                 <div class="row">
                     <div class="col-md-6" data-aos="fade-right">
-                        <form id="contactForm" novalidate>
-                            <div class="mb-3">
-                                <label for="name" class="form-label">Name</label>
-                                <input type="text" class="form-control" id="name" required aria-required="true">
-                                <div class="invalid-feedback">Please enter your name.</div>
+                        <div class="terminal">
+                            <div class="terminal-header">
+                                <div class="terminal-button"></div>
+                                <div class="terminal-button"></div>
+                                <div class="terminal-button"></div>
                             </div>
-                            <div class="mb-3">
-                                <label for="email" class="form-label">Email</label>
-                                <input type="email" class="form-control" id="email" required aria-required="true">
-                                <div class="invalid-feedback">Please enter a valid email address.</div>
+                            <div class="terminal-body">
+                                <p class="terminal-text">$ initiating_contact_protocol</p>
+                                <form id="contactForm" novalidate>
+                                    <p class="terminal-text">$ enter_name:<br>
+                                    <input type="text" class="terminal-input" id="name" required aria-required="true">
+                                    </p>
+                                    <p class="terminal-text">$ enter_email:<br>
+                                    <input type="email" class="terminal-input" id="email" required aria-required="true">
+                                    </p>
+                                    <p class="terminal-text">$ enter_message:<br>
+                                    <textarea class="terminal-input" id="message" rows="5" required aria-required="true"></textarea>
+                                    </p>
+                                    <button type="submit" class="btn btn-primary">Execute Transmission</button>
+                                </form>
                             </div>
-                            <div class="mb-3">
-                                <label for="message" class="form-label">Message</label>
-                                <textarea class="form-control" id="message" rows="5" required aria-required="true"></textarea>
-                                <div class="invalid-feedback">Please enter your message.</div>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Send Message</button>
-                        </form>
+                        </div>
                     </div>
                     <div class="col-md-6" data-aos="fade-left">
-                        <h3>Get in Touch</h3>
-                        <p><i class="fas fa-map-marker-alt" aria-hidden="true"></i> <strong>Location:</strong> Arlington, Virginia, United States</p>
-                        <p><i class="fas fa-phone" aria-hidden="true"></i> <strong>Phone:</strong> <a href="tel:+17039696510">+1 7039696510</a></p>
-                        <p><i class="fas fa-envelope" aria-hidden="true"></i> <strong>Email:</strong> <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a></p>
-                        <p><i class="fab fa-linkedin" aria-hidden="true"></i> <strong>LinkedIn:</strong> <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">linkedin.com/in/amaljithk</a></p>
-                        <p><i class="fas fa-globe" aria-hidden="true"></i> <strong>Website:</strong> <a href="https://amaljithkuttamath.github.io/" target="_blank" rel="noopener noreferrer">amaljithkuttamath.github.io</a></p>
+                        <h3>Connection Details</h3>
+                        <p><i class="fas fa-map-marker-alt" aria-hidden="true"></i> <strong>Coordinates:</strong> Arlington, Virginia, United States</p>
+                        <p><i class="fas fa-phone" aria-hidden="true"></i> <strong>Communication Device:</strong> <a href="tel:+17039696510">+1 7039696510</a></p>
+                        <p><i class="fas fa-envelope" aria-hidden="true"></i> <strong>Electronic Mail:</strong> <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a></p>
+                        <p><i class="fab fa-linkedin" aria-hidden="true"></i> <strong>Professional Network:</strong> <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">linkedin.com/in/amaljithk</a></p>
+                        <p><i class="fas fa-globe" aria-hidden="true"></i> <strong>Web Portal:</strong> <a href="https://amaljithkuttamath.github.io/" target="_blank" rel="noopener noreferrer">amaljithkuttamath.github.io</a></p>
                     </div>
                 </div>
             </div>
@@ -185,7 +202,7 @@
 
     <footer class="bg-dark text-light py-4">
         <div class="container text-center">
-            <p>&copy; 2023 Amaljith Kuttamath. All rights reserved.</p>
+            <p>&copy; 2023 Amaljith Kuttamath. All rights reserved. Powered by caffeine, late-night coding sessions, and the occasional quantum fluctuation.</p>
         </div>
     </footer>
 
