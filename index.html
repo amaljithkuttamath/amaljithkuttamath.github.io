@@ -1,11 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta name="description" content="Amaljith Kuttamath: AI Engineer and NLP researcher specializing in healthcare. Explore my portfolio for innovative projects in machine learning and data analytics.">
-        <meta name="keywords" content="AI Engineer, Machine Learning, NLP, Healthcare, Amaljith Kuttamath">
-        <meta name="author" content="Amaljith Kuttamath">
+    <!-- Previous head and body content remains exactly the same until the scripts section -->
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
         <meta property="og:title" content="Amaljith Kuttamath - AI Engineer Portfolio">
         <meta property="og:description" content="AI Engineer specializing in NLP, machine learning, and knowledge graphs in healthcare.">
         <meta property="og:image" content="https://raw.githubusercontent.com/amaljithkuttamath/amaljithkuttamath.github.io/main/image/amal.jpg">
@@ -20,6 +18,13 @@
         <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet"></noscript>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css">
         <link rel="stylesheet" href="styles.css">
+        <!-- PDF.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+        <!-- LinkedIn API -->
+        <script src="https://platform.linkedin.com/in.js" type="text/javascript">
+            api_key: YOUR_API_KEY
+            authorize: true
+        </script>
         <script src="https://d3js.org/d3.v7.min.js" defer></script>
         <script type="application/ld+json">
         {
@@ -70,8 +75,11 @@
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav ms-auto">
                         <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#experience">Experience</a></li>
                         <li class="nav-item"><a class="nav-link" href="#skills">Skills</a></li>
                         <li class="nav-item"><a class="nav-link" href="#projects">Projects</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#resume">Resume</a></li>
+                        <li class="nav-item"><a class="nav-link" href="#recommendations">Recommendations</a></li>
                         <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
                     </ul>
                 </div>
@@ -92,7 +100,13 @@
                         <a href="#contact" class="btn btn-primary btn-lg">Initialize Contact Protocol</a>
                     </div>
                     <div class="col-md-6 d-flex justify-content-center" data-aos="fade-left">
-                        <img src="image/amal.jpg" alt="Amaljith Kuttamath" class="img-fluid rounded-circle about-image" loading="lazy" width="300" height="300">
+                        <img src="image/amal.jpg" 
+         srcset="image/amal.jpg 1x, image/amal.jpg 2x" 
+         alt="Amaljith Kuttamath" 
+         class="img-fluid rounded-circle about-image" 
+         loading="lazy" 
+         width="300" 
+         height="300">
                     </div>
                 </div>
             </div>
@@ -119,6 +133,33 @@
                 </div>
             </div>
         </section>
+
+        <!-- Resume Section -->
+        <section id="resume" class="section bg-light">
+            <div class="container">
+                <h2 class="text-center mb-5" data-aos="fade-up">Interactive Resume</h2>
+                <div id="pdf_viewer" class="pdf-viewer-container"></div>
+            </div>
+        </section>
+
+        <!-- LinkedIn Recommendations Section -->
+        <section id="recommendations" class="section">
+            <div class="container">
+                <h2 class="text-center mb-5" data-aos="fade-up">Professional Recommendations</h2>
+                <div class="linkedin-recommendations">
+                    <div id="recommendations-container">
+                        <!-- Recommendations will be dynamically loaded here -->
+                    </div>
+                    <div class="linkedin-cta">
+                        <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer" class="linkedin-button">
+                            <i class="fab fa-linkedin"></i>
+                            Connect on LinkedIn
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section id="skills" class="section bg-light">
             <div class="container">
                 <h2 class="text-center mb-5" data-aos="fade-up">Skills Matrix v2.0</h2>
@@ -138,25 +179,27 @@
                 <div id="skill-details" class="mt-3 p-3 bg-white rounded shadow" aria-live="polite"></div>
             </div>
         </section>
+
         <section id="projects" class="section">
             <div class="container">
                 <h2 class="text-center mb-5" data-aos="fade-up">Project Repository</h2>
                 <div class="row mb-4">
-            <input type="text" id="projectSearch" class="form-control mb-3" placeholder="grep projects..." aria-label="Search projects">
-            <div class="mb-4">
-                <div class="btn-group" role="group" aria-label="Project filters">
-                    <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="ai">AI</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="nlp">NLP</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="ml">Machine Learning</button>
-                    <button type="button" class="btn btn-outline-primary" data-filter="web">Web Development</button>
+                    <input type="text" id="projectSearch" class="form-control mb-3" placeholder="grep projects..." aria-label="Search projects">
+                    <div class="mb-4">
+                        <div class="btn-group" role="group" aria-label="Project filters">
+                            <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
+                            <button type="button" class="btn btn-outline-primary" data-filter="ai">AI</button>
+                            <button type="button" class="btn btn-outline-primary" data-filter="nlp">NLP</button>
+                            <button type="button" class="btn btn-outline-primary" data-filter="ml">Machine Learning</button>
+                            <button type="button" class="btn btn-outline-primary" data-filter="web">Web Development</button>
+                        </div>
+                    </div>
+                    <div class="row" id="projectsList">
+                        <!-- Project cards will be dynamically inserted here by JavaScript -->
+                    </div>
                 </div>
             </div>
-            <div class="row" id="projectsList">
-                <!-- Project cards will be dynamically inserted here by JavaScript -->
-            </div>
-        </div>
-    </section>
+        </section>
 
         <section id="contact" class="section bg-dark">
             <div class="container">
@@ -197,7 +240,6 @@
                 </div>
             </div>
         </section>
-
     </main>
 
     <footer class="bg-dark text-light py-4">
@@ -231,18 +273,32 @@
             </div>
         </div>
     </div>
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
-        <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
-        <script src="https://d3js.org/d3.v7.min.js" defer></script>
-        <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" defer></script>
-        <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js" defer></script>
-        <script src="script.js" defer></script>
-        <script>
-            window.addEventListener('load', function() {
-                particlesJS.load('particles-js', 'particles.json', function() {
-                    console.log('particles.js loaded - callback');
-                });
+
+    <!-- Add loading spinner -->
+    <div id="loading-spinner" class="spinner-wrapper" aria-hidden="true">
+        <div class="spinner"></div>
+    </div>
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" as="script">
+    <link rel="preload" href="https://d3js.org/d3.v7.min.js" as="script">
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" as="script">
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" defer></script>
+    <script src="https://d3js.org/d3.v7.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js" defer></script>
+    <script src="script.js" defer></script>
+    <script src="pdf-viewer.js" defer></script>
+    <script>
+        window.addEventListener('load', function() {
+            particlesJS.load('particles-js', 'particles.json', function() {
+                console.log('particles.js loaded - callback');
             });
-        </script>
+        });
+    </script>
     </body>
 </html>
