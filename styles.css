@@ -582,16 +582,191 @@ body.dark-mode {
     .d-flex.gap-3 {
         flex-wrap: wrap;
     }
+
+    /* Enhanced Mobile Styles */
+    /* Typography adjustments */
+    h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); }
+    h2 { font-size: clamp(1.5rem, 3.5vw, 2rem); }
+    h3 { font-size: clamp(1.2rem, 3vw, 1.8rem); }
+    
+    /* Navigation adjustments */
+    .navbar {
+        padding: var(--space-sm);
+    }
+    
+    .navbar-brand {
+        font-size: 1.4rem;
+    }
+    
+    .nav-link {
+        padding: var(--space-sm);
+        text-align: center;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    /* Header section adjustments */
+    header {
+        padding: var(--space-md) 0;
+        text-align: center;
+    }
+    
+    .header-content {
+        flex-direction: column-reverse;
+    }
+    
+    /* Skills graph adjustments */
+    #skills-graph {
+        height: 400px;
+        overflow: hidden;
+    }
+    
+    .network-controls-container {
+        position: static;
+        margin-bottom: var(--space-md);
+    }
+    
+    .network-search {
+        width: 100%;
+        margin-bottom: var(--space-sm);
+    }
+    
+    /* Project cards adjustments */
+    .project-card {
+        margin-bottom: var(--space-md);
+    }
+    
+    .project-image {
+        height: 150px;
+    }
+    
+    /* Experience timeline adjustments */
+    .experience-timeline {
+        padding-left: var(--space-md);
+    }
+    
+    .experience-item {
+        padding-left: var(--space-md);
+    }
+    
+    /* Contact form adjustments */
+    .terminal {
+        margin-bottom: var(--space-lg);
+    }
+    
+    /* Control buttons adjustments */
+    #darkModeToggle,
+    #backToTop {
+        width: 40px;
+        height: 40px;
+        font-size: 1.2rem;
+    }
+    
+    /* Button groups adjustments */
+    .btn-group {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-xs);
+    }
+    
+    .btn-group .btn {
+        margin: 0;
+        border-radius: var(--radius-sm) !important;
+    }
+    
+    /* Container padding */
+    .container {
+        padding-left: var(--space-md);
+        padding-right: var(--space-md);
+    }
+    
+    /* Skills visualization adjustments */
+    .skills-container {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Education cards adjustments */
+    .education-card {
+        padding: var(--space-md);
+    }
+    
+    /* Timeline content adjustments */
+    .timeline-content {
+        padding: var(--space-md);
+    }
 }
 
-@media (max-width: 576px) {
+/* Even smaller screens */
+@media (max-width: 480px) {
+    /* Further reduce sizes */
     .container {
-        padding-inline: var(--space-md);
+        padding-left: var(--space-sm);
+        padding-right: var(--space-sm);
     }
+    
+    /* Stack buttons vertically */
+    .d-flex.gap-3 {
+        flex-direction: column;
+        gap: var(--space-sm);
+    }
+    
+    .btn {
+        width: 100%;
+        margin-bottom: var(--space-xs);
+    }
+    
+    /* Adjust project filters */
+    .btn-group {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Simplify network controls */
+    .network-controls {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    
+    .network-controls button {
+        margin: 2px;
+    }
+    
+    /* Adjust modal content */
+    .modal-dialog {
+        margin: var(--space-sm);
+    }
+    
+    /* Reduce padding in cards */
+    .card-body {
+        padding: var(--space-sm);
+    }
+}
 
-    h1 { font-size: clamp(2rem, 4vw, 2.5rem); }
-    h2 { font-size: clamp(1.75rem, 3.5vw, 2.25rem); }
+/* Tablet-specific adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .container {
+        padding-left: var(--space-lg);
+        padding-right: var(--space-lg);
+    }
+    
+    .skills-container {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .project-card {
+        margin-bottom: var(--space-lg);
+    }
+}
 
+/* Touch device optimizations */
+@media (hover: none) {
+    .btn:hover,
+    .card:hover,
+    .project-card:hover {
+        transform: none;
+    }
+    
+    .nav-link:hover {
+        background: rgba(255,255,255,0.1);
+    }
 }
 
 /* Print Styles */
