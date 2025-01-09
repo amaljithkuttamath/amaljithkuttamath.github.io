@@ -125,14 +125,16 @@ header {
 .btn,
 .card,
 #darkModeToggle,
-#backToTop,
-.linkedin-button {
+#backToTop {
     background-color: var(--background-color);
     color: var(--text-color);
     border: none;
     box-shadow: var(--neo-shadow-outset);
     transition: transform var(--transition-speed) var(--transition-timing),
                 box-shadow var(--transition-speed) var(--transition-timing);
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
 }
 
 .btn {
@@ -147,8 +149,7 @@ header {
 .btn:hover,
 .card:hover,
 #darkModeToggle:hover,
-#backToTop:hover,
-.linkedin-button:hover {
+#backToTop:hover {
     box-shadow: var(--neo-shadow-inset);
     transform: translateY(-2px);
 }
@@ -159,6 +160,27 @@ header {
     transform: scale(0.98);
 }
 
+/* LinkedIn Button */
+.btn-linkedin {
+    background-color: #0077b5;
+    color: white;
+    border: 2px solid #0077b5;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    transition: all 0.3s ease;
+}
+
+.btn-linkedin:hover {
+    background-color: transparent;
+    color: #0077b5;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
 /* Cards */
 .card {
     height: 100%;
@@ -167,44 +189,6 @@ header {
 
 .card-body {
     padding: var(--space-lg);
-}
-
-/* Skills Graph */
-#skills-graph {
-    width: 100%;
-    height: clamp(400px, 60vh, 600px);
-    background-color: var(--surface-color);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--neo-shadow-inset);
-    border: none;
-}
-
-.node circle {
-    fill-opacity: 0.8;
-    stroke: var(--primary-color);
-    stroke-width: 2px;
-    transition: fill-opacity var(--transition-speed) var(--transition-timing),
-                r var(--transition-speed) var(--transition-timing),
-                stroke var(--transition-speed) var(--transition-timing);
-    cursor: pointer;
-}
-
-.node:is(:hover, :focus) circle {
-    fill-opacity: 1;
-    r: 15px;
-    stroke: var(--accent-color);
-}
-
-.node text {
-    font-size: 12px;
-    font-weight: 600;
-    font-family: var(--font-mono);
-    fill: var(--text-color);
-}
-
-.link {
-    stroke: var(--surface-color);
-    stroke-opacity: 0.6;
 }
 
 /* Forms */
@@ -309,95 +293,250 @@ body.dark-mode {
     visibility: visible;
 }
 
-/* PDF Viewer */
-.pdf-viewer-container {
-    max-width: 100%;
+/* Timeline styles */
+.timeline {
+    position: relative;
+    max-width: 1200px;
     margin: 0 auto;
-    background: var(--background-color);
-    padding: 20px;
+}
+
+.timeline::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    background: var(--primary-color);
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    margin-left: -1px;
+}
+
+.timeline-item {
+    padding: 10px 40px;
+    position: relative;
+    width: 50%;
+}
+
+/* Project card styles */
+.project-card {
+    border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+}
+
+.project-card:hover {
+    transform: translateY(-5px);
+}
+
+.project-image {
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+}
+
+/* Skills visualization */
+.skills-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+}
+
+.skill-category {
+    background: rgba(255,255,255,0.05);
+    padding: 1.5rem;
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+}
+
+/* Education Cards */
+.education-card {
+    background: var(--surface-color);
+    padding: 2rem;
     border-radius: var(--radius-lg);
+    box-shadow: var(--neo-shadow-outset);
+    margin-bottom: 2rem;
+    border-top: 4px solid var(--accent-color);
+}
+
+.education-card h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+}
+
+.education-card .institution {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent-color);
+    margin-bottom: 0.5rem;
+}
+
+.education-card .period {
+    font-family: var(--font-mono);
+    color: var(--text-color);
+    opacity: 0.8;
+    margin-bottom: 1rem;
+}
+
+/* Skill Progress Bars */
+.skill-item {
+    margin-bottom: 1.5rem;
+}
+
+.skill-name {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+.progress {
+    height: 0.5rem;
+    background: rgba(0,0,0,0.1);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+
+.progress-bar {
+    background: var(--accent-color);
+    transition: width 1.5s ease-in-out;
+}
+
+/* Timeline Enhancements */
+.timeline-content {
+    background: var(--surface-color);
+    padding: 1.5rem;
+    border-radius: var(--radius-md);
     box-shadow: var(--neo-shadow-outset);
 }
 
-.pdf-controls {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 20px;
+.timeline-content h3 {
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
 }
 
-.pdf-container {
-    overflow-x: auto;
-    margin-top: 20px;
-    text-align: center;
+.time-period {
+    font-family: var(--font-mono);
+    color: var(--accent-color);
+    margin-bottom: 1rem;
 }
 
-#pdf_renderer {
-    max-width: 100%;
-    height: auto;
+.timeline-content ul {
+    padding-left: 1.2rem;
+}
+
+.timeline-content li {
+    margin-bottom: 0.5rem;
+    color: var(--text-color);
+}
+
+/* Updated Experience Timeline Styles */
+.experience-timeline {
+    position: relative;
+    max-width: 900px;
     margin: 0 auto;
+}
+
+.experience-item {
+    margin-bottom: 3rem;
+    position: relative;
+    padding-left: 2rem;
+    border-left: 3px solid var(--accent-color);
+}
+
+.experience-content {
     background: var(--surface-color);
+    padding: 1.5rem;
+    border-radius: var(--radius-md);
+    box-shadow: var(--neo-shadow-outset);
+}
+
+.experience-header {
+    margin-bottom: 1rem;
+}
+
+.experience-header h3 {
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
+}
+
+.company-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--accent-color);
+}
+
+.achievement-list {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+.achievement-list li {
+    position: relative;
+    padding-left: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.achievement-list li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--accent-color);
+}
+
+/* Enhanced Network Visualization */
+.network-controls {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 10px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: 100;
+}
+
+.network-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    pointer-events: none;
+    z-index: 1000;
+    max-width: 250px;
+}
+
+.node-hover {
+    cursor: pointer;
+    filter: brightness(1.2);
+}
+
+.network-legend {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 15px;
+    border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
 }
 
-/* LinkedIn Integration */
-.linkedin-recommendations {
-    background: var(--background-color);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    margin-top: 30px;
-    box-shadow: var(--neo-shadow-outset);
-}
-
-.recommendation-card {
-    padding: 15px;
-    margin-bottom: 20px;
-    background: var(--background-color);
+.network-search {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 200px;
+    background: rgba(255, 255, 255, 0.9);
     border-radius: var(--radius-md);
-    box-shadow: var(--neo-shadow-inset);
-}
-
-.recommendation-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.recommender-avatar {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    margin-right: 15px;
-}
-
-.recommender-info {
-    flex: 1;
-}
-
-.recommender-name {
-    font-weight: 600;
-    margin: 0;
-}
-
-.recommender-title {
-    font-size: 0.9em;
-    margin: 0;
-    opacity: 0.8;
-}
-
-.recommendation-text {
-    font-style: italic;
-    line-height: 1.6;
-}
-
-.linkedin-button {
-    padding: 10px 20px;
-    border-radius: var(--radius-md);
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
+    padding: 8px;
 }
 
 /* Media Queries */
@@ -417,10 +556,6 @@ body.dark-mode {
         margin-top: var(--space-sm);
     }
     
-    #skills-graph {
-        height: 400px;
-    }
-
     header {
         padding: var(--space-lg) 0;
     }
@@ -434,6 +569,19 @@ body.dark-mode {
     }
 
     h1 { font-size: clamp(2rem, 4vw, 3rem); }
+
+    #recommendations .d-flex {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .btn-linkedin {
+        margin-top: var(--space-sm);
+    }
+
+    .d-flex.gap-3 {
+        flex-wrap: wrap;
+    }
 }
 
 @media (max-width: 576px) {
@@ -444,9 +592,6 @@ body.dark-mode {
     h1 { font-size: clamp(2rem, 4vw, 2.5rem); }
     h2 { font-size: clamp(1.75rem, 3.5vw, 2.25rem); }
 
-    #skills-graph {
-        height: 300px;
-    }
 }
 
 /* Print Styles */
@@ -460,7 +605,6 @@ body.dark-mode {
     .navbar,
     .btn,
     #contact form,
-    #skills-graph,
     #contact,
     footer,
     #darkModeToggle,
@@ -504,4 +648,33 @@ body.dark-mode {
     .btn, .card, .form-control {
         border: 2px solid var(--primary-color);
     }
+}
+
+/* Container Optimization */
+.container {
+    max-width: 1440px;
+    width: 90%;
+    margin: 0 auto;
+}
+
+/* GPU Acceleration */
+.btn,
+.card,
+#darkModeToggle,
+#backToTop,
+.project-card {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+}
+
+/* Improved Dark Mode Transition */
+body,
+.navbar,
+.card,
+.form-control {
+    transition: background-color var(--transition-speed) var(--transition-timing),
+                color var(--transition-speed) var(--transition-timing),
+                border-color var(--transition-speed) var(--transition-timing);
+    will-change: background-color, color, border-color;
 }

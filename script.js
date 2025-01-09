@@ -1,4 +1,35 @@
 document.addEventListener("DOMContentLoaded", function () {
+  // Debounce function
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Improved dark mode handling
+  const darkModeToggle = document.getElementById("darkModeToggle");
+  const prefersDarkScheme = window.matchMedia("(prefers-color-scheme: dark)");
+
+  function setDarkMode(isDark) {
+    document.body.classList.toggle("dark-mode", isDark);
+    darkModeToggle.innerHTML = isDark
+      ? '<i class="fas fa-sun"></i>'
+      : '<i class="fas fa-moon"></i>';
+    localStorage.setItem("darkMode", isDark);
+  }
+
+  // Initialize dark mode based on user preference or saved setting
+  const savedDarkMode = localStorage.getItem("darkMode");
+  setDarkMode(
+    savedDarkMode === null ? prefersDarkScheme.matches : savedDarkMode === "true"
+  );
+
   document.querySelectorAll('a[href^="#"]').forEach((e) => {
     e.addEventListener("click", function (e) {
       e.preventDefault();
@@ -28,14 +59,21 @@ document.addEventListener("DOMContentLoaded", function () {
       a(!t.classList.contains("dark-mode"));
     });
   const i = document.getElementById("backToTop");
-  window.addEventListener("scroll", () => {
-    window.pageYOffset > 300
-      ? (i.style.display = "block")
-      : (i.style.display = "none");
-  }),
-    i.addEventListener("click", () => {
-      window.scrollTo({ top: 0, behavior: "smooth" });
+  const handleScroll = debounce(() => {
+    const scrollPosition = window.pageYOffset;
+    document.getElementById("backToTop").style.display =
+      scrollPosition > 300 ? "block" : "none";
+
+    document.querySelectorAll(".section").forEach((section) => {
+      const rect = section.getBoundingClientRect();
+      const isVisible =
+        rect.top < window.innerHeight / 2 && rect.bottom >= window.innerHeight / 2;
+      section.classList.toggle("active", isVisible);
     });
+  }, 100);
+
+  window.addEventListener("scroll", handleScroll);
+
   const n = [
       { id: "AI", group: 1, label: "Artificial Intelligence", level: 95 },
       { id: "ML", group: 1, label: "Machine Learning", level: 90 },
@@ -308,12 +346,21 @@ document.addEventListener("DOMContentLoaded", function () {
     s = document.getElementById("skills-graph");
   r.observe(s);
   const l = document.getElementById("contactForm");
-  l.addEventListener("submit", function (e) {
-    e.preventDefault(),
-      l.checkValidity() &&
-        (alert("Thank you for your message! I will get back to you soon."),
-        l.reset()),
-      l.classList.add("was-validated");
+  l.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    try {
+      // Add your form submission logic here
+      const response = await submitForm(this);
+      if (!response.ok) throw new Error("Form submission failed");
+      alert("Thank you for your message!");
+      this.reset();
+    } catch (error) {
+      console.error("Form submission error:", error);
+      alert(
+        "Sorry, there was an error sending your message. Please try again later."
+      );
+    }
+    this.classList.add("was-validated");
   });
   const c = [
     {
@@ -416,15 +463,124 @@ document.addEventListener("DOMContentLoaded", function () {
         ", "
       )}</p>\n        `);
   }),
-    window.addEventListener("scroll", () => {
-      const e = window.scrollY,
-        t = window.innerHeight;
-      document.querySelectorAll(".section").forEach((a) => {
-        const i = a.offsetTop,
-          n = a.offsetHeight;
-        e > i - t / 2 && e < i + n - t / 2
-          ? a.classList.add("active")
-          : a.classList.remove("active");
-      });
-    });
+    window.addEventListener("scroll", handleScroll);
 });
+
+function initializeNetwork(container) {
+    const width = container.clientWidth;
+    const height = 600;
+    let currentScale = 1;
+    
+    // Add UI controls
+    container.insertAdjacentHTML('beforeend', `
+        <div class="network-controls-container">
+            <input type="text" class="form-control network-search" placeholder="Search skills...">
+            <div class="network-controls">
+                <button class="btn btn-sm btn-light" id="zoomIn"><i class="fas fa-plus"></i></button>
+                <button class="btn btn-sm btn-light" id="zoomOut"><i class="fas fa-minus"></i></button>
+                <button class="btn btn-sm btn-light" id="resetView"><i class="fas fa-undo"></i></button>
+                <button class="btn btn-sm btn-light" id="togglePhysics"><i class="fas fa-atom"></i></button>
+            </div>
+        </div>
+    `);
+
+    // Setup visualization
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+
+    const g = svg.append('g');
+    
+    // Setup zoom behavior
+    const zoom = d3.zoom()
+        .scaleExtent([0.2, 4])
+        .on('zoom', ({transform}) => {
+            currentScale = transform.k;
+            g.attr('transform', transform);
+            updateNodesScale();
+        });
+
+    svg.call(zoom);
+
+    // Initialize simulation
+    const simulation = d3.forceSimulation(n)
+        .force('link', d3.forceLink(o).id(d => d.id).distance(100))
+        .force('charge', d3.forceManyBody().strength(-200))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => d.level / 2 + 10));
+
+    // Create network elements
+    const links = g.append('g')
+        .selectAll('path')
+        .data(o)
+        .join('path')
+        .attr('stroke', '#999')
+        .attr('stroke-opacity', 0.6)
+        .attr('fill', 'none');
+
+    const nodes = g.append('g')
+        .selectAll('g')
+        .data(n)
+        .join('g')
+        .call(d3.drag()
+            .on('start', (e) => {
+                if (!e.active) simulation.alphaTarget(0.3).restart();
+                e.subject.fx = e.subject.x;
+                e.subject.fy = e.subject.y;
+            })
+            .on('drag', (e) => {
+                e.subject.fx = e.x;
+                e.subject.fy = e.y;
+            })
+            .on('end', (e) => {
+                if (!e.active) simulation.alphaTarget(0);
+                e.subject.fx = null;
+                e.subject.fy = null;
+            }));
+
+    // Add visual elements to nodes
+    nodes.append('circle')
+        .attr('r', d => d.level / 4)
+        .attr('fill', d => d3.schemeCategory10[d.group - 1]);
+
+    nodes.append('text')
+        .attr('x', d => d.level / 4 + 5)
+        .attr('dy', '.35em')
+        .text(d => d.id);
+
+    // Event handlers
+    document.querySelector('.network-search').addEventListener('input', e => {
+        const term = e.target.value.toLowerCase();
+        const nodeOpacity = d => d.label.toLowerCase().includes(term) ? 1 : 0.1;
+        const linkOpacity = d => d.source.label.toLowerCase().includes(term) ||
+            d.target.label.toLowerCase().includes(term) ? 0.6 : 0.1;
+        nodes.style('opacity', nodeOpacity);
+        links.style('opacity', linkOpacity);
+    });
+
+    // Control buttons
+    document.getElementById('zoomIn').onclick = () => svg.transition().call(zoom.scaleBy, 1.3);
+    document.getElementById('zoomOut').onclick = () => svg.transition().call(zoom.scaleBy, 0.7);
+    document.getElementById('resetView').onclick = () => svg.transition().call(zoom.transform, d3.zoomIdentity);
+    document.getElementById('togglePhysics').onclick = () => 
+        simulation.alpha() > 0 ? simulation.stop() : simulation.restart();
+
+    function updateNodesScale() {
+        nodes.selectAll('circle').attr('r', d => (d.level / 4) / currentScale);
+        nodes.selectAll('text')
+            .style('font-size', `${12 / currentScale}px`)
+            .attr('x', d => (d.level / 4 + 5) / currentScale);
+    }
+
+    // Update positions
+    simulation.on('tick', () => {
+        links.attr('d', d => {
+            const dx = d.target.x - d.source.x,
+                  dy = d.target.y - d.source.y,
+                  dr = Math.sqrt(dx * dx + dy * dy);
+            return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+        });
+        nodes.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+}

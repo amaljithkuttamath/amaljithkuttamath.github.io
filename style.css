@@ -1,0 +1,64 @@
+.network-search {
+    width: 200px;
+    height: 38px;
+}
+
+.network-controls-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 10px;
+    z-index: 1000;
+}
+
+.network-controls {
+    display: flex;
+    gap: 5px;
+}
+
+.network-controls button {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+    transition: all 0.2s ease;
+}
+
+.network-controls button:hover {
+    background: #fff;
+    transform: scale(1.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.network-tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px;
+    border-radius: 5px;
+    font-size: 14px;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+#skills-graph {
+    position: relative;
+    background: linear-gradient(to bottom right, #f8f9fa, #e9ecef);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+#skills-graph svg {
+    cursor: grab;
+}
+
+#skills-graph svg:active {
+    cursor: grabbing;
+}
