@@ -174,9 +174,9 @@
             <h2 class="text-center mb-5" data-aos="fade-up">Professional Recommendations</h2>
             <div class="recommendations-container">
                 <!-- Recommendations will be dynamically loaded here -->
-            <!-- </div>
+            </div>
         </div>
-    </section> --> -->
+    </section> -->
 
     <section id="skills" class="section">
         <div class="container">
@@ -481,7 +481,7 @@
 <script src="https://d3js.org/d3.v7.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js" defer></script>
-<script src="script.js" defer></script>
+<script src="new_scripts.js" defer></script>
 <script src="pdf-viewer.js" defer></script>
 <script>
     window.addEventListener('load', function() {
@@ -492,7 +492,7 @@
 
     // Add service worker registration
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js')
+        navigator.serviceWorker.register('/service-worker.js')
             .then(registration => console.log('ServiceWorker registered'))
             .catch(error => console.log('ServiceWorker registration failed:', error));
     }
