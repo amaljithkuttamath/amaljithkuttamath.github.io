@@ -1,0 +1,24 @@
+{
+  "name": "Amaljith Kuttamath - AI Engineer Portfolio",
+  "short_name": "Amaljith K",
+  "description": "AI Engineer specializing in NLP, machine learning, and knowledge graphs in healthcare",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101318",
+  "theme_color": "#101318",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80' font-family='Arial' fill='%23ffffff'>AK</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80' font-family='Arial' fill='%23ffffff'>AK</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["productivity", "technology"],
+  "lang": "en-US"
+} 

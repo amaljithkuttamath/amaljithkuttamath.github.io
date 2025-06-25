@@ -31,18 +31,13 @@
     <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"></noscript>
     <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet"></noscript>
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=VT323&family=Source+Code+Pro:wght@400;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=VT323&family=Source+Code+Pro:wght@400;600;700&display=swap" rel="stylesheet"></noscript>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css">
     <link rel="stylesheet" href="styles.css">
-    <!-- PDF.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <!-- LinkedIn API -->
-    <script src="https://platform.linkedin.com/in.js" type="text/javascript">
-        api_key: YOUR_API_KEY
-        authorize: true
-    </script>
-    <script src="https://d3js.org/d3.v7.min.js" defer></script>
+    <!-- PDF.js - moved to bottom for deferred loading -->
+    <!-- LinkedIn API - Configured for public profile integration -->
+    <script src="https://platform.linkedin.com/in.js" defer></script>
     <script type="application/ld+json">
     {
         "@context": "http://schema.org",
@@ -97,11 +92,12 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#experience">Experience</a></li>
                     <li class="nav-item"><a class="nav-link" href="#skills">Skills</a></li>
                     <li class="nav-item"><a class="nav-link" href="#projects">Projects</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#experience">Experience</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#publications">Publications</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#education">Education</a></li>
                     <li class="nav-item"><a class="nav-link" href="#resume">Resume</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#recommendations">Recommendations</a></li>
                     <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
                 </ul>
             </div>
@@ -112,78 +108,95 @@
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-md-6" data-aos="fade-right">
-                    <h1 class="display-4 fw-bold mb-4">Amaljith Kuttamath</h1>
+                    <h1 class="display-4 fw-bold mb-4 text-gradient">Amaljith Kuttamath</h1>
                     <h2 class="h3 mb-4">I'm <span id="typing-effect" aria-live="polite"></span></h2>
                     <p class="lead mb-4">AI Engineer crafting intelligent solutions in healthcare through:</p>
-                    <ul class="lead mb-4">
+                    <ul class="lead mb-4 feature-list">
                         <li>🧠 Advanced NLP & Machine Learning</li>
                         <li>🔬 Knowledge Graph Engineering</li>
                         <li>🏥 Healthcare Analytics Innovation</li>
                         <li>☁️ Cloud-Native AI Solutions</li>
                     </ul>
-                    <div class="d-flex gap-3">
+                    <div class="d-flex gap-3 flex-wrap">
                         <a href="#contact" class="btn btn-primary btn-lg">Let's Connect</a>
                         <a href="#projects" class="btn btn-outline-primary btn-lg">View My Work</a>
                         <a href="https://www.linkedin.com/in/amaljithk" 
                            target="_blank" 
                            rel="noopener noreferrer" 
-                           class="btn btn-linkedin btn-lg">
+                           class="btn btn-outline-primary btn-lg">
                             <i class="fab fa-linkedin me-2"></i>
                             LinkedIn
                         </a>
                     </div>
                 </div>
                 <div class="col-md-6 d-flex justify-content-center" data-aos="fade-left">
-                    <img src="image/amal.jpg" 
-     srcset="image/amal.jpg 1x, image/amal.jpg 2x" 
-     alt="Amaljith Kuttamath" 
-     class="img-fluid rounded-circle about-image" 
-     loading="lazy" 
-     width="300" 
-     height="300">
+                    <div class="hero-image-container">
+                        <img src="image/amal.jpg"  
+                             alt="Amaljith Kuttamath" 
+                             class="img-fluid rounded-circle about-image" 
+                             loading="lazy" 
+                             width="300" 
+                             height="300">
+                    </div>
                 </div>
             </div>
         </div>
     </header>
 
 <main id="main-content">
-    <section id="about" class="section">
+    <section id="about" class="section reveal">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">About Me (v1.0)</h2>
-            <div class="row">
-                <div class="col-md-12" data-aos="fade-up">
-                    <p>As an AI Engineer with extensive experience in AI research and development, I specialize in natural language processing (NLP), machine learning (ML), and knowledge graphs. At Sorcero, I lead retrieval-augmented generation (RAG) applications on Google Cloud's Vertex AI, focusing deeply on medical records and oncology data. My expertise lies in transforming complex data into actionable insights through advanced visualization and automation techniques.</p>
-                    <p>My background as a Technical Consultant and Solutions Architect has equipped me to deliver scalable AI/ML solutions across various industries, including finance and manufacturing. With a strong engineering foundation, I have a proven track record of developing and deploying solutions that consistently achieve over 90% accuracy in critical areas such as predictive maintenance, anomaly detection, and time-series forecasting.</p>
-                    <p>In my free time, I enjoy solving Rubik's cubes, participating in hackathons, and exploring the latest advancements in quantum computing. My life motto: "Always code as if the person who ends up maintaining your code will be a violent psychopath who knows where you live."</p>
-                    <pre class="nerdy-ascii text-center">
-   _____          __  .__                                  
-  /  _  \   _____/  |_|  |__   ____   ____   ____   ____  
- /  /_\  \ /    \   __\  |  \ /  _ \ /    \_/ __ \ /    \ 
-/    |    \   |  \  | |   Y  (  <_> )   |  \  ___/|   |  \
-\____|__  /___|  /__| |___|  /\____/|___|  /\___  >___|  /
-        \/     \/          \/            \/     \/     \/ 
-        </pre>
+                    <h2 class="section-title" data-aos="fade-up">About Me</h2>
+            <div class="row justify-content-center">
+                <div class="col-lg-10" data-aos="fade-up">
+                    <div class="about-content">
+                        <p class="lead text-center mb-5">Transforming complex data into intelligent solutions that make a real-world impact.</p>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="about-card">
+                                    <h4 class="text-gradient">🎯 Current Focus</h4>
+                                    <p>As an AI Engineer at Sorcero, I specialize in natural language processing (NLP), machine learning (ML), and knowledge graphs. I lead retrieval-augmented generation (RAG) applications on Google Cloud's Vertex AI, focusing deeply on medical records and oncology data.</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="about-card">
+                                    <h4 class="text-gradient">🚀 Expertise</h4>
+                                    <p>My expertise lies in transforming complex data into actionable insights through advanced visualization and automation techniques. I consistently achieve over 90% accuracy in critical areas such as predictive maintenance, anomaly detection, and time-series forecasting.</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="text-center mt-5">
+                            <p class="philosophy-quote">"Always code as if the person who ends up maintaining your code will be a violent psychopath who knows where you live."</p>
+                            <div class="fun-facts mt-4">
+                                <span class="badge bg-gradient me-2">🧩 Rubik's Cube Solver</span>
+                                <span class="badge bg-gradient me-2">🏆 Hackathon Enthusiast</span>
+                                <span class="badge bg-gradient">⚛️ Quantum Computing Explorer</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- LinkedIn Recommendations Section -->
-    <!-- <section id="recommendations" class="section">
+    <section id="recommendations" class="section">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Professional Recommendations</h2>
-            <div class="recommendations-container">
+                    <h2 class="section-title" data-aos="fade-up">Professional Recommendations</h2>
+            <div id="recommendations-container" class="row">
                 <!-- Recommendations will be dynamically loaded here -->
             </div>
         </div>
-    </section> -->
+    </section>
 
-    <section id="skills" class="section">
+    <section id="skills" class="section reveal">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Technical Expertise</h2>
+                    <h2 class="section-title" data-aos="fade-up">Technical Expertise</h2>
             <div class="row mb-4">
                 <div class="col-md-12">
-                    <p class="text-center" data-aos="fade-up">Explore my neural network of skills and technologies</p>
+                    <p class="text-center lead" data-aos="fade-up">Explore my neural network of skills and technologies</p>
                 </div>
             </div>
             <div id="skills-graph-container" class="position-relative" data-aos="zoom-in">
@@ -193,160 +206,179 @@
         </div>
     </section>
 
-    <section id="projects" class="section bg-light">
+    <section id="projects" class="section">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Featured Projects</h2>
-            <div class="project-filters mb-4">
-                <input type="text" id="projectSearch" class="form-control mb-3" placeholder="grep projects..." aria-label="Search projects">
-                <div class="mb-4">
-                    <div class="btn-group" role="group" aria-label="Project filters">
-                        <button type="button" class="btn btn-outline-primary active" data-filter="all">All</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="ai">AI</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="nlp">NLP</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="ml">Machine Learning</button>
-                        <button type="button" class="btn btn-outline-primary" data-filter="web">Web Development</button>
+            <h2 class="section-title" data-aos="fade-up">Featured Projects</h2>
+            <div class="project-filters" data-aos="fade-up">
+                <input type="text" id="projectSearch" class="form-control" placeholder="Search projects..." aria-label="Search projects">
+                <div class="filter-buttons">
+                    <button type="button" class="filter-btn active" data-filter="all">All</button>
+                    <button type="button" class="filter-btn" data-filter="ai">AI</button>
+                    <button type="button" class="filter-btn" data-filter="nlp">NLP</button>
+                    <button type="button" class="filter-btn" data-filter="ml">Machine Learning</button>
+                    <button type="button" class="filter-btn" data-filter="web">Web Development</button>
+                </div>
+            </div>
+            <div class="projects-grid" id="projectsList" data-aos="fade-up">
+                <!-- Projects will be dynamically loaded -->
+            </div>
+        </div>
+    </section>
+
+    <section id="experience" class="section">
+        <div class="container">
+            <h2 class="section-title" data-aos="fade-up">Professional Journey</h2>
+            <div class="timeline" data-aos="fade-up">
+                <div class="timeline-item">
+                    <div class="timeline-dot"><i class="fas fa-briefcase"></i></div>
+                    <div class="timeline-content">
+                        <h3 class="timeline-title">AI Engineer</h3>
+                        <div class="timeline-meta">
+                            <span>Sorcero</span>
+                            <span>Washington DC-Baltimore Area</span>
+                            <span>May 2024 - Present</span>
+                        </div>
+                        <div class="timeline-body">
+                            <ul>
+                                <li>Spearheaded RAG application development using Google Cloud Vertex AI and Gemini Pro for medical records.</li>
+                                <li>Designed knowledge graphs for medical datasets with multi-modal indexing and embeddings.</li>
+                                <li>Integrated Elastic Search and Neo4j for advanced real-time analytics.</li>
+                                <li>Implemented chain of thought processing using Langchain and LlamaIndex.</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
-                <div class="row g-4" id="projectsList">
-                    <div class="col-md-6 col-lg-4" data-aos="fade-up">
-                        <div class="project-card">
-                            <div class="project-image">
-                                <!-- Add project screenshot -->
+
+                <div class="timeline-item">
+                    <div class="timeline-dot"><i class="fas fa-flask"></i></div>
+                    <div class="timeline-content">
+                        <h3 class="timeline-title">Senior NLP Research Fellow</h3>
+                        <div class="timeline-meta">
+                            <span>TraCCC</span>
+                            <span>Washington DC-Baltimore Area</span>
+                            <span>Jan 2024 - May 2024</span>
+                        </div>
+                        <!-- Add description if available -->
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-dot"><i class="fas fa-cogs"></i></div>
+                    <div class="timeline-content">
+                        <h3 class="timeline-title">Technical Consultant</h3>
+                        <div class="timeline-meta">
+                            <span>INECTA</span>
+                            <span>United States</span>
+                            <span>May 2021 - Aug 2022</span>
+                        </div>
+                        <div class="timeline-body">
+                            <ul>
+                                <li>Developed RAG system with GPT-3.5turbo for visual insights from natural language queries.</li>
+                                <li>Analyzed 5K+ inventory items and managed 50+ EDI pipelines via Azure Data Factory.</li>
+                                <li>Built 5 web applications using Django, Flask, React, and NextJs.</li>
+                                <li>Improved time series forecasting by 15% through sophisticated methods.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                 <div class="timeline-item">
+                    <div class="timeline-dot"><i class="fas fa-server"></i></div>
+                    <div class="timeline-content">
+                        <h3 class="timeline-title">Solutions Architect</h3>
+                        <div class="timeline-meta">
+                            <span>RadianArc Technologies</span>
+                            <span>Mumbai Area, India</span>
+                            <span>May 2019 - Apr 2021</span>
+                        </div>
+                        <div class="timeline-body">
+                            <ul>
+                                <li>Achieved 90%+ accuracy in anomaly detection through advanced statistics.</li>
+                                <li>Managed sensor data preprocessing for 95% accurate time-to-failure prediction.</li>
+                                <li>Reduced machine downtime by 50% through KPI dashboard development.</li>
+                                <li>Deployed scalable business solutions using Azure Data Lake and Python.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-dot"><i class="fas fa-code"></i></div>
+                    <div class="timeline-content">
+                        <h3 class="timeline-title">Software Engineer</h3>
+                        <div class="timeline-meta">
+                            <span>Tata Consultancy Services</span>
+                            <span>India</span>
+                            <span>Nov 2017 - Sep 2019</span>
+                        </div>
+                        <div class="timeline-body">
+                            <ul>
+                                <li>Automated testing processes using Selenium with Cucumber framework.</li>
+                                <li>Managed POS systems testing and performance optimization.</li>
+                                <li>Developed AR application concept for company's Innovation labs.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="publications" class="section">
+        <div class="container">
+            <h2 class="section-title" data-aos="fade-up">Publications & Certifications</h2>
+            <div class="row">
+                <div class="col-md-6" data-aos="fade-right">
+                    <div class="card h-100">
+                        <div class="card-body">
+                             <div class="d-flex align-items-center mb-4">
+                                <i class="fas fa-book-open fa-2x text-accent me-3"></i>
+                                <h3 class="card-title mb-0">Publications & Research</h3>
                             </div>
-                            <div class="project-content">
-                                <h3>Project Title</h3>
-                                <p>Brief description with key achievements and technologies used.</p>
-                                <div class="project-links">
-                                    <a href="#" class="btn btn-sm btn-primary">Live Demo</a>
-                                    <a href="#" class="btn btn-sm btn-outline-primary">Source Code</a>
+                            <div class="publication-item mb-4">
+                                <h5>Falcon: Conversational Data Analytics System</h5>
+                                <p class="text-muted">Master's Capstone Project - George Mason University (2024)</p>
+                                <div class="project-tags">
+                                    <span class="tag">LLM</span>
+                                    <span class="tag">SQL</span>
+                                    <span class="tag">NLP</span>
+                                </div>
+                            </div>
+                            <div class="publication-item">
+                                <h5>Healthcare RAG Systems</h5>
+                                <p class="text-muted">Industry Research - Sorcero (2024)</p>
+                                 <div class="project-tags">
+                                    <span class="tag">RAG</span>
+                                    <span class="tag">Medical AI</span>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <!-- Add more project cards -->
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Update Experience Section -->
-    <section id="experience" class="section">
-        <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Professional Journey</h2>
-            <div class="experience-timeline">
-                <div class="experience-item" data-aos="fade-up">
-                    <div class="experience-content">
-                        <div class="experience-header">
-                            <h3>AI Engineer</h3>
-                            <div class="company-details">
-                                <span class="company">Sorcero</span>
-                                <span class="location">Washington DC-Baltimore Area</span>
-                                <span class="duration">May 2024 - Present</span>
-                            </div>
-                        </div>
-                        <ul class="achievement-list">
-                            <li>Spearheaded RAG application development using Google Cloud Vertex AI and Gemini Pro for medical records</li>
-                            <li>Designed knowledge graphs for medical datasets with multi-modal indexing and embeddings</li>
-                            <li>Integrated Elastic Search and Neo4j for advanced real-time analytics</li>
-                            <li>Implemented chain of thought processing using Langchain and LlamaIndex</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="experience-item" data-aos="fade-up">
-                    <div class="experience-content">
-                        <div class="experience-header">
-                            <h3>Senior NLP Research Fellow</h3>
-                            <div class="company-details">
-                                <span class="company">TraCCC</span>
-                                <span class="location">Washington DC-Baltimore Area</span>
-                                <span class="duration">January 2024 - May 2024</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="experience-item" data-aos="fade-up">
-                    <div class="experience-content">
-                        <div class="experience-header">
-                            <h3>Technical Consultant</h3>
-                            <div class="company-details">
-                                <span class="company">INECTA</span>
-                                <span class="location">United States</span>
-                                <span class="duration">May 2021 - August 2022</span>
-                            </div>
-                        </div>
-                        <ul class="achievement-list">
-                            <li>Developed RAG system with GPT-3.5turbo for visual insights from natural language queries</li>
-                            <li>Analyzed 5K+ inventory items and managed 50+ EDI pipelines via Azure Data Factory</li>
-                            <li>Built 5 web applications using Django, Flask, React, and NextJs</li>
-                            <li>Improved time series forecasting by 15% through sophisticated methods</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="experience-item" data-aos="fade-up">
-                    <div class="experience-content">
-                        <div class="experience-header">
-                            <h3>Solutions Architect</h3>
-                            <div class="company-details">
-                                <span class="company">RadianArc Technologies</span>
-                                <span class="location">Mumbai Area, India</span>
-                                <span class="duration">May 2019 - April 2021</span>
-                            </div>
-                        </div>
-                        <ul class="achievement-list">
-                            <li>Achieved 90%+ accuracy in anomaly detection through advanced statistics</li>
-                            <li>Managed sensor data preprocessing for 95% accurate time-to-failure prediction</li>
-                            <li>Reduced machine downtime by 50% through KPI dashboard development</li>
-                            <li>Deployed scalable business solutions using Azure Data Lake and Python</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="experience-item" data-aos="fade-up">
-                    <div class="experience-content">
-                        <div class="experience-header">
-                            <h3>Software Engineer</h3>
-                            <div class="company-details">
-                                <span class="company">Tata Consultancy Services</span>
-                                <span class="location">India</span>
-                                <span class="duration">November 2017 - September 2019</span>
-                            </div>
-                        </div>
-                        <ul class="achievement-list">
-                            <li>Automated testing processes using Selenium with Cucumber framework</li>
-                            <li>Managed POS systems testing and performance optimization</li>
-                            <li>Developed AR application concept for company's Innovation labs</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Add Publications Section -->
-    <section id="publications" class="section bg-light">
-        <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Publications & Certifications</h2>
-            <div class="row">
-                <div class="col-md-6" data-aos="fade-right">
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <h3 class="card-title">Publications</h3>
-                            <ul class="publication-list">
-                                <!-- Add your publications -->
-                            </ul>
-                        </div>
-                    </div>
                 </div>
                 <div class="col-md-6" data-aos="fade-left">
                     <div class="card h-100">
                         <div class="card-body">
-                            <h3 class="card-title">Certifications</h3>
-                            <ul class="certification-list">
-                                <!-- Add your certifications -->
-                            </ul>
+                             <div class="d-flex align-items-center mb-4">
+                                <i class="fas fa-certificate fa-2x text-accent me-3"></i>
+                                <h3 class="card-title mb-0">Certifications</h3>
+                            </div>
+                            <div class="certification-item mb-3">
+                                <div class="d-flex justify-content-between">
+                                    <h6 class="mb-0">Google Cloud Professional Machine Learning Engineer</h6>
+                                    <span class="text-muted">2024</span>
+                                </div>
+                            </div>
+                             <div class="certification-item mb-3">
+                                <div class="d-flex justify-content-between">
+                                    <h6 class="mb-0">AWS Certified Solutions Architect</h6>
+                                    <span class="text-muted">2023</span>
+                                </div>
+                            </div>
+                             <div class="certification-item">
+                                <div class="d-flex justify-content-between">
+                                    <h6 class="mb-0">Microsoft Azure Data Scientist Associate</h6>
+                                    <span class="text-muted">2022</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -354,78 +386,99 @@
         </div>
     </section>
 
-    <!-- Fix Education Section -->
-    <section id="education" class="section bg-light">
+    <section id="education" class="section">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Educational Background</h2>
-            <div class="row">
+            <h2 class="section-title" data-aos="fade-up">Educational Background</h2>
+            <div class="row justify-content-center">
                 <div class="col-md-6" data-aos="fade-right">
-                    <div class="education-card">
-                        <h3>Master's Degree in Data Analytics</h3>
-                        <p class="institution">George Mason University</p>
-                        <p class="period">August 2022 - May 2024</p>
+                    <div class="card">
+                        <div class="card-body d-flex align-items-center">
+                            <i class="fas fa-graduation-cap fa-3x text-accent me-4"></i>
+                            <div>
+                                <h3 class="card-title">Master's in Data Analytics</h3>
+                                <p class="text-muted mb-1">George Mason University</p>
+                                <p class="text-muted">Aug 2022 - May 2024</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="col-md-6" data-aos="fade-left">
-                    <div class="education-card">
-                        <h3>Bachelor of Technology</h3>
-                        <p class="institution">GITAM University, Visakhapatnam</p>
-                        <p class="period">2013 - 2017</p>
-                        <p>Electrical, Electronics and Communications Engineering</p>
+                    <div class="card">
+                         <div class="card-body d-flex align-items-center">
+                            <i class="fas fa-bolt fa-3x text-accent me-4"></i>
+                            <div>
+                                <h3 class="card-title">Bachelor of Technology</h3>
+                                <p class="text-muted mb-1">GITAM University</p>
+                                <p class="text-muted">2013 - 2017</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Move Resume Section here, just before Contact -->
-    <section id="resume" class="section bg-light">
+    <section id="resume" class="section reveal">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Interactive Resume</h2>
+                    <h2 class="section-title" data-aos="fade-up">Interactive Resume</h2>
             <div class="row mb-4">
                 <div class="col-md-12">
-                    <p class="text-center" data-aos="fade-up">View and download my detailed resume</p>
+                    <p class="text-center lead" data-aos="fade-up">View and download my detailed resume</p>
                 </div>
             </div>
             <div id="pdf_viewer" class="pdf-viewer-container"></div>
         </div>
     </section>
 
-    <section id="contact" class="section bg-dark">
+    <section id="contact" class="section">
         <div class="container">
-            <h2 class="text-center mb-5" data-aos="fade-up">Establish Connection</h2>
-            <div class="row">
-                <div class="col-md-6" data-aos="fade-right">
-                    <div class="terminal">
-                        <div class="terminal-header">
-                            <div class="terminal-button"></div>
-                            <div class="terminal-button"></div>
-                            <div class="terminal-button"></div>
+            <h2 class="section-title" data-aos="fade-up">Establish Connection</h2>
+            <div class="row contact-grid">
+                <div class="col-lg-6" data-aos="fade-right">
+                    <form id="contactForm" class="contact-form" novalidate>
+                        <div class="form-group">
+                            <input type="text" class="form-control" id="name" name="name" placeholder="Your Name" required aria-required="true">
                         </div>
-                        <div class="terminal-body">
-                            <p class="terminal-text">$ initiating_contact_protocol</p>
-                            <form id="contactForm" novalidate>
-                                <p class="terminal-text">$ enter_name:<br>
-                                <input type="text" class="terminal-input" id="name" required aria-required="true">
-                                </p>
-                                <p class="terminal-text">$ enter_email:<br>
-                                <input type="email" class="terminal-input" id="email" required aria-required="true">
-                                </p>
-                                <p class="terminal-text">$ enter_message:<br>
-                                <textarea class="terminal-input" id="message" rows="5" required aria-required="true"></textarea>
-                                </p>
-                                <button type="submit" class="btn btn-primary">Execute Transmission</button>
-                            </form>
+                        <div class="form-group">
+                            <input type="email" class="form-control" id="email" name="email" placeholder="Your Email" required aria-required="true">
+                        </div>
+                        <div class="form-group">
+                            <textarea class="form-control" id="message" name="message" rows="5" placeholder="Your Message" required aria-required="true"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Execute Transmission</button>
+                    </form>
+                </div>
+                <div class="col-lg-6" data-aos="fade-left">
+                    <div class="contact-info-grid">
+                        <div class="contact-info-item">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <div>
+                                <strong>Coordinates</strong><br>
+                                Arlington, Virginia, United States
+                            </div>
+                        </div>
+                        <div class="contact-info-item">
+                            <i class="fas fa-phone"></i>
+                             <div>
+                                <strong>Phone</strong><br>
+                                <a href="tel:+17039696510">+1 703-969-6510</a>
+                            </div>
+                        </div>
+                        <div class="contact-info-item">
+                            <i class="fas fa-envelope"></i>
+                            <div>
+                                <strong>Email</strong><br>
+                                <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a>
+                            </div>
+                        </div>
+                        <div class="contact-info-item">
+                            <i class="fab fa-linkedin"></i>
+                             <div>
+                                <strong>LinkedIn</strong><br>
+                                <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">linkedin.com/in/amaljithk</a>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div class="col-md-6" data-aos="fade-left">
-                    <h3>Connection Details</h3>
-                    <p><i class="fas fa-map-marker-alt" aria-hidden="true"></i> <strong>Coordinates:</strong> Arlington, Virginia, United States</p>
-                    <p><i class="fas fa-phone" aria-hidden="true"></i> <strong>Communication Device:</strong> <a href="tel:+17039696510">+1 7039696510</a></p>
-                    <p><i class="fas fa-envelope" aria-hidden="true"></i> <strong>Electronic Mail:</strong> <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a></p>
-                    <p><i class="fab fa-linkedin" aria-hidden="true"></i> <strong>Professional Network:</strong> <a href="https://www.linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">linkedin.com/in/amaljithk</a></p>
-                    <p><i class="fas fa-globe" aria-hidden="true"></i> <strong>Web Portal:</strong> <a href="https://amaljithkuttamath.github.io/" target="_blank" rel="noopener noreferrer">amaljithkuttamath.github.io</a></p>
                 </div>
             </div>
         </div>
@@ -434,17 +487,17 @@
 
 <footer class="bg-dark text-light py-4">
     <div class="container text-center">
-        <p>&copy; 2023 Amaljith Kuttamath. All rights reserved. Powered by caffeine, late-night coding sessions, and the occasional quantum fluctuation.</p>
+        <p>&copy; 2024 Amaljith Kuttamath. All rights reserved. Powered by caffeine, late-night coding sessions, and the occasional quantum fluctuation.</p>
+        <div class="footer-links mt-3">
+            <a href="#about" class="text-light mx-2">About</a>
+            <a href="#skills" class="text-light mx-2">Skills</a>
+            <a href="#projects" class="text-light mx-2">Projects</a>
+            <a href="#contact" class="text-light mx-2">Contact</a>
+        </div>
     </div>
 </footer>
 
-<button id="darkModeToggle" aria-label="Toggle dark mode">
-    <i class="fas fa-moon" aria-hidden="true"></i>
-</button>
 
-<button id="backToTop" aria-label="Back to top">
-    <i class="fas fa-arrow-up" aria-hidden="true"></i>
-</button>
 
 <!-- Project Modal -->
 <div class="modal fade" id="projectModal" tabindex="-1" aria-labelledby="projectModalLabel" aria-hidden="true">
@@ -474,6 +527,7 @@
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js" as="script">
 <link rel="preload" href="https://d3js.org/d3.v7.min.js" as="script">
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" as="script">
+<link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" as="script">
 
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
@@ -481,8 +535,8 @@
 <script src="https://d3js.org/d3.v7.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.12" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js" defer></script>
-<script src="new_scripts.js" defer></script>
-<script src="pdf-viewer.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+<script src="scripts.js" defer></script>
 <script>
     window.addEventListener('load', function() {
         particlesJS.load('particles-js', 'particles.json', function() {

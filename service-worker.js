@@ -1,21 +1,25 @@
-const CACHE_NAME = 'amaljith-portfolio-v2';
+const CACHE_NAME = 'amaljith-portfolio-v3';
 const urlsToCache = [
   '/',
   '/index.html',
   '/styles.css',
-  '/script.js',
+  '/new_scripts.js',
+  '/particles.json',
+  '/manifest.json',
   '/image/amal.jpg',
+  '/image/Profile.pdf',
   '/offline.html',
-  '/favicon.ico',
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js',
-  'https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js',
+  'https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js',
   'https://cdn.jsdelivr.net/npm/typed.js@2.0.12',
   'https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.js',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
   'https://cdn.jsdelivr.net/npm/aos@2.3.4/dist/aos.css',
   'https://d3js.org/d3.v7.min.js',
-  'https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Playfair+Display:wght@400;700&display=swap'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  'https://fonts.googleapis.com/css2?family=VT323&family=Source+Code+Pro:wght@400;600;700&display=swap'
 ];
 
 self.addEventListener('install', event => {
