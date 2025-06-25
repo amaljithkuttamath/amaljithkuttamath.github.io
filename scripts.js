@@ -301,9 +301,20 @@ document.addEventListener("DOMContentLoaded", function () {
                 return;
             }
 
-            // Simulate form submission
-            this.showMessage('Thank you for your message! I will get back to you soon.', 'success');
-            this.form.reset();
+            // Send email via Web3Forms (free 250 emails/month)
+            fetch('https://api.web3forms.com/submit', {
+                method: 'POST',
+                body: formData
+            }).then(response => {
+                if (response.ok) {
+                    this.showMessage('Thank you for your message! I will get back to you soon.', 'success');
+                    this.form.reset();
+                } else {
+                    this.showMessage('Sorry, there was an error sending your message. Please try again.', 'error');
+                }
+            }).catch(error => {
+                this.showMessage('Sorry, there was an error sending your message. Please try again.', 'error');
+            });
         }
 
         showMessage(text, type) {
