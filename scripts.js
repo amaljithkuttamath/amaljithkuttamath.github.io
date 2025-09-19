@@ -3,60 +3,59 @@ document.addEventListener("DOMContentLoaded", function () {
     // Project data - simplified
     const projectsData = [
         {
-            id: "falconProject",
-            title: "Falcon: Chat with Your Data",
-            description: "Led a 6-person team to develop conversational data analytics using fine-tuned Codellama-34B and Mistral-7B models.",
-            categories: ["ai", "nlp"],
-            technologies: "Python, Codellama-34B, Mistral-7B, LangChain, SQL",
-            role: "Team Lead & Technical Architect",
-            company: "GMU Capstone Project",
-            period: "2024",
-            impact: "Democratized data analytics for non-technical users",
-            demo: "https://lnkd.in/gMbtYs25"
+            id: "lungCancerResearch",
+            title: "Lung Cancer Risk Prediction from Medical History",
+            description: "Published peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records.",
+            categories: ["ai", "research"],
+            technologies: "Python, Machine Learning, EHR Analysis, Statistical Modeling",
+            role: "Lead Researcher",
+            company: "Quality Management in Health Care",
+            period: "2025",
+            impact: "DOI: 10.1097/QMH.0000000000000525"
         },
         {
             id: "medicalRAG",
-            title: "Medical RAG System",
-            description: "Developing advanced RAG applications using Google Cloud's Vertex AI and Gemini Pro for medical records analysis.",
+            title: "Production Medical RAG System",
+            description: "Built production RAG system using Vertex AI serving 10,000+ daily medical record queries with 30% improvement in retrieval fidelity.",
             categories: ["ai", "nlp", "healthcare"],
             technologies: "Python, Vertex AI, Gemini Pro, LangChain, Neo4j, Elasticsearch",
             role: "AI Engineer",
             company: "Sorcero",
             period: "May 2024 - Present",
-            impact: "Enabling healthcare professionals to efficiently extract insights from medical documentation"
+            impact: "Serves 10,000+ daily queries for healthcare organizations"
         },
         {
             id: "predictiveMaintenance",
-            title: "Industrial Predictive Maintenance System", 
-            description: "Led development of ML-powered predictive maintenance achieving 95% accuracy, reducing machine downtime by 50%.",
+            title: "Predictive Maintenance Platform", 
+            description: "Built predictive maintenance system using IoT sensor data achieving 95% accurate time-to-failure prediction.",
             categories: ["ml"],
-            technologies: "Python, Azure Data Lake, Advanced Statistics, Sensor Analytics",
+            technologies: "Python, Azure, IoT Sensors, Machine Learning",
             role: "Solutions Architect",
             company: "RadianArc Technologies",
             period: "May 2019 - April 2021",
-            impact: "Reduced unplanned downtime by 50%"
+            impact: "Reduced equipment downtime by 50%, saved $1M annually"
         },
         {
             id: "supplychainRAG",
-            title: "Supply Chain RAG Analytics System",
-            description: "Developed RAG system with GPT-3.5turbo enabling natural language queries for 5K+ inventory items.",
+            title: "Business Intelligence RAG Platform",
+            description: "Built RAG system with GPT-3.5turbo enabling natural language queries for enterprise ERP data serving 50+ clients.",
             categories: ["nlp", "ai", "web"],
             technologies: "GPT-3.5turbo, Azure Data Factory, Django, Flask, React, NextJS",
             role: "Technical Consultant", 
             company: "INECTA",
             period: "May 2021 - August 2022",
-            impact: "Improved forecasting accuracy by 15%"
+            impact: "Processed 2TB+ daily data, saved $200K annually"
         },
         {
             id: "testAutomation",
-            title: "Enterprise Test Automation Framework",
-            description: "Architected automated testing ecosystem using Selenium with Cucumber framework, reducing testing time by 70%.",
+            title: "QA Test Automation Framework",
+            description: "Built automated testing framework using Selenium and Cucumber, improving testing efficiency by 70% across 10+ projects.",
             categories: ["web"],
             technologies: "Selenium, Cucumber, Java, TestNG, Jenkins",
             role: "Software Engineer",
             company: "Tata Consultancy Services", 
             period: "November 2017 - September 2019",
-            impact: "Reduced manual testing effort by 70%"
+            impact: "Improved testing efficiency by 70% across Fortune 500 clients"
         }
     ];
 
@@ -95,8 +94,8 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         initScrollSpy() {
-            const sections = document.querySelectorAll("section[id]");
-            const navLinks = document.querySelectorAll(".nav-link");
+            const sections = document.querySelectorAll("section[id], header[id]");
+            const navDots = document.querySelectorAll(".nav-dot");
 
             const handleScroll = () => {
                 const fromTop = window.scrollY + 100;
@@ -106,8 +105,8 @@ document.addEventListener("DOMContentLoaded", function () {
                     
                     if (fromTop >= offsetTop && fromTop < offsetTop + offsetHeight) {
                         const id = section.getAttribute("id");
-                        navLinks.forEach(link => {
-                            link.classList.toggle("active", link.getAttribute("href") === `#${id}`);
+                        navDots.forEach(dot => {
+                            dot.classList.toggle("active", dot.getAttribute("href") === `#${id}`);
                         });
                     }
                 });
@@ -337,8 +336,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
         const roles = [
             'AI Engineer',
-            'NLP Specialist', 
-            'Faculty @GMU'
+            'Healthcare AI Researcher', 
+            'Production ML Engineer'
         ];
 
         let currentRole = 0;
@@ -883,9 +882,9 @@ document.addEventListener("DOMContentLoaded", function () {
             const instructions = document.createElement('div');
             instructions.className = 'skills-instructions';
             instructions.innerHTML = `
-                <h6>🎮 Interactive Controls</h6>
+                <h6>Interactive Controls</h6>
                 <ul>
-                    <li><span class="key">🖱️</span> Hover & click skills to explore</li>
+                    <li><span class="key">Click</span> Hover & click skills to explore</li>
                     <li><span class="key">R</span> Randomize positions</li>
                     <li><span class="key">C</span> Cycle by category</li>
                     <li><span class="key">Space</span> Explode constellation</li>
