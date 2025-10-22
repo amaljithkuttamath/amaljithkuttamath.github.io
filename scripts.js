@@ -3,6 +3,17 @@ document.addEventListener("DOMContentLoaded", function () {
     // Project data - simplified
     const projectsData = [
         {
+            id: "llmFinetuning",
+            title: "Production LLM Fine-tuning Pipeline",
+            description: "End-to-end fine-tuning system for Qwen2.5-3B using GRPO + LoRA with vLLM deployment. Includes automated evaluation, monitoring, and A/B testing infrastructure.",
+            categories: ["ai", "ml"],
+            technologies: "PyTorch, vLLM, LoRA, GRPO, HuggingFace, Docker, Kubernetes",
+            role: "AI Engineer",
+            company: "Personal Project",
+            period: "2024",
+            impact: "40% improvement in task-specific performance, 3x faster inference"
+        },
+        {
             id: "lungCancerResearch",
             title: "Lung Cancer Risk Prediction from Medical History",
             description: "Published peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records.",
@@ -17,12 +28,34 @@ document.addEventListener("DOMContentLoaded", function () {
             id: "medicalRAG",
             title: "Production Medical RAG System",
             description: "Built production RAG system using Vertex AI serving 10,000+ daily medical record queries with 30% improvement in retrieval fidelity.",
-            categories: ["ai", "nlp", "healthcare"],
+            categories: ["ai", "nlp"],
             technologies: "Python, Vertex AI, Gemini Pro, LangChain, Neo4j, Elasticsearch",
             role: "AI Engineer",
             company: "Sorcero",
             period: "May 2024 - Present",
             impact: "Serves 10,000+ daily queries for healthcare organizations"
+        },
+        {
+            id: "vectorSearch",
+            title: "Hybrid Vector Search System",
+            description: "Built hybrid search combining dense embeddings, sparse retrieval, and reranking for improved RAG accuracy. Integrated Pinecone and Elasticsearch.",
+            categories: ["ai", "nlp"],
+            technologies: "Sentence Transformers, Pinecone, Elasticsearch, FastAPI, Python",
+            role: "AI Engineer",
+            company: "Sorcero",
+            period: "2024",
+            impact: "35% improvement in retrieval precision, 50ms average latency"
+        },
+        {
+            id: "agenticAI",
+            title: "Multi-Agent AI System",
+            description: "Developed autonomous AI agents with tool use, planning, and memory using LangGraph. Implements ReAct pattern for complex problem-solving.",
+            categories: ["ai", "nlp"],
+            technologies: "LangChain, LangGraph, OpenAI GPT-4, Python, Redis",
+            role: "Personal Project",
+            company: "Open Source",
+            period: "2024",
+            impact: "Successfully completes 80%+ of complex multi-step tasks"
         },
         {
             id: "predictiveMaintenance",

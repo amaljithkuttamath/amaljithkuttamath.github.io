@@ -2282,3 +2282,159 @@ footer {
     z-index: 2;
 }
 
+/* === AI Engineering Stack Styles === */
+.tech-stack-card {
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-8);
+    transition: all var(--transition-normal);
+    height: 100%;
+    text-align: center;
+}
+
+.tech-stack-card:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    box-shadow: var(--glass-shadow-glow);
+    transform: translateY(-4px);
+}
+
+.tech-icon {
+    color: var(--accent);
+    margin-bottom: var(--space-4);
+}
+
+.tech-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    justify-content: center;
+    margin-top: var(--space-4);
+}
+
+.tech-badge {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border-light);
+    border-radius: var(--radius-full);
+    padding: var(--space-2) var(--space-4);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.tech-badge:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+/* === GitHub Card Styles === */
+.github-card {
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+    transition: all var(--transition-normal);
+    height: 100%;
+}
+
+.github-card:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    box-shadow: var(--glass-shadow-glow);
+    transform: translateY(-4px);
+}
+
+.github-card h4 {
+    font-size: 1.25rem;
+    margin-bottom: var(--space-3);
+}
+
+.github-card .badge {
+    font-size: 0.75rem;
+    padding: var(--space-1) var(--space-3);
+}
+
+/* === Tech Tags (used in timeline and projects) === */
+.tech-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+
+.tech-tags .tag,
+.project-tags .tag {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border-light);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-3);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+}
+
+.tech-tags .tag:hover,
+.project-tags .tag:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+/* === Hero Badge Styles === */
+header .badge {
+    font-size: 0.85rem;
+    padding: var(--space-2) var(--space-4);
+    font-weight: 500;
+    backdrop-filter: var(--glass-blur-light);
+}
+
+/* === Continuous Learning Section === */
+.learning-card {
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+    transition: all var(--transition-normal);
+}
+
+.learning-card:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    box-shadow: var(--glass-shadow-glow);
+}
+
+.learning-item {
+    padding: var(--space-4);
+    border-left: 3px solid var(--accent);
+    background: var(--glass-bg);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-3);
+}
+
+.learning-item h5 {
+    color: var(--accent);
+    margin-bottom: var(--space-2);
+}
+
+/* === Responsive Adjustments === */
+@media (max-width: 768px) {
+    .tech-stack-card {
+        padding: var(--space-6);
+    }
+    
+    .github-card {
+        padding: var(--space-5);
+    }
+    
+    .tech-badge {
+        font-size: 0.75rem;
+        padding: var(--space-1) var(--space-3);
+    }
+}
