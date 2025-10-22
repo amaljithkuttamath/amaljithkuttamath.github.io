@@ -2392,6 +2392,18 @@ header .badge {
     padding: var(--space-2) var(--space-4);
     font-weight: 500;
     backdrop-filter: var(--glass-blur-light);
+    background: rgba(59, 130, 246, 0.2) !important;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: var(--text-primary);
+    display: inline-block;
+    margin-bottom: var(--space-2);
+}
+
+header .badge:hover {
+    background: rgba(59, 130, 246, 0.3) !important;
+    border-color: rgba(59, 130, 246, 0.6);
+    transform: translateY(-2px);
+    transition: all 0.2s ease;
 }
 
 /* === Continuous Learning Section === */
@@ -2436,5 +2448,276 @@ header .badge {
     .tech-badge {
         font-size: 0.75rem;
         padding: var(--space-1) var(--space-3);
+    }
+}
+
+/* === Hero Section Enhancements === */
+header#home {
+    padding: var(--space-8) 0;
+}
+
+header#home .lead {
+    line-height: 1.6;
+    margin-bottom: var(--space-6);
+}
+
+header#home .badge-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+}
+
+/* Better button spacing */
+header#home .btn {
+    white-space: nowrap;
+}
+
+/* === Improved Hero Image === */
+.hero-image-container {
+    position: relative;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.desktop-hero-image {
+    box-shadow: var(--glass-shadow-glow);
+    border: 3px solid rgba(59, 130, 246, 0.3);
+    transition: all 0.3s ease;
+}
+
+.desktop-hero-image:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 60px rgba(59, 130, 246, 0.5);
+}
+
+.mobile-hero-image {
+    max-width: 250px;
+    box-shadow: var(--glass-shadow-glow);
+    border: 3px solid rgba(59, 130, 246, 0.3);
+}
+
+/* === Responsive Improvements === */
+@media (max-width: 768px) {
+    header#home {
+        padding: var(--space-6) 0;
+    }
+    
+    header#home .display-4 {
+        font-size: 2.5rem;
+    }
+    
+    header#home .lead {
+        font-size: 1rem;
+    }
+    
+    header .badge {
+        font-size: 0.75rem;
+        padding: var(--space-1) var(--space-3);
+    }
+    
+    header#home .btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 576px) {
+    header#home .display-4 {
+        font-size: 2rem;
+    }
+    
+    header#home .h3 {
+        font-size: 1.25rem;
+    }
+}
+
+/* === Section Spacing Improvements === */
+section.section {
+    padding: var(--space-20) 0;
+}
+
+@media (max-width: 768px) {
+    section.section {
+        padding: var(--space-12) 0;
+    }
+}
+
+/* === Better Text Hierarchy === */
+.section-title {
+    margin-bottom: var(--space-12);
+}
+
+section .lead {
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+/* === About Card Improvements === */
+.about-card {
+    background: var(--glass-bg-light);
+    backdrop-filter: var(--glass-blur-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+    height: 100%;
+    transition: all var(--transition-normal);
+}
+
+.about-card:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: var(--glass-shadow-glow);
+}
+
+.about-card h4 {
+    margin-bottom: var(--space-4);
+}
+
+.about-card .fa-2x {
+    color: var(--accent);
+}
+
+/* === Tech Stack Card Text === */
+.tech-stack-card h4 {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    margin-top: var(--space-3);
+}
+
+/* === Timeline Improvements === */
+.timeline-item {
+    margin-bottom: var(--space-8);
+}
+
+/* === Better Button Styles === */
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    transition: all var(--transition-normal);
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.btn-outline-primary {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: transparent;
+    transition: all var(--transition-normal);
+}
+
+.btn-outline-primary:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* === Stats Grid === */
+.stats-grid {
+    display: flex;
+    justify-content: space-around;
+    gap: var(--space-8);
+    margin-top: var(--space-8);
+}
+
+.stat-item {
+    text-align: center;
+    padding: var(--space-6);
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-normal);
+    flex: 1;
+}
+
+.stat-item:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: var(--glass-shadow-glow);
+}
+
+.stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent) 0%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: var(--space-2);
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}
+
+/* === Simplified Tech Stack === */
+.tech-stack-simple {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.tech-category {
+    text-align: center;
+}
+
+.tech-category-title {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    margin-bottom: var(--space-4);
+    font-weight: 600;
+}
+
+.tech-items {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-3);
+}
+
+.tech-item {
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-5);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all var(--transition-normal);
+}
+
+.tech-item:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* === Responsive Stats and Tech Stack === */
+@media (max-width: 768px) {
+    .stats-grid {
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+    
+    .stat-number {
+        font-size: 2rem;
+    }
+    
+    .tech-item {
+        font-size: 0.85rem;
+        padding: var(--space-2) var(--space-4);
     }
 }
