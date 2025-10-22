@@ -2619,3 +2619,105 @@ section .lead {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
+
+/* === Stats Grid === */
+.stats-grid {
+    display: flex;
+    justify-content: space-around;
+    gap: var(--space-8);
+    margin-top: var(--space-8);
+}
+
+.stat-item {
+    text-align: center;
+    padding: var(--space-6);
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-normal);
+    flex: 1;
+}
+
+.stat-item:hover {
+    background: var(--glass-bg-medium);
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: var(--glass-shadow-glow);
+}
+
+.stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent) 0%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: var(--space-2);
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin-bottom: 0;
+}
+
+/* === Simplified Tech Stack === */
+.tech-stack-simple {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.tech-category {
+    text-align: center;
+}
+
+.tech-category-title {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    margin-bottom: var(--space-4);
+    font-weight: 600;
+}
+
+.tech-items {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-3);
+}
+
+.tech-item {
+    background: var(--glass-bg-light);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-5);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all var(--transition-normal);
+}
+
+.tech-item:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* === Responsive Stats and Tech Stack === */
+@media (max-width: 768px) {
+    .stats-grid {
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+    
+    .stat-number {
+        font-size: 2rem;
+    }
+    
+    .tech-item {
+        font-size: 0.85rem;
+        padding: var(--space-2) var(--space-4);
+    }
+}
