@@ -368,9 +368,11 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!element) return;
 
         const roles = [
-            'AI Engineer',
-            'Healthcare AI Researcher', 
-            'Production ML Engineer'
+            'AI Engineer @ Sorcero',
+            'Published Healthcare AI Researcher',
+            'Production LLM Systems Architect',
+            'Google Cloud ML Engineer',
+            'RAG & Vector Search Specialist'
         ];
 
         let currentRole = 0;
@@ -967,6 +969,10 @@ document.addEventListener("DOMContentLoaded", function () {
             once: true
         });
     }
+
+    // Dynamic footer year
+    const footerYear = document.getElementById('footer-year');
+    if (footerYear) footerYear.textContent = new Date().getFullYear();
 
     // Hide loading spinner
     function hideLoadingSpinner() {
