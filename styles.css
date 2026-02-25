@@ -2622,8 +2622,8 @@ section .lead {
 
 /* === Stats Grid === */
 .stats-grid {
-    display: flex;
-    justify-content: space-around;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--space-8);
     margin-top: var(--space-8);
 }
@@ -2708,7 +2708,7 @@ section .lead {
 /* === Responsive Stats and Tech Stack === */
 @media (max-width: 768px) {
     .stats-grid {
-        flex-direction: column;
+        grid-template-columns: repeat(2, 1fr);
         gap: var(--space-4);
     }
     
