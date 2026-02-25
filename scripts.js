@@ -27,13 +27,13 @@ document.addEventListener("DOMContentLoaded", function () {
         {
             id: "medicalRAG",
             title: "Production Medical RAG System",
-            description: "Built production RAG system using Vertex AI serving 10,000+ daily medical record queries with 30% improvement in retrieval fidelity.",
+            description: "Built production RAG system using Vertex AI for healthcare document processing with 30% improvement in retrieval fidelity.",
             categories: ["ai", "nlp"],
             technologies: "Python, Vertex AI, Gemini Pro, LangChain, Neo4j, Elasticsearch",
             role: "AI Engineer",
             company: "Sorcero",
             period: "May 2024 - Present",
-            impact: "Serves 10,000+ daily queries for healthcare organizations"
+            impact: "Production system for healthcare organizations"
         },
         {
             id: "vectorSearch",
