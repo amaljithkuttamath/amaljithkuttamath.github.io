@@ -33,6 +33,18 @@ const branches = [
           outcome: 'Complete working implementation with explanations aimed at people who want to understand the mechanics, not just the API.',
         },
       },
+      {
+        title: 'microGPT Playground',
+        desc: 'Train a GPT live in your browser — watch attention, embeddings, and loss evolve in real time.',
+        tags: ['interactive', 'D3.js', 'transformers'],
+        url: '/playground',
+        details: {
+          problem: 'Reading about transformers is one thing. Watching one learn, step by step, makes it click.',
+          approach: 'Port microgpt.py to pure browser JS with a custom autograd engine. D3.js visualizes every component: attention heatmaps, MLP activations, embedding vectors, optimizer state, and loss curves — all updating live during training.',
+          stack: 'JavaScript, D3.js, Astro',
+          outcome: 'A self-contained, zero-dependency playground that trains a character-level GPT on 500 names directly in the browser.',
+        },
+      },
     ],
   },
 ];
@@ -49,40 +61,39 @@ const branches = [
       <div class="git-branch">
         <div class="branch-label">{branch.name}</div>
         {branch.items.map((item) => (
-          <div class="git-commit">
-            <h3>
-              {item.url
-                ? <a href={item.url}>{item.title}</a>
-                : item.title}
-            </h3>
-            <p>{item.desc}</p>
-            <div class="tags">
-              {item.tags.map((t) => <span class="tag">{t}</span>)}
-            </div>
+          <details class="git-commit-expandable">
+            <summary class="git-commit">
+              <h3>
+                {item.url
+                  ? <a href={item.url} onclick="event.stopPropagation()">{item.title}</a>
+                  : item.title}
+              </h3>
+              <p>{item.desc}</p>
+              <div class="tags">
+                {item.tags.map((t) => <span class="tag">{t}</span>)}
+              </div>
+            </summary>
             {item.details && (
-              <details class="commit-details">
-                <summary>read more</summary>
-                <div class="details-grid">
-                  <div class="detail-row">
-                    <span class="detail-label">Problem</span>
-                    <span class="detail-value">{item.details.problem}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Approach</span>
-                    <span class="detail-value">{item.details.approach}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Stack</span>
-                    <span class="detail-value detail-stack">{item.details.stack}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Outcome</span>
-                    <span class="detail-value">{item.details.outcome}</span>
-                  </div>
+              <div class="commit-expanded">
+                <div class="detail-row">
+                  <span class="detail-label">Problem</span>
+                  <span class="detail-value">{item.details.problem}</span>
                 </div>
-              </details>
+                <div class="detail-row">
+                  <span class="detail-label">Approach</span>
+                  <span class="detail-value">{item.details.approach}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Stack</span>
+                  <span class="detail-value detail-stack">{item.details.stack}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Outcome</span>
+                  <span class="detail-value">{item.details.outcome}</span>
+                </div>
+              </div>
             )}
-          </div>
+          </details>
         ))}
       </div>
     ))}

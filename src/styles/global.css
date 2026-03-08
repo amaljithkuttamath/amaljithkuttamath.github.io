@@ -163,7 +163,7 @@ nav .logo {
 }
 
 nav .logo:hover {
-  color: var(--fg-muted);
+  color: var(--accent-color);
 }
 
 nav .logo.active {
@@ -186,7 +186,7 @@ nav .nav-links a {
 }
 
 nav .nav-links a:hover {
-  color: var(--fg);
+  color: var(--accent-color);
 }
 
 nav .nav-links a.active {
@@ -231,7 +231,7 @@ nav .nav-links a.active::after {
 }
 
 .post-item a:hover {
-  color: var(--fg-muted);
+  color: var(--accent-color);
 }
 
 .post-item time {
@@ -291,7 +291,7 @@ a.project-tile:hover {
 }
 
 a.project-tile:hover h3 {
-  color: var(--fg-muted);
+  color: var(--accent-color);
 }
 
 .project-tile h3 {
@@ -393,9 +393,28 @@ a.project-tile:hover h3 {
   background: var(--fg-faint);
 }
 
+/* Expandable project item — the whole row is clickable */
+.git-commit-expandable {
+  position: relative;
+}
+
+.git-commit-expandable summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.git-commit-expandable summary::-webkit-details-marker {
+  display: none;
+}
+
 .git-commit {
   position: relative;
   padding: 0.75rem 0;
+  transition: color var(--duration) var(--ease);
+}
+
+.git-commit:hover h3 {
+  color: var(--accent-color);
 }
 
 .git-commit::before {
@@ -415,12 +434,17 @@ a.project-tile:hover h3 {
   opacity: 0.7;
 }
 
+.git-commit-expandable[open] .git-commit::before {
+  opacity: 0.8;
+}
+
 .git-commit h3 {
   font-family: var(--font-sans);
   font-size: var(--text-item-title);
   font-weight: 500;
   margin: 0 0 0.25rem 0;
   color: var(--fg);
+  transition: color var(--duration) var(--ease);
 }
 
 .git-commit h3 a {
@@ -429,7 +453,7 @@ a.project-tile:hover h3 {
 }
 
 .git-commit h3 a:hover {
-  color: var(--fg-muted);
+  color: var(--accent-color);
 }
 
 .git-commit p {
@@ -445,43 +469,12 @@ a.project-tile:hover h3 {
   flex-wrap: wrap;
 }
 
-/* ── Expandable details ────────────────────────── */
-
-.commit-details {
-  margin-top: 0.625rem;
-}
-
-.commit-details summary {
-  font-family: var(--font-mono);
-  font-size: var(--text-label);
-  color: var(--fg-muted);
-  cursor: pointer;
-  letter-spacing: 0.03em;
-  transition: color var(--duration) var(--ease);
-  list-style: none;
-  user-select: none;
-}
-
-.commit-details summary::-webkit-details-marker {
-  display: none;
-}
-
-.commit-details summary::before {
-  content: '+ ';
-}
-
-.commit-details[open] summary::before {
-  content: '\2212  ';
-}
-
-.commit-details summary:hover {
-  color: var(--fg);
-}
-
-.details-grid {
-  margin-top: 0.75rem;
+/* Expanded details panel */
+.commit-expanded {
   border-left: 1px solid var(--fg-faint);
+  margin-left: 0;
   padding-left: 1rem;
+  padding-bottom: 0.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
@@ -552,7 +545,7 @@ footer a {
 }
 
 footer a:hover {
-  color: var(--fg);
+  color: var(--accent-color);
 }
 
 /* ── Post layout (article pages) ───────────────── */
@@ -613,7 +606,8 @@ footer a:hover {
 }
 
 .prose a:hover {
-  text-decoration-color: var(--fg-muted);
+  color: var(--accent-color);
+  text-decoration-color: var(--accent-color);
 }
 
 .prose code {
@@ -763,7 +757,7 @@ footer a:hover {
 }
 
 .section-header a:hover {
-  color: var(--fg);
+  color: var(--accent-color);
 }
 
 /* ── About page ────────────────────────────────── */
@@ -800,7 +794,8 @@ footer a:hover {
 }
 
 .about-content a:hover {
-  text-decoration-color: var(--fg-muted);
+  color: var(--accent-color);
+  text-decoration-color: var(--accent-color);
 }
 
 .about-content hr {
