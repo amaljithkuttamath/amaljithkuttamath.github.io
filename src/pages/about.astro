@@ -2,95 +2,153 @@
 import Base from '../layouts/Base.astro';
 ---
 
-<Base title="About | Amaljith Kuttamath" description="AI Engineer researching LLM trust and safety. Building tools for mechanistic interpretability and hallucination detection.">
-  <div class="about-content animate-in">
+<Base title="About | Amaljith Kuttamath" description="AI Engineer researching LLM trust, safety, and mechanistic interpretability. Building tooling for model evaluation and failure mode analysis.">
+  <article class="about-content animate-in">
     <h1>About</h1>
 
-    <p>
-      I'm an AI Engineer based in Arlington, VA, researching LLM trust and safety at the architectural level. I study how language models fail through mechanistic interpretability, hallucination detection, and failure mode analysis. Currently building <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer">Trust Bench</a>, an open-source tool for profiling LLM trustworthiness. At <a href="https://sorcero.com" target="_blank" rel="noopener noreferrer">Sorcero</a>, I build retrieval pipelines, knowledge graphs, and NLP tools for healthcare.
-    </p>
+    <section class="about-section">
+      <p>
+        I research how language models fail and build tooling to measure it. Right now that means <strong>Trust Bench</strong>, a framework for profiling LLM trustworthiness: extracting internal signals, evaluating across safety dimensions, and diagnosing failure modes specific to a deployment context. Before that, I spent years building retrieval pipelines and knowledge graphs for healthcare, where I developed methodology for measuring hallucination patterns in retrieval-augmented generation. That work is what pulled me toward the deeper question of what's actually happening inside these models.
+      </p>
+    </section>
 
-    <p>
-      Before Sorcero, I was a Senior NLP Research Fellow at George Mason's TraCCC, where I worked on applying language models to security research. Before that, I built enterprise data pipelines at INECTA, designed predictive maintenance systems at RadianArc, and wrote software at TCS. I got my start interning at ISRO, which is where I first realized I wanted to work on hard technical problems.
-    </p>
+    <section class="about-section">
+      <div class="section-header">
+        <h2>What I Work On</h2>
+      </div>
+      <ul class="focus-list">
+        <li><strong>LLM trust and safety:</strong> failure mode analysis, hallucination detection, mechanistic interpretability</li>
+        <li><strong>Evaluation systems:</strong> building frameworks that profile model behavior beyond standard benchmarks</li>
+        <li><strong>Retrieval and knowledge:</strong> RAG pipelines, knowledge graphs, measuring retrieval fidelity</li>
+      </ul>
+    </section>
 
-    <p>
-      I have an MS in Data Analytics from George Mason University and a BTech in Electrical Engineering from GITAM.
-    </p>
-
-    <h2>Tools I Use</h2>
-    <div class="skills-grid">
-      <div class="skill-group">
-        <h3>AI / ML</h3>
-        <p>PyTorch, Transformers, LangChain, LlamaIndex, spaCy, sentence-transformers</p>
+    <section class="about-section">
+      <div class="section-header">
+        <h2>Background</h2>
       </div>
-      <div class="skill-group">
-        <h3>Data</h3>
-        <p>Neo4j, Elasticsearch, PostgreSQL, Databricks, Spark</p>
-      </div>
-      <div class="skill-group">
-        <h3>Cloud</h3>
-        <p>Google Cloud (Vertex AI), Azure (Data Factory, Data Lake), AWS</p>
-      </div>
-      <div class="skill-group">
-        <h3>Languages</h3>
-        <p>Python, SQL, JavaScript, TypeScript</p>
-      </div>
-    </div>
-
-    <h2>Timeline</h2>
-    <div class="timeline">
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">AI Engineer</span>
-          <span class="timeline-company">Sorcero</span>
+      <p class="background-brief">Started at <a href="https://www.isro.gov.in" target="_blank" rel="noopener noreferrer">ISRO</a>. Co-founded <strong>RadianArc</strong>, where we built digital twins for predictive maintenance on industrial machinery. MS in Data Analytics from George Mason University, where my thesis focused on RAG systems for healthcare.</p>
+      <div class="credentials">
+        <div class="detail-row">
+          <span class="detail-label">Cert</span>
+          <span class="detail-value">Google Cloud Professional ML Engineer, 2024</span>
         </div>
-        <p class="timeline-desc">RAG pipelines, knowledge graphs, and NLP for healthcare</p>
-      </div>
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">Senior NLP Research Fellow</span>
-          <span class="timeline-company">George Mason TraCCC</span>
+        <div class="detail-row">
+          <span class="detail-label">Paper</span>
+          <span class="detail-value"><a href="https://doi.org/10.1097/QMH.0000000000000525" target="_blank" rel="noopener noreferrer">Predicting Risk of Lung Cancer</a>, Quality Management in Health Care</span>
         </div>
-        <p class="timeline-desc">Language models applied to security research</p>
       </div>
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">Data Engineer</span>
-          <span class="timeline-company">INECTA</span>
-        </div>
-        <p class="timeline-desc">50+ EDI pipelines on Azure and Databricks</p>
-      </div>
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">Data Scientist</span>
-          <span class="timeline-company">RadianArc</span>
-        </div>
-        <p class="timeline-desc">Predictive maintenance from industrial sensor data</p>
-      </div>
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">Software Engineer</span>
-          <span class="timeline-company">TCS</span>
-        </div>
-        <p class="timeline-desc">Enterprise software development</p>
-      </div>
-      <div class="timeline-item">
-        <div>
-          <span class="timeline-role">Intern</span>
-          <span class="timeline-company">ISRO</span>
-        </div>
-        <p class="timeline-desc">Where it started</p>
-      </div>
-    </div>
+    </section>
 
-    <p><a href="/resume.pdf" class="resume-link">Download resume (PDF)</a></p>
+    <section class="about-section about-cta">
+      <p>
+        Want to collaborate or talk shop? <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a> · <a href="/resume.pdf" class="resume-link">Resume (PDF)</a>
+      </p>
+      <div class="social-links">
+        <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+        <a href="https://x.com/amaljithkm" target="_blank" rel="noopener noreferrer">X</a>
+        <a href="https://substack.com/@amaljithk" target="_blank" rel="noopener noreferrer">Substack</a>
+      </div>
+    </section>
+  </article>
 
-    <hr />
-
-    <p class="about-cta">
-      If you want to collaborate or just talk shop, reach out.<br />
-      <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a>
-    </p>
-  </div>
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    "mainEntity": {
+      "@type": "Person",
+      "name": "Amaljith Kuttamath",
+      "jobTitle": "AI Engineer",
+      "url": "https://amaljithkuttamath.github.io",
+      "email": "kuttamath.amaljith@gmail.com",
+      "alumniOf": [
+        { "@type": "CollegeOrUniversity", "name": "George Mason University" },
+        { "@type": "CollegeOrUniversity", "name": "GITAM University" }
+      ],
+      "sameAs": [
+        "https://github.com/amaljithkuttamath",
+        "https://linkedin.com/in/amaljithk",
+        "https://x.com/amaljithkm",
+        "https://substack.com/@amaljithk"
+      ]
+    }
+  })} />
 </Base>
+
+<style>
+  .about-section {
+    margin-bottom: var(--space-xl);
+  }
+
+  .about-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .focus-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+
+  .focus-list li {
+    font-size: var(--text-body);
+    color: var(--fg-muted);
+    line-height: 1.6;
+  }
+
+  .background-brief {
+    margin-bottom: var(--space-md);
+  }
+
+  .credentials {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .credentials .detail-row {
+    padding: var(--space-xs) 0;
+    border-bottom: 1px solid var(--fg-faint);
+  }
+
+  .credentials .detail-row:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .credentials .detail-value a {
+    text-decoration: underline;
+    text-decoration-color: var(--fg-faint);
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+
+  .credentials .detail-value a:hover {
+    color: var(--accent-color);
+    text-decoration-color: var(--accent-color);
+  }
+
+  .about-cta p {
+    margin-bottom: var(--space-sm);
+  }
+
+  .social-links {
+    display: flex;
+    gap: var(--space-lg);
+  }
+
+  .social-links a {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .social-links a:hover {
+    color: var(--accent-color);
+  }
+</style>

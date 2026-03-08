@@ -5,27 +5,23 @@ date: "2025-03-07"
 description: "A visual, from-scratch deep dive into the algorithm behind GPT, Qwen, Llama, and every other LLM."
 ---
 
-> Based on Andrej Karpathy's [microgpt](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95). 200 lines of pure Python containing **the entire algorithm**. Everything else (CUDA kernels, distributed training, trillion-token datasets) is just efficiency. The soul of the machine fits on a napkin.
+> Based on Andrej Karpathy's [microgpt](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95). 200 lines of pure Python containing the core algorithm behind every modern LLM. The CUDA kernels, distributed training, and trillion-token datasets are engineering challenges on top of this foundation. But the mechanism itself fits on a napkin.
 
 > **Want to see it live?** [Open the interactive playground](/playground) and watch a tiny GPT learn to write names in your browser.
 
 ## 1. The Core Idea
 
-Every large language model (GPT-4, Claude, Llama, Qwen) runs the exact same algorithm:
+Every large language model (GPT-4, Claude, Llama, Qwen) runs the same core loop:
 
 ```
-THE ENTIRE ALGORITHM
-====================
-
-1. Read a LOT of text
-2. For each word, try to predict the NEXT word
+1. Read a lot of text
+2. For each token, predict the next one
 3. Measure how wrong you were
-4. Adjust your parameters to be LESS wrong next time
+4. Adjust parameters to be less wrong
 5. Repeat billions of times
-6. You now have ChatGPT
 ```
 
-That's it. That's the tweet. Now let's go deep.
+Simple to state, surprisingly deep to understand. Let's walk through each piece.
 
 ---
 
@@ -40,9 +36,7 @@ random.shuffle(docs)
 
 The model loads 32,000 human names ("emma", "olivia", "liam", "noah"), each treated as a tiny document.
 
-An LLM is a **statistical model of language**. It doesn't "understand" anything. It learns **patterns**. Feed it names and it learns what sequences of letters *look like* English names. Feed it the entire internet and it learns what sequences of words *look like* human knowledge.
-
-The **exact same algorithm** works at both ends of the spectrum. The only difference is how much data you pour in and how many parameters you give the model to absorb it.
+At its core, an LLM is a statistical model of language. It learns patterns: feed it names and it learns what sequences of letters *look like* English names. Feed it the entire internet and it learns what sequences of words *look like* human knowledge. Whether that constitutes "understanding" is an open question, and one I think about a lot. What's clear is that the same algorithm works at both ends of the spectrum. The only difference is how much data and how many parameters you give it.
 
 ---
 
@@ -56,9 +50,9 @@ BOS = len(uchars)                      # 26 = special token
 vocab_size = len(uchars) + 1           # 27 total tokens
 ```
 
-Neural networks speak **numbers**, not text. We need a translator. Map every unique symbol to an integer.
+Neural networks speak numbers, not text. So we need a mapping from every unique symbol to an integer.
 
-**BOS** = Beginning of Sequence. It's a special token that means "a new document starts here." Every LLM uses these special tokens. ChatGPT has `<|im_start|>` and `<|im_end|>`. They're invisible to you, but they structure every conversation.
+**BOS** (Beginning of Sequence) is a special token meaning "a new document starts here." Every LLM uses these structural tokens. ChatGPT has `<|im_start|>` and `<|im_end|>`. They're invisible to users, but they frame every conversation. When I first implemented this, it was surprising how much the model's behavior depends on getting these boundary tokens right.
 
 Production models like Qwen use **Byte Pair Encoding**, a smarter scheme that merges frequently occurring character pairs into single tokens. "understanding" becomes `[un, der, stand, ing]`: 4 tokens instead of 13 characters. Fewer tokens = faster processing.
 
@@ -68,9 +62,9 @@ Production models like Qwen use **Byte Pair Encoding**, a smarter scheme that me
 
 *The learning algorithm*
 
-This is the **most important section**. If you understand this, you understand how every neural network on Earth learns.
+This section is worth spending time on. If you understand autograd, you understand how every neural network learns.
 
-Every calculation the model performs is secretly recorded in a graph. Why? Because of **backpropagation**, the algorithm that answers:
+Every calculation the model performs is recorded in a computation graph. Why? Because of **backpropagation**, the algorithm that answers:
 
 > "If I wiggle each input slightly, how does the final output change?"
 
@@ -80,19 +74,17 @@ This is a **gradient**: the direction and amount to adjust each parameter.
 child.grad += local_grad * v.grad
 ```
 
-That single line is **the entire learning algorithm of deep learning**. The chain rule, applied recursively through a computation graph.
+That single line is the chain rule, applied recursively through a computation graph. It's the foundation of all gradient-based learning.
 
-The autograd engine is a **tape recorder for math**. It records every calculation, then plays the tape backwards to figure out how to improve. PyTorch, TensorFlow, JAX: they all do exactly this.
+I think of the autograd engine as a tape recorder for math. It records every calculation, then plays the tape backwards to figure out how to improve. PyTorch, TensorFlow, JAX all implement variations of this. The elegance here is that no matter how complex your model gets, learning reduces to this same backward pass.
 
 ---
 
 ## 5. The Transformer Architecture
 
-This is the **core of the model**, from "Attention Is All You Need" (Vaswani et al., 2017).
+This is the core of the model, from "Attention Is All You Need" (Vaswani et al., 2017).
 
 ### Attention
-
-*The key innovation*
 
 Imagine you're in a library. You have a **question** (Query). Every book has a **label** (Key) and **content** (Value). You compare your question to each label, then read mostly from the most relevant books.
 
@@ -106,30 +98,19 @@ The dot product measures similarity. Divide by `sqrt(head_dim)` to keep values s
 
 ### Multi-Head Attention
 
-Multiple attention heads run in parallel, each learning to look for different patterns. One might track vowels, another tracks position, another tracks repetition.
+Multiple attention heads run in parallel, each learning to look for different patterns. One might track vowels, another tracks position, another tracks repetition. Watching these patterns emerge during training is genuinely interesting. In the playground, you can see heads specialize within the first few hundred steps.
 
 ### The MLP
 
-*Where knowledge lives*
-
-```
-Attention lets tokens TALK TO EACH OTHER.
-The MLP lets each token THINK BY ITSELF.
-```
-
-The MLP expands the representation 4x, applies a non-linearity (ReLU), then compresses back. Research suggests this is where factual knowledge is stored.
+Attention lets tokens communicate with each other. The MLP lets each token process information independently. The MLP expands the representation 4x, applies a non-linearity (ReLU), then compresses back. There's evidence suggesting this is where factual knowledge gets stored (Meng et al., 2022), though the picture is more nuanced than "MLPs = memory." This is one of the open questions in mechanistic interpretability that I find most compelling.
 
 ### Residual Connections
 
-*The skip highway*
-
-Without residuals, gradients vanish after ~10 layers. With them, 80+ layer networks train successfully. The model learns what to **add** to the input, not what to replace it with.
+Without residual connections, gradients vanish after roughly 10 layers. With them, 80+ layer networks train successfully. The key insight: the model learns what to **add** to the existing representation, not what to replace it with. This framing matters for interpretability, because it means each layer's contribution can be studied independently.
 
 ---
 
 ## 6. Training
-
-*Going to school*
 
 ```python
 for step in range(num_steps):
@@ -149,16 +130,14 @@ The loss function is cross-entropy: "how surprised was the model by the truth?" 
 
 ## 7. Inference
 
-*The model speaks*
-
 ```python
 probs = softmax([l / temperature for l in logits])
 token_id = random.choices(range(vocab_size), weights=probs)[0]
 ```
 
-The model generates one token at a time, feeding each output back as input. **Temperature** controls randomness: low = deterministic and safe, high = creative and unpredictable. This is the same slider you see in ChatGPT and Claude.
+The model generates one token at a time, feeding each output back as input. **Temperature** controls randomness: low values make the model deterministic and safe, high values make it creative and unpredictable. This is the same slider you see in ChatGPT and Claude.
 
-**KV Cache** makes this fast. Instead of recomputing all past tokens every step, we cache their Key and Value vectors. This is why LLM inference is O(n) not O(n²) per new token.
+**KV Cache** makes this practical. Without it, generating each new token requires recomputing keys and values for every previous token. With caching, we store those vectors and only compute the new token's attention over them. The speedup is significant, especially for long sequences.
 
 *Try generating names yourself in the [playground](/playground).*
 
@@ -177,7 +156,7 @@ Same algorithm. Same architecture. Just more of everything:
 
 Key upgrades: **RoPE** (rotary position embeddings generalize to any sequence length), **GQA** (grouped query attention reduces KV cache 3-4x), **SwiGLU** (smoother activation, no dead neurons).
 
-What makes models good at reasoning isn't the architecture. It's **scale**, training on **reasoning examples**, **RLHF alignment**, and **reinforcement learning on correct answers**.
+What makes models good at reasoning isn't the architecture alone. It's scale, training on reasoning examples, RLHF alignment, and reinforcement learning on correct answers. The architecture provides the capacity. Everything else determines what fills it.
 
 ---
 
@@ -189,9 +168,9 @@ MODEL:  token → embed → { attention + MLP } × N → logits
 LOSS:   -log(prob of correct next token)
 LEARN:  loss.backward() → Adam updates all params
 INFER:  BOS → model → sample → feed back → repeat
-
-That's it. Everything else is engineering.
 ```
+
+The algorithm is simple. Making it work reliably at scale, understanding *why* it works, and figuring out when to trust its outputs are where the hard problems live. Those are the questions I'm most interested in.
 
 ---
 

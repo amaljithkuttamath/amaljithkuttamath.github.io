@@ -13,8 +13,8 @@ const formatDate = (date: string) =>
 const spotlight = [
   {
     title: 'Trust Bench',
-    desc: 'Open-source tool for profiling LLM trustworthiness. Extract trust signals from model internals, evaluate across safety dimensions, diagnose failures, and apply targeted improvements.',
-    tags: ['AI safety', 'interpretability', 'PyTorch', 'LLM evaluation'],
+    desc: 'Framework for profiling LLM trustworthiness. Extracts internal signals, evaluates across safety dimensions (truthfulness, fairness, robustness), diagnoses failure modes, and measures trust boundaries specific to deployment context.',
+    tags: ['AI safety', 'mechanistic interpretability', 'PyTorch', 'evaluation'],
     status: 'in progress',
     links: [
       { label: 'github', url: 'https://github.com/amaljithkuttamath/trust-bench' },
@@ -22,7 +22,7 @@ const spotlight = [
   },
   {
     title: 'Predicting Risk of Lung Cancer From Medical History',
-    desc: 'AUC 0.82 in lung cancer risk prediction using Electronic Health Records.',
+    desc: 'Peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records. Developed methodology for clinical risk modeling with structured EHR data.',
     journal: 'Quality Management in Health Care',
     year: 2025,
     tags: ['research', 'healthcare', 'machine learning'],
@@ -38,49 +38,49 @@ const proof = [
   {
     title: 'Healthcare RAG Pipeline',
     metric: '10K+ daily queries',
-    desc: 'Retrieval-augmented generation on Vertex AI for clinicians querying medical records and PubMed.',
-    tags: ['RAG', 'vertex ai', 'langchain'],
+    desc: 'Production RAG system for clinicians querying medical records and PubMed. Built hallucination-aware retrieval with domain-specific re-ranking.',
+    tags: ['RAG', 'vertex ai', 'hallucination detection'],
     details: {
-      problem: 'Clinicians need fast, accurate answers from medical records and research papers. Manual search across PubMed and internal records is slow and error-prone.',
-      approach: 'Retrieval-augmented generation pipeline on Google Cloud Vertex AI. Documents are chunked, embedded with multi-modal indexing, and stored for vector retrieval. Gemini Pro generates answers grounded in retrieved context.',
+      problem: 'Clinicians need accurate, grounded answers from medical records and research. Standard retrieval surfaces irrelevant context, leading to hallucinated outputs in clinical settings.',
+      approach: 'Retrieval-augmented generation on Vertex AI with hallucination-aware retrieval. Domain-specific re-ranking ensures clinical relevance. Measurement of retrieval fidelity across query types.',
       stack: 'Vertex AI, Gemini Pro, LangChain, LlamaIndex, Python',
-      outcome: 'Serves oncology-specific queries with domain-aware re-ranking. Handles 10,000+ daily queries across medical records and PubMed.',
+      outcome: 'Serves 10,000+ daily clinical queries. Developed methodology for measuring retrieval fidelity and hallucination rates in domain-specific RAG.',
     },
   },
   {
     title: 'Medical Knowledge Graph',
     metric: '5 entity types, cross-format search',
-    desc: 'Graph connecting diseases, drugs, treatments, and clinical trials with vector search.',
-    tags: ['neo4j', 'elasticsearch', 'embeddings'],
+    desc: 'Knowledge graph connecting diseases, drugs, treatments, and clinical trials. Powers retrieval grounding for the RAG system.',
+    tags: ['neo4j', 'knowledge graphs', 'embeddings'],
     details: {
-      problem: 'Medical knowledge is scattered across databases, papers, and records. Relationships between entities are lost in flat storage.',
-      approach: 'Graph schema in Neo4j mapping diseases, treatments, drugs, clinical trials, and expert opinions. Elasticsearch for full-text and vector search. Multi-modal embeddings for cross-format querying.',
+      problem: 'Medical knowledge is scattered across databases, papers, and records. Flat storage loses entity relationships critical for accurate retrieval.',
+      approach: 'Graph schema mapping diseases, treatments, drugs, clinical trials, and expert opinions. Multi-modal embeddings for cross-format querying. Provides structured grounding for RAG retrieval.',
       stack: 'Neo4j, Elasticsearch, Python, sentence-transformers',
-      outcome: 'Powers the retrieval layer of the RAG pipeline. Enables queries across text, structured data, and metadata in a single interface.',
+      outcome: 'Powers the retrieval grounding layer. Enables entity-aware queries across text, structured data, and metadata.',
     },
   },
   {
     title: 'LLM Fine-tuning System',
     metric: '25% lower inference cost',
-    desc: 'Production fine-tuning pipeline for Qwen2.5-3B with GRPO + LoRA, deployed via vLLM.',
-    tags: ['LLM', 'fine-tuning', 'vLLM'],
+    desc: 'Fine-tuning Qwen2.5-3B with GRPO + LoRA. Studied how reward-guided optimization changes model behavior at the output distribution level.',
+    tags: ['LLM', 'fine-tuning', 'GRPO', 'vLLM'],
     details: {
-      problem: 'Off-the-shelf models underperform on domain tasks. Fine-tuning at scale requires efficient training and serving infrastructure.',
+      problem: 'Off-the-shelf models underperform on domain tasks. Understanding how fine-tuning alters model behavior requires both training infrastructure and evaluation methodology.',
       approach: '4-bit quantization with LoRA adapters for memory-efficient training. GRPO for reward-guided optimization. vLLM for high-throughput inference with auto-scaling.',
       stack: 'PyTorch, Hugging Face, LoRA, vLLM, Python',
-      outcome: 'Fine-tuned 3B parameter model deployed to production, reducing inference costs by 25%.',
+      outcome: 'Deployed fine-tuned 3B parameter model to production, reducing inference costs by 25%. Developed evaluation pipeline for measuring behavioral shift pre/post fine-tuning.',
     },
   },
   {
     title: 'Drug Safety Sentiment Analysis',
     metric: 'early warning signals',
-    desc: 'Reads medical expert opinions and flags potential safety signals for pharmaceutical products.',
-    tags: ['NLP', 'classification', 'healthcare'],
+    desc: 'Transformer classifiers detecting sentiment shifts in medical expert opinions to flag safety signals for pharmaceutical products.',
+    tags: ['NLP', 'safety signals', 'healthcare'],
     details: {
-      problem: 'Pharmaceutical safety teams need to catch early warning signs in expert opinion records before adverse events escalate.',
-      approach: 'Fine-tuned transformer classifiers on domain-specific medical language. Detects sentiment shifts in expert opinions per drug per condition over time.',
+      problem: 'Pharmaceutical safety teams need to detect early warning signs in expert opinions before adverse events escalate. Manual review doesn\'t scale.',
+      approach: 'Fine-tuned transformer classifiers on domain-specific medical language. Tracks sentiment shifts per drug per condition over time. Measures classifier reliability against pharmacovigilance ground truth.',
       stack: 'PyTorch, Hugging Face Transformers, spaCy, Python',
-      outcome: 'Surfaces drugs with increasing negative sentiment for safety review. Feeds directly into existing pharmacovigilance workflows.',
+      outcome: 'Surfaces drugs with increasing negative sentiment for safety review. Integrated into existing pharmacovigilance workflows.',
     },
   },
   {
@@ -110,19 +110,19 @@ const proof = [
   {
     title: 'Predictive Maintenance',
     metric: '90%+ accuracy, 50% less downtime',
-    desc: 'Sensor data from industrial equipment, turned into early warnings before machines break down.',
-    tags: ['signal processing', 'time series', 'python'],
+    desc: 'Digital twin platform for industrial machinery. Anomaly detection and time-to-failure prediction from IoT sensor streams.',
+    tags: ['anomaly detection', 'time series', 'digital twins'],
     details: {
-      problem: "Unplanned machine downtime is expensive. Sensor data exists but isn't used for proactive maintenance.",
-      approach: 'Signal processing pipeline: ingest raw sensor data, clean and featurize, train models for anomaly detection and time-to-failure prediction.',
+      problem: "Unplanned machine downtime is expensive. Raw sensor data exists but isn't used for proactive failure prediction.",
+      approach: 'Signal processing pipeline ingesting IoT sensor streams. Feature extraction, anomaly detection, and time-to-failure models trained on historical failure data.',
       stack: 'Python, scikit-learn, Azure Data Lake, Power BI',
-      outcome: '90%+ anomaly detection accuracy. 95% time-to-failure prediction accuracy. KPI dashboards reduced machine downtime by 50%.',
+      outcome: '90%+ anomaly detection accuracy. 95% time-to-failure prediction. Reduced machine downtime by 50% across deployed sites.',
     },
   },
 ];
 ---
 
-<Base title="Work | Amaljith Kuttamath" description="Research, shipped systems, and technical writing.">
+<Base title="Work | Amaljith Kuttamath" description="Research in LLM trust and safety, production AI systems, and technical writing on mechanistic interpretability.">
 
   <div class="page-header animate-in">
     <h1>Work</h1>
@@ -164,7 +164,7 @@ const proof = [
         <h3>microGPT Playground</h3>
         <span class="playground-cta">try it live &rarr;</span>
       </div>
-      <p>Train a GPT in your browser. Watch attention, embeddings, and loss evolve in real time. Same architecture as ChatGPT, small enough to understand.</p>
+      <p>Train a transformer in your browser. Watch attention patterns, embeddings, and loss evolve in real time. Same architecture as frontier models, small enough to inspect every component.</p>
       <div class="tags">
         <span class="tag">interactive</span>
         <span class="tag">d3.js</span>
