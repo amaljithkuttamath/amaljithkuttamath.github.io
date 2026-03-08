@@ -1,25 +1,11 @@
 ---
 import Base from '../layouts/Base.astro';
 
-const allPosts = import.meta.glob('./writing/*.md', { eager: true }) as Record<string, any>;
+const allPosts = import.meta.glob('./work/*.md', { eager: true }) as Record<string, any>;
 const posts = Object.entries(allPosts)
-  .map(([path, mod]) => ({ ...mod, url: '/writing/' + path.replace('./writing/', '').replace('.md', '') }))
+  .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') }))
   .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime())
   .slice(0, 5);
-
-const projects = [
-  {
-    title: 'Trust Bench',
-    description: 'Open-source tool for profiling LLM trustworthiness. Extract trust signals, evaluate, diagnose failures, and improve models.',
-    tags: ['AI safety', 'interpretability', 'PyTorch'],
-  },
-  {
-    title: 'Understanding LLMs From Scratch',
-    description: 'A walkthrough of the transformer algorithm, from tokenization to inference, in 200 lines of Python.',
-    tags: ['deep learning', 'transformers'],
-    url: '/writing/understanding-llms',
-  },
-];
 
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
@@ -36,50 +22,103 @@ const formatDate = (date: string) =>
     <div class="status">Researching LLM trust & safety</div>
   </section>
 
-  <section class="home-section animate-in animate-in-delay-1">
-    <div class="section-header">
-      <h2>Writing</h2>
-      <a href="/writing">View all &rarr;</a>
-    </div>
-    {posts.length > 0 ? (
-      <ul class="post-list">
-        {posts.map((post) => (
-          <li class="post-item">
-            <a href={post.url}>{post.frontmatter.title}</a>
-            <time class="mono">{formatDate(post.frontmatter.date)}</time>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p class="empty-state">New posts coming soon.</p>
-    )}
+  <section class="featured animate-in animate-in-delay-1">
+    <a href="/playground" class="featured-card">
+      <span class="featured-eyebrow">Interactive</span>
+      <h2>microGPT Playground</h2>
+      <p>Watch a tiny GPT learn to write names — live in your browser. Same architecture as ChatGPT, small enough to understand.</p>
+      <span class="featured-cta">Open playground &rarr;</span>
+    </a>
   </section>
 
   <section class="home-section animate-in animate-in-delay-2">
     <div class="section-header">
-      <h2>Projects</h2>
-      <a href="/projects">View all &rarr;</a>
+      <h2>Recent Work</h2>
+      <a href="/work">View all &rarr;</a>
     </div>
-    <div class="project-grid">
-      {projects.map((project) =>
-        project.url ? (
-          <a href={project.url} class="project-tile">
-            <h3>{project.title}</h3>
-            <p>{project.description}</p>
-            <div class="tags">
-              {project.tags.map((tag) => <span class="tag">{tag}</span>)}
-            </div>
-          </a>
-        ) : (
-          <div class="project-tile">
-            <h3>{project.title}</h3>
-            <p>{project.description}</p>
-            <div class="tags">
-              {project.tags.map((tag) => <span class="tag">{tag}</span>)}
-            </div>
-          </div>
-        )
-      )}
-    </div>
+    <ul class="post-list">
+      {posts.map((post) => (
+        <li class="post-item">
+          <a href={post.url}>{post.frontmatter.title}</a>
+          <time class="mono">{formatDate(post.frontmatter.date)}</time>
+        </li>
+      ))}
+      <li class="post-item">
+        <a href="/work#healthcare-rag-pipeline">Healthcare RAG Pipeline</a>
+        <span class="mono project-tag-inline">RAG &middot; vertex ai</span>
+      </li>
+      <li class="post-item">
+        <a href="/work#medical-knowledge-graph">Medical Knowledge Graph</a>
+        <span class="mono project-tag-inline">neo4j &middot; embeddings</span>
+      </li>
+      <li class="post-item">
+        <a href="/work#drug-safety-sentiment-analysis">Drug Safety Sentiment Analysis</a>
+        <span class="mono project-tag-inline">NLP &middot; healthcare</span>
+      </li>
+    </ul>
   </section>
 </Base>
+
+<style>
+  .featured {
+    margin-bottom: var(--space-3xl);
+  }
+
+  .featured-card {
+    display: block;
+    padding: var(--space-xl) var(--space-lg);
+    border: 1px solid var(--fg-faint);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+
+  .featured-card:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-elevated);
+  }
+
+  .featured-eyebrow {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .featured-card h2 {
+    font-family: var(--font-serif);
+    font-size: var(--text-section);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0.5rem 0;
+  }
+
+  .featured-card p {
+    color: var(--fg-muted);
+    font-size: var(--text-body);
+    line-height: 1.7;
+    max-width: 520px;
+    margin-bottom: var(--space-md);
+  }
+
+  .featured-cta {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--accent-color);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .featured-card:hover .featured-cta {
+    color: var(--accent-color);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .project-tag-inline {
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+</style>
