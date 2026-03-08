@@ -1,0 +1,89 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+  ogImage?: string;
+}
+
+const { title, description = 'AI Engineer. Building things that think.', ogImage } = Astro.props;
+const currentPath = Astro.url.pathname;
+const canonicalURL = new URL(currentPath, Astro.site);
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content={description} />
+  <meta name="author" content="Amaljith Kuttamath" />
+  <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
+  <link rel="canonical" href={canonicalURL} />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content={canonicalURL} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  {ogImage && <meta property="og:image" content={new URL(ogImage, Astro.site)} />}
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@amaljithkm" />
+  <meta name="twitter:title" content={title} />
+  <meta name="twitter:description" content={description} />
+  {ogImage && <meta name="twitter:image" content={new URL(ogImage, Astro.site)} />}
+
+  <title>{title}</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="sitemap" href="/sitemap-index.xml" />
+
+  <!-- JSON-LD structured data -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "Amaljith Kuttamath",
+    "url": "https://amaljithkuttamath.github.io",
+    "jobTitle": "AI Engineer",
+    "worksFor": { "@type": "Organization", "name": "Sorcero" },
+    "sameAs": [
+      "https://github.com/amaljithkuttamath",
+      "https://linkedin.com/in/amaljithk",
+      "https://x.com/amaljithkm"
+    ]
+  })} />
+
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <div class="container">
+    <nav>
+      <a href="/" class="logo" class:list={[{ active: currentPath === '/' }]} aria-label="Home">AK</a>
+      <div class="nav-links">
+        <a href="/writing" class:list={[{ active: currentPath.startsWith('/writing') }]}>writing</a>
+        <a href="/projects" class:list={[{ active: currentPath === '/projects' || currentPath === '/projects/' }]}>projects</a>
+        <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
+      </div>
+    </nav>
+
+    <main id="main">
+      <slot />
+    </main>
+
+    <footer>
+      <div class="footer-links">
+        <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer" aria-label="GitHub (opens in new tab)">github</a>
+        <a href="https://linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn (opens in new tab)">linkedin</a>
+        <a href="https://x.com/amaljithkm" target="_blank" rel="noopener noreferrer" aria-label="X / Twitter (opens in new tab)">x</a>
+        <a href="mailto:amaljithkuttamath@gmail.com" aria-label="Send email">email</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
+
+<style is:global>
+  @import '../styles/global.css';
+</style>

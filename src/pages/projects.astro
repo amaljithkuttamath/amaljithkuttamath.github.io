@@ -1,0 +1,150 @@
+---
+import Base from '../layouts/Base.astro';
+
+const branches = [
+  {
+    name: 'ai/nlp',
+    items: [
+      {
+        title: 'Healthcare RAG Pipeline',
+        desc: 'A retrieval system that helps clinicians query medical records and PubMed literature in natural language.',
+        tags: ['RAG', 'vertex ai', 'langchain', 'llamaindex'],
+        details: {
+          problem: 'Clinicians need fast, accurate answers from medical records and research papers. Manual search across PubMed and internal records is slow and error-prone.',
+          approach: 'Retrieval-augmented generation pipeline on Google Cloud Vertex AI. Documents are chunked, embedded with multi-modal indexing, and stored for vector retrieval. Gemini Pro generates answers grounded in retrieved context.',
+          stack: 'Vertex AI, Gemini Pro, LangChain, LlamaIndex, Python',
+          outcome: 'Serves oncology-specific queries with domain-aware re-ranking. Handles 10,000+ daily queries across medical records and PubMed.',
+        },
+      },
+      {
+        title: 'Medical Knowledge Graph',
+        desc: 'A graph connecting diseases, drugs, treatments, and clinical trials — making relationships between medical concepts searchable.',
+        tags: ['neo4j', 'elasticsearch', 'embeddings'],
+        details: {
+          problem: 'Medical knowledge is scattered across databases, papers, and records. Relationships between entities (drug → treats → disease → has trial) are lost in flat storage.',
+          approach: 'Graph schema in Neo4j mapping diseases, treatments, drugs, clinical trials, and expert opinions as nodes and edges. Elasticsearch for full-text and vector search. Multi-modal embeddings for cross-format querying.',
+          stack: 'Neo4j, Elasticsearch, Python, sentence-transformers',
+          outcome: 'Powers the retrieval layer of the RAG pipeline. Enables queries across text, structured data, and metadata in a single interface.',
+        },
+      },
+      {
+        title: 'Drug Safety Sentiment Analysis',
+        desc: 'Reads medical expert opinions and flags potential safety signals for pharmaceutical products.',
+        tags: ['NLP', 'classification', 'healthcare'],
+        details: {
+          problem: 'Pharmaceutical safety teams need to catch early warning signs in expert opinion records before adverse events escalate.',
+          approach: 'Fine-tuned transformer classifiers on domain-specific medical language. Detects sentiment shifts in expert opinions per drug per condition over time.',
+          stack: 'PyTorch, Hugging Face Transformers, spaCy, Python',
+          outcome: 'Surfaces drugs with increasing negative sentiment for safety review. Feeds directly into existing pharmacovigilance workflows.',
+        },
+      },
+      {
+        title: 'NL-to-Insights',
+        desc: 'Ask a question in plain English about your inventory, get back a chart.',
+        tags: ['RAG', 'GPT', 'plotly'],
+        details: {
+          problem: 'Warehouse managers need inventory analytics but can\'t write SQL. Analysts become bottlenecks for routine data questions.',
+          approach: 'Natural language → SQL translation via GPT-3.5 Turbo. Queries execute against inventory and sales databases. Results render as interactive Plotly charts.',
+          stack: 'GPT-3.5 Turbo, Plotly, PostgreSQL, Python, FastAPI',
+          outcome: 'Used for demand forecasting across 5,000+ SKUs. Eliminated analyst dependency for standard inventory queries.',
+        },
+      },
+    ],
+  },
+  {
+    name: 'data-engineering',
+    items: [
+      {
+        title: 'EDI Pipelines',
+        desc: 'Over 50 data pipelines moving business data between ERP systems, warehouses, and reporting tools.',
+        tags: ['azure', 'databricks', 'ETL'],
+        details: {
+          problem: 'Business partners exchange data via EDI (Electronic Data Interchange) — a standardized-in-theory format that varies wildly in practice. Data needs cleaning, transformation, and routing to downstream systems.',
+          approach: 'Azure Data Factory orchestrates ingestion and routing. Databricks handles transformation, schema normalization, and quality checks.',
+          stack: 'Azure Data Factory, Databricks, Azure Data Lake, Python, SQL',
+          outcome: 'Processed over 2TB of transaction data. Connected ERP systems, warehouses, and reporting tools into a single pipeline.',
+        },
+      },
+      {
+        title: 'Predictive Maintenance',
+        desc: 'Sensor data from industrial equipment, turned into early warnings before machines break down.',
+        tags: ['signal processing', 'time series', 'python'],
+        details: {
+          problem: 'Unplanned machine downtime is expensive. Sensor data exists but isn\'t used for proactive maintenance.',
+          approach: 'Signal processing pipeline: ingest raw sensor data, clean and featurize, train models for anomaly detection and time-to-failure prediction.',
+          stack: 'Python, scikit-learn, Azure Data Lake, Power BI',
+          outcome: '90%+ anomaly detection accuracy. 95% time-to-failure prediction accuracy. KPI dashboards reduced machine downtime by 50%.',
+        },
+      },
+    ],
+  },
+  {
+    name: 'writing',
+    items: [
+      {
+        title: 'Understanding LLMs From Scratch',
+        desc: 'How large language models work — from raw text to trained model — in 200 lines of Python.',
+        tags: ['deep learning', 'transformers'],
+        url: '/writing/understanding-llms',
+        details: {
+          problem: 'Most LLM explanations are either too abstract or assume deep ML knowledge. Needed a middle-ground walkthrough.',
+          approach: 'Build a working transformer from scratch. Cover tokenization, embeddings, attention, backpropagation, training, and inference with code and ASCII diagrams.',
+          stack: 'Python, PyTorch',
+          outcome: 'Complete working implementation with explanations aimed at people who want to understand the mechanics, not just the API.',
+        },
+      },
+    ],
+  },
+];
+---
+
+<Base title="Projects — Amaljith Kuttamath" description="AI/NLP projects, data engineering pipelines, and technical writing.">
+  <div class="page-header animate-in">
+    <h1>Projects</h1>
+    <p class="subtitle">Things I've built, organized the way I think about them.</p>
+  </div>
+
+  <div class="git-tree animate-in animate-in-delay-1">
+    {branches.map((branch) => (
+      <div class="git-branch">
+        <div class="branch-label">{branch.name}</div>
+        {branch.items.map((item) => (
+          <div class="git-commit">
+            <h3>
+              {item.url
+                ? <a href={item.url}>{item.title}</a>
+                : item.title}
+            </h3>
+            <p>{item.desc}</p>
+            <div class="tags">
+              {item.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+            {item.details && (
+              <details class="commit-details">
+                <summary>read more</summary>
+                <div class="details-grid">
+                  <div class="detail-row">
+                    <span class="detail-label">Problem</span>
+                    <span class="detail-value">{item.details.problem}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">Approach</span>
+                    <span class="detail-value">{item.details.approach}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">Stack</span>
+                    <span class="detail-value detail-stack">{item.details.stack}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">Outcome</span>
+                    <span class="detail-value">{item.details.outcome}</span>
+                  </div>
+                </div>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+    ))}
+  </div>
+</Base>

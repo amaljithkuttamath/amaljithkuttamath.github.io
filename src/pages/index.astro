@@ -1,0 +1,90 @@
+---
+import Base from '../layouts/Base.astro';
+
+const allPosts = import.meta.glob('./writing/*.md', { eager: true }) as Record<string, any>;
+const posts = Object.entries(allPosts)
+  .map(([path, mod]) => ({ ...mod, url: '/writing/' + path.replace('./writing/', '').replace('.md', '') }))
+  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime())
+  .slice(0, 5);
+
+const projects = [
+  {
+    title: 'Healthcare RAG Pipeline',
+    description: 'Helping doctors find answers in medical literature and patient records using retrieval-augmented generation.',
+    tags: ['RAG', 'vertex ai'],
+  },
+  {
+    title: 'Medical Knowledge Graph',
+    description: 'Connecting diseases, treatments, and clinical trials in a searchable graph that powers downstream AI.',
+    tags: ['neo4j', 'embeddings'],
+  },
+  {
+    title: 'Understanding LLMs From Scratch',
+    description: 'A walkthrough of the transformer algorithm — from tokenization to inference — in 200 lines of Python.',
+    tags: ['deep learning', 'transformers'],
+    url: '/writing/understanding-llms',
+  },
+];
+
+const formatDate = (date: string) =>
+  new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+---
+
+<Base title="Amaljith Kuttamath">
+  <section class="hero animate-in">
+    <h1>Amaljith Kuttamath</h1>
+    <p class="tagline">
+      AI Engineer building systems that help healthcare professionals
+      find the right information at the right time. Currently at Sorcero,
+      working on RAG pipelines and knowledge graphs for medical data.
+    </p>
+    <div class="status">Building AI for healthcare</div>
+  </section>
+
+  <section class="home-section animate-in animate-in-delay-1">
+    <div class="section-header">
+      <h2>Writing</h2>
+      <a href="/writing">View all &rarr;</a>
+    </div>
+    {posts.length > 0 ? (
+      <ul class="post-list">
+        {posts.map((post) => (
+          <li class="post-item">
+            <a href={post.url}>{post.frontmatter.title}</a>
+            <time class="mono">{formatDate(post.frontmatter.date)}</time>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p class="empty-state">New posts coming soon.</p>
+    )}
+  </section>
+
+  <section class="home-section animate-in animate-in-delay-2">
+    <div class="section-header">
+      <h2>Projects</h2>
+      <a href="/projects">View all &rarr;</a>
+    </div>
+    <div class="project-grid">
+      {projects.map((project) =>
+        project.url ? (
+          <a href={project.url} class="project-tile">
+            <h3>{project.title}</h3>
+            <p>{project.description}</p>
+            <div class="tags">
+              {project.tags.map((tag) => <span class="tag">{tag}</span>)}
+            </div>
+          </a>
+        ) : (
+          <div class="project-tile">
+            <h3>{project.title}</h3>
+            <p>{project.description}</p>
+            <div class="tags">
+              {project.tags.map((tag) => <span class="tag">{tag}</span>)}
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  </section>
+</Base>

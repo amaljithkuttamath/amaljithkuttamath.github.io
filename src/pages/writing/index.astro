@@ -1,0 +1,31 @@
+---
+import Base from '../../layouts/Base.astro';
+
+const allPosts = import.meta.glob('./*.md', { eager: true }) as Record<string, any>;
+const posts = Object.entries(allPosts)
+  .map(([path, mod]) => ({ ...mod, url: '/writing/' + path.replace('./', '').replace('.md', '') }))
+  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
+
+const formatDate = (date: string) =>
+  new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+---
+
+<Base title="Writing — Amaljith Kuttamath" description="Deep dives, notes, and things I'm thinking about.">
+  <div class="page-header animate-in">
+    <h1>Writing</h1>
+    <p class="subtitle">Deep dives, notes, and things I'm thinking about.</p>
+  </div>
+
+  {posts.length > 0 ? (
+    <ul class="post-list animate-in animate-in-delay-1">
+      {posts.map((post) => (
+        <li class="post-item">
+          <a href={post.url}>{post.frontmatter.title}</a>
+          <time class="mono">{formatDate(post.frontmatter.date)}</time>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p class="empty-state animate-in animate-in-delay-1">No posts yet. Check back soon.</p>
+  )}
+</Base>
