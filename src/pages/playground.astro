@@ -119,13 +119,26 @@ import Base from '../layouts/Base.astro';
   :global(.ctrl-row) {
     display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   }
-  :global(.ctrl-section) {
+  :global(.ctrl-details) {
     border-top: 1px solid var(--fg-faint); padding-top: 8px;
   }
-  :global(.ctrl-heading) {
+  :global(.ctrl-details[open]) {
+    padding-bottom: 4px;
+  }
+  :global(.ctrl-summary) {
     font-size: var(--text-label); font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.06em; margin-bottom: 8px; color: var(--fg);
+    cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
   }
+  :global(.ctrl-summary::-webkit-details-marker) { display: none; }
+  :global(.ctrl-summary::before) {
+    content: '\25B6'; font-size: 0.6rem; color: var(--fg-muted);
+    transition: transform 0.15s var(--ease);
+  }
+  :global(.ctrl-details[open] > .ctrl-summary::before) {
+    transform: rotate(90deg);
+  }
+  :global(.ctrl-summary:hover) { color: var(--accent-color); }
   :global(.ctrl-grid) {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;
   }
@@ -718,29 +731,29 @@ function init(){
       '<button class="pg-btn" id="btn-reset" style="background:var(--fg-muted)">Reset</button>'+
       '<select class="pg-select" id="dataset-select"><option value="builtin">Names (500)</option><option value="custom">Custom</option></select>'+
     '</div>'+
-    '<div class="ctrl-section">'+
-      '<div class="ctrl-heading">Training</div>'+
+    '<details class="ctrl-details" open>'+
+      '<summary class="ctrl-summary">Training</summary>'+
       '<div class="ctrl-grid">'+
         '<label class="pg-knob"><span class="knob-name">Speed</span><span class="knob-desc">Steps per frame. Higher = faster, less detail.</span><span class="knob-control"><input type="range" id="speed" min="1" max="50" value="10"><span class="knob-val" id="speed-val">10</span></span></label>'+
         '<label class="pg-knob"><span class="knob-name">Learning rate</span><span class="knob-desc">How fast the model learns. Too high = unstable.</span><span class="knob-control"><input type="range" id="lr-slider" min="1" max="50" value="10"><span class="knob-val" id="lr-val">0.010</span></span></label>'+
         '<label class="pg-knob"><span class="knob-name">Steps</span><span class="knob-desc">Total training iterations. More = better results.</span><span class="knob-control"><input type="number" id="num-steps" class="pg-input" value="1000" min="100" max="10000" step="100"></span></label>'+
       '</div>'+
-    '</div>'+
-    '<div class="ctrl-section">'+
-      '<div class="ctrl-heading">Model architecture <span style="font-weight:400;color:var(--fg-muted)">(change, then hit Reset)</span></div>'+
+    '</details>'+
+    '<details class="ctrl-details">'+
+      '<summary class="ctrl-summary">Model architecture <span style="font-weight:400;color:var(--fg-muted)">(change, then hit Reset)</span></summary>'+
       '<div class="ctrl-grid">'+
         '<label class="pg-knob"><span class="knob-name">Embedding dim</span><span class="knob-desc">Numbers per character. Higher = richer, slower.</span><span class="knob-control"><input type="number" id="emb-dim" class="pg-input" value="16" min="4" max="64" step="4"></span></label>'+
         '<label class="pg-knob"><span class="knob-name">Attention heads</span><span class="knob-desc">Parallel attention patterns. Each looks for something different.</span><span class="knob-control"><input type="number" id="num-heads" class="pg-input" value="4" min="1" max="8" step="1"></span></label>'+
         '<label class="pg-knob"><span class="knob-name">Context window</span><span class="knob-desc">How many characters the model can look back at.</span><span class="knob-control"><input type="number" id="block-size" class="pg-input" value="16" min="4" max="32" step="4"></span></label>'+
         '<label class="pg-knob"><span class="knob-name">Layers</span><span class="knob-desc">Transformer blocks stacked. More = deeper thinking.</span><span class="knob-control"><input type="number" id="num-layers" class="pg-input" value="1" min="1" max="4" step="1"></span></label>'+
       '</div>'+
-    '</div>'+
-    '<div class="ctrl-section">'+
-      '<div class="ctrl-heading">Generation</div>'+
+    '</details>'+
+    '<details class="ctrl-details">'+
+      '<summary class="ctrl-summary">Generation</summary>'+
       '<div class="ctrl-grid">'+
         '<label class="pg-knob"><span class="knob-name">Temperature</span><span class="knob-desc">Randomness of generated names. Low = safe, high = creative.</span><span class="knob-control"><input type="range" id="temperature" min="1" max="20" value="10"><span class="knob-val" id="temp-val">0.50</span></span></label>'+
       '</div>'+
-    '</div>';
+    '</details>';
 
   document.getElementById('dataset-select').addEventListener('change',function(e){
     document.getElementById('custom-text').style.display=e.target.value==='custom'?'block':'none';
