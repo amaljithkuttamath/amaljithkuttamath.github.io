@@ -33,25 +33,35 @@ import Base from '../layouts/Base.astro';
 
       <div class="card card-wide" id="card-input">
         <div class="card-step">1</div>
-        <div class="card-title">Turning Characters into Numbers <span class="card-hint">The model represents each character as a list of 16 numbers called an embedding</span></div>
+        <div class="card-title">Turning Characters into Numbers <span class="card-hint">The model represents each character as a list of 16 numbers called an embedding. <code>te = wte[token_id]; pe = wpe[position]</code></span></div>
         <div id="input-content"></div>
+      </div>
+
+      <div class="flow-connector" id="flow-1-2">
+        <span class="flow-arrow">&#x2193;</span>
+        <span class="flow-text">Combined embedding feeds into attention. <code>x = token_emb + pos_emb</code></span>
       </div>
 
       <div class="card card-wide" id="card-attention">
         <div class="card-step">2</div>
-        <div class="card-title">Which Characters Matter? <span class="card-hint">The attention mechanism decides which earlier characters are relevant for predicting the next one</span></div>
+        <div class="card-title">Which Characters Matter? <span class="card-hint">The attention mechanism decides which earlier characters are relevant for predicting the next one. <code>score = (Q . K) / sqrt(d); attn = softmax(score)</code></span></div>
         <div id="attn-content"></div>
+      </div>
+
+      <div class="flow-connector" id="flow-2-3">
+        <span class="flow-arrow">&#x2193;</span>
+        <span class="flow-text">Attention output + residual feeds into MLP and then to output. <code>x = attn(x) + x</code></span>
       </div>
 
       <div class="card" id="card-mlp">
         <div class="card-step">3</div>
-        <div class="card-title">Thinking It Through <span class="card-hint">64 neurons activate or stay silent based on the patterns they detect</span></div>
+        <div class="card-title">Thinking It Through <span class="card-hint"><code>h = relu(x @ W1); out = h @ W2</code></span></div>
         <div id="mlp-content"></div>
       </div>
 
       <div class="card" id="card-output">
         <div class="card-step">4</div>
-        <div class="card-title">Making a Prediction <span class="card-hint">The model assigns a probability to every possible next character</span></div>
+        <div class="card-title">Making a Prediction <span class="card-hint"><code>probs = softmax(x @ lm_head)</code></span></div>
         <svg id="output-svg"></svg>
         <div id="output-verdict" class="verdict"></div>
       </div>
@@ -59,37 +69,37 @@ import Base from '../layouts/Base.astro';
       <!-- BACKWARD PASS: learning from mistakes -->
       <div class="phase-label" id="phase-backward">
         <span class="phase-tag phase-tag-back">Backward Pass</span>
-        <span class="phase-desc">Error flows back through the model. Each component learns how to improve</span>
+        <span class="phase-desc">Compare prediction to truth. <code>loss = -log(prob[correct])</code>. Error flows back through every layer.</span>
         <span class="phase-arrow">&#x2191;</span>
       </div>
 
       <div class="card" id="card-loss">
         <div class="card-step" style="background:#6a3">5</div>
-        <div class="card-title">How Wrong Was It? <span class="card-hint">The loss measures the gap between what the model predicted and the right answer</span></div>
+        <div class="card-title">How Wrong Was It? <span class="card-hint"><code>loss.backward()</code> computes gradients for all weights</span></div>
         <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
           <div style="flex:1;min-width:250px"><svg id="loss-svg"></svg></div>
           <div id="loss-explain" class="loss-explain"></div>
         </div>
       </div>
 
-      <div class="card card-wide" id="card-update">
+      <div class="card" id="card-update">
         <div class="card-step" style="background:#6a3">6</div>
-        <div class="card-title">Learning from the Mistake <span class="card-hint">The optimizer adjusts each of the <span id="param-count-inline"></span> weights to make the model a little less wrong next time</span></div>
+        <div class="card-title">Learning from the Mistake <span class="card-hint"><code>param -= lr * grad / (sqrt(v) + eps)</code> across <span id="param-count-inline"></span> weights</span></div>
         <div id="update-content" class="stats-grid"></div>
       </div>
 
       <!-- RESULT -->
       <div class="phase-label">
         <span class="phase-tag phase-tag-result">Result</span>
-        <span class="phase-desc">What can the model generate after this training?</span>
+        <span class="phase-desc">Weights updated. The model tries again next step, slightly less wrong.</span>
       </div>
 
-      <div class="card" id="card-samples">
-        <div class="card-title">Generated Names <span class="card-hint">These names are invented from scratch, not copied from training data</span></div>
+      <div class="card card-wide" id="card-samples">
+        <div class="card-title">Generated Names <span class="card-hint">Invented from scratch, not copied from training data</span></div>
         <pre id="samples-content" class="samples"></pre>
       </div>
 
-      <div class="card" id="card-stats">
+      <div class="card card-wide" id="card-stats">
         <div class="card-title">Model Stats</div>
         <div id="stats-content" class="stats-grid"></div>
       </div>
@@ -210,6 +220,45 @@ import Base from '../layouts/Base.astro';
     float: left; margin-right: 8px; margin-top: 1px;
   }
 
+  /* Flow connectors between cards */
+  .flow-connector {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .flow-arrow {
+    color: var(--accent-color);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+  .flow-text {
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+  .flow-text code {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    background: var(--bg-elevated);
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .flow-connector-back .flow-arrow {
+    color: #6a3;
+  }
+  .card-hint code {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    background: var(--bg);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
   /* Phase labels between cards */
   .phase-label {
     grid-column: 1 / -1;
@@ -266,13 +315,13 @@ import Base from '../layouts/Base.astro';
   #card-attention { min-height: 220px; }
 
   /* MLP */
-  :global(.mlp-bar-row) { display: flex; gap: 1px; align-items: flex-end; height: 80px; }
-  :global(.mlp-bar) { width: 6px; border-radius: 1px 1px 0 0; }
-  :global(.mlp-info) { font-size: 0.75rem; color: var(--fg-muted); margin-top: 6px; }
+  :global(.mlp-grid) { display: inline-grid; grid-template-columns: repeat(8, 18px); gap: 2px; }
+  :global(.mlp-cell) { width: 18px; height: 18px; border-radius: 2px; }
+  :global(.mlp-info) { font-size: 0.75rem; color: var(--fg-muted); margin-top: 8px; line-height: 1.5; }
 
   /* Output */
-  #card-output { min-height: 220px; }
-  #card-output svg { width: 100%; height: 150px; }
+  #card-output { min-height: 260px; }
+  #card-output svg { width: 100%; height: 190px; }
   .verdict {
     font-size: var(--text-small);
     margin-top: 6px;
@@ -620,18 +669,44 @@ function updateAttn(){
 function updateMLP(){
   var el=document.getElementById('mlp-content');
   if(!lastInter||!lastInter.layers[0]){el.innerHTML='<span style="color:var(--fg-muted);font-size:0.8rem">Waiting...</span>';return}
+  var pre=lastInter.layers[0].preRelu;
   var post=lastInter.layers[0].postRelu;
   var mx=0;for(var i=0;i<post.length;i++)if(post[i]>mx)mx=post[i];
   mx=mx||1;
   var active=0;for(var i=0;i<post.length;i++)if(post[i]>0)active++;
-  var h='<div class="mlp-bar-row">';
-  for(var i=0;i<post.length;i++){
-    var ht=Math.round(post[i]/mx*70);
-    var col=post[i]>0?'var(--accent-color)':'var(--fg-faint)';
-    h+='<div class="mlp-bar" style="height:'+Math.max(1,ht)+'px;background:'+col+'"></div>';
+  // Heatmap grid: 8 rows x 8 cols for 64 neurons
+  var cols=8,rows=Math.ceil(post.length/cols);
+  var cell=20;
+  var h='<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">';
+  // Pre-ReLU heatmap
+  h+='<div><div style="font-size:0.7rem;margin-bottom:4px;color:var(--fg-muted)"><strong>Before ReLU</strong> (raw)</div>';
+  h+='<div class="mlp-grid">';
+  var preMx=0;for(var i=0;i<pre.length;i++)if(Math.abs(pre[i])>preMx)preMx=Math.abs(pre[i]);
+  preMx=preMx||1;
+  for(var i=0;i<pre.length;i++){
+    var norm=pre[i]/preMx;
+    var t2=Math.max(0,Math.min(1,(norm+1)/2));
+    var rv=Math.round(68+t2*187),gv=Math.round(1+t2*207),bv=Math.round(84+t2*(230-84)*(.5+t2*.5));
+    if(t2>.6){rv=Math.round(94+t2*161);gv=Math.round(201+t2*28);bv=Math.round(98-t2*60)}
+    h+='<div class="mlp-cell" style="background:rgb('+rv+','+gv+','+bv+')" title="neuron '+i+': '+pre[i].toFixed(3)+'"></div>';
+    if((i+1)%cols===0)h+='<br>';
   }
+  h+='</div></div>';
+  // Post-ReLU heatmap
+  h+='<div><div style="font-size:0.7rem;margin-bottom:4px;color:var(--fg-muted)"><strong>After ReLU</strong> (active only)</div>';
+  h+='<div class="mlp-grid">';
+  for(var i=0;i<post.length;i++){
+    var norm=post[i]/mx;
+    var t2=Math.max(0,Math.min(1,norm));
+    var rv,gv,bv;
+    if(post[i]===0){rv=40;gv=40;bv=45;}
+    else{rv=Math.round(68+t2*187);gv=Math.round(1+t2*207);bv=Math.round(84+t2*(230-84)*(.5+t2*.5));if(t2>.6){rv=Math.round(94+t2*161);gv=Math.round(201+t2*28);bv=Math.round(98-t2*60)}}
+    h+='<div class="mlp-cell" style="background:rgb('+rv+','+gv+','+bv+')" title="neuron '+i+': '+post[i].toFixed(3)+'"></div>';
+    if((i+1)%cols===0)h+='<br>';
+  }
+  h+='</div></div>';
   h+='</div>';
-  h+='<div class="mlp-info">'+active+' of '+post.length+' neurons are active for this character. Each bar is one neuron in the hidden layer. Colored bars fired (detected a useful pattern), gray bars stayed silent. Different characters activate different combinations of neurons, which is how the model tells them apart.</div>';
+  h+='<div class="mlp-info"><strong>'+active+'/'+post.length+'</strong> neurons active. ReLU kills negative values (dark cells on the right). The pattern of which neurons fire is how the model encodes what it learned from attention.</div>';
   el.innerHTML=h;
 }
 
@@ -642,10 +717,10 @@ function initOutput(){
   var el=document.getElementById('card-output');
   var m={top:6,right:8,bottom:32,left:36};
   var w=el.clientWidth-32-m.left-m.right;if(w<100)w=300;
-  var h=130-m.top-m.bottom;
+  var h=170-m.top-m.bottom;
   svg.attr('viewBox','0 0 '+(w+m.left+m.right)+' '+(h+m.top+m.bottom));
   outG=svg.append('g').attr('transform','translate('+m.left+','+m.top+')');
-  outXS=d3.scaleBand().range([0,w]).padding(0.15);
+  outXS=d3.scaleBand().range([0,w]).padding(0.12);
   outYS=d3.scaleLinear().range([h,0]);
   outXA=outG.append('g').attr('class','axis').attr('transform','translate(0,'+h+')');
   outYA=outG.append('g').attr('class','axis');
@@ -667,7 +742,7 @@ function updateOutput(){
   var bars=outG.selectAll('.bar').data(data,function(d){return d.ch});
   bars.enter().append('rect').attr('class','bar').merge(bars)
     .attr('x',function(d){return outXS(d.ch)}).attr('width',outXS.bandwidth())
-    .attr('y',function(d){return outYS(d.p)}).attr('height',function(d){var el=document.getElementById('card-output');return Math.max(0,(130-6-32-6)-outYS(d.p))})
+    .attr('y',function(d){return outYS(d.p)}).attr('height',function(d){return Math.max(0,(170-6-32)-outYS(d.p))})
     .attr('fill',function(d){return d.i===targetIdx?'#6a6':'var(--accent-color)'}).attr('opacity',function(d){return d.i===targetIdx?1:.5});
   bars.exit().remove();
   // Verdict
