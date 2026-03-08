@@ -26,6 +26,18 @@ const formattedDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
         <p class="post-description">{frontmatter.description}</p>
       )}
     </header>
+    <script type="application/ld+json" set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": frontmatter.title,
+      "description": frontmatter.description,
+      "datePublished": frontmatter.date,
+      "author": {
+        "@type": "Person",
+        "name": "Amaljith Kuttamath",
+        "url": "https://amaljithkuttamath.github.io"
+      }
+    })} />
     <slot />
   </article>
 </Base>
