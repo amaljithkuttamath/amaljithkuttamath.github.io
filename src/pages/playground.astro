@@ -1,0 +1,787 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="microGPT Playground — Amaljith Kuttamath" description="Watch a tiny GPT learn to generate names — one character at a time, live in your browser.">
+  <div class="pg">
+    <div class="pg-head">
+      <h1>microGPT Playground</h1>
+      <p>This is a tiny GPT — the same architecture behind ChatGPT, Claude, and every other large language model — running entirely in your browser. It starts knowing nothing. You'll watch it learn, from random noise to inventing plausible human names, by training on 500 real names one character at a time. Every card below shows a different piece of the model's brain as it learns.</p>
+      <p style="margin-top:8px">Read the <a href="/work/understanding-llms" style="color:var(--accent-color)">full explanation</a> of how every piece works.</p>
+      <div class="pg-howto">
+        <strong>How to use:</strong> Hit <strong>Train</strong> to start training automatically, or <strong>Step</strong> to advance one step at a time and watch each piece update. The cards below show what happens inside the model at every step. Tweak the knobs, hit <strong>Reset</strong>, and train again to see how they change the result.
+      </div>
+    </div>
+
+    <div class="pg-controls" id="controls"></div>
+    <textarea id="custom-text" class="pg-textarea" placeholder="One item per line..." style="display:none"></textarea>
+
+    <!-- Fixed dashboard grid — nothing moves -->
+    <div class="dash">
+      <!-- Row 1: Story + progress -->
+      <div class="card card-wide" id="card-story">
+        <div class="card-title">What is the model doing?</div>
+        <div id="story-content" class="story-content">Press <strong>Train</strong> or <strong>Step</strong> to start</div>
+      </div>
+
+      <!-- FORWARD PASS — data flows through the model -->
+      <div class="phase-label" id="phase-forward">
+        <span class="phase-tag">Forward Pass</span>
+        <span class="phase-desc">Data flows through the model to make a prediction</span>
+        <span class="phase-arrow">&#x2193;</span>
+      </div>
+
+      <div class="card card-wide" id="card-input">
+        <div class="card-step">1</div>
+        <div class="card-title">Turning Characters into Numbers <span class="card-hint">The model represents each character as a list of 16 numbers called an embedding</span></div>
+        <div id="input-content"></div>
+      </div>
+
+      <div class="card card-wide" id="card-attention">
+        <div class="card-step">2</div>
+        <div class="card-title">Which Characters Matter? <span class="card-hint">The attention mechanism decides which earlier characters are relevant for predicting the next one</span></div>
+        <div id="attn-content"></div>
+      </div>
+
+      <div class="card" id="card-mlp">
+        <div class="card-step">3</div>
+        <div class="card-title">Thinking It Through <span class="card-hint">64 neurons activate or stay silent based on the patterns they detect</span></div>
+        <div id="mlp-content"></div>
+      </div>
+
+      <div class="card" id="card-output">
+        <div class="card-step">4</div>
+        <div class="card-title">Making a Prediction <span class="card-hint">The model assigns a probability to every possible next character</span></div>
+        <svg id="output-svg"></svg>
+        <div id="output-verdict" class="verdict"></div>
+      </div>
+
+      <!-- BACKWARD PASS — learning from mistakes -->
+      <div class="phase-label" id="phase-backward">
+        <span class="phase-tag phase-tag-back">Backward Pass</span>
+        <span class="phase-desc">Error flows back through the model — each component learns how to improve</span>
+        <span class="phase-arrow">&#x2191;</span>
+      </div>
+
+      <div class="card" id="card-loss">
+        <div class="card-step" style="background:#6a3">5</div>
+        <div class="card-title">How Wrong Was It? <span class="card-hint">The loss measures the gap between what the model predicted and the right answer</span></div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+          <div style="flex:1;min-width:250px"><svg id="loss-svg"></svg></div>
+          <div id="loss-explain" class="loss-explain"></div>
+        </div>
+      </div>
+
+      <div class="card card-wide" id="card-update">
+        <div class="card-step" style="background:#6a3">6</div>
+        <div class="card-title">Learning from the Mistake <span class="card-hint">The optimizer adjusts each of the <span id="param-count-inline"></span> weights to make the model a little less wrong next time</span></div>
+        <div id="update-content" class="stats-grid"></div>
+      </div>
+
+      <!-- RESULT -->
+      <div class="phase-label">
+        <span class="phase-tag phase-tag-result">Result</span>
+        <span class="phase-desc">What can the model generate after this training?</span>
+      </div>
+
+      <div class="card" id="card-samples">
+        <div class="card-title">Generated Names <span class="card-hint">These names are invented from scratch, not copied from training data</span></div>
+        <pre id="samples-content" class="samples"></pre>
+      </div>
+
+      <div class="card" id="card-stats">
+        <div class="card-title">Model Stats</div>
+        <div id="stats-content" class="stats-grid"></div>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .pg { max-width: 1100px; margin: 0 auto; }
+  .pg-head { margin-bottom: var(--space-lg); }
+  .pg-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
+  .pg-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .pg-howto {
+    margin-top: 10px; padding: 10px 14px;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); font-size: var(--text-small);
+    color: var(--fg-muted); line-height: 1.7;
+  }
+  .pg-howto strong { color: var(--fg); }
+
+  .pg-controls {
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--bg-elevated); padding: 12px 16px;
+    border-radius: var(--radius-md); margin-bottom: var(--space-md);
+    border: 1px solid var(--fg-faint);
+  }
+  :global(.ctrl-row) {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  :global(.ctrl-section) {
+    border-top: 1px solid var(--fg-faint); padding-top: 8px;
+  }
+  :global(.ctrl-heading) {
+    font-size: var(--text-label); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 8px; color: var(--fg);
+  }
+  :global(.ctrl-grid) {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;
+  }
+  :global(.pg-knob) {
+    display: flex; flex-direction: column; gap: 2px; cursor: default;
+  }
+  :global(.knob-name) {
+    font-size: var(--text-small); font-weight: 600; color: var(--fg);
+  }
+  :global(.knob-desc) {
+    font-size: var(--text-label); color: var(--fg-muted); line-height: 1.4;
+  }
+  :global(.knob-control) {
+    display: flex; align-items: center; gap: 6px; margin-top: 2px;
+  }
+  :global(.knob-control input[type="range"]) { flex: 1; }
+  :global(.knob-val) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg); min-width: 36px; text-align: right;
+  }
+  :global(.pg-input) {
+    width: 70px; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-sm);
+    padding: 4px 6px; font-family: var(--font-mono); font-size: var(--text-small);
+    text-align: center;
+  }
+  .pg-textarea {
+    width: 100%; height: 60px; background: var(--bg-elevated); color: var(--fg);
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-sm);
+    padding: 8px; font-family: var(--font-mono); font-size: var(--text-small);
+    margin-bottom: var(--space-md); resize: vertical;
+  }
+
+  /* Fixed dashboard grid */
+  .dash {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    min-height: 180px;
+    overflow: hidden;
+  }
+  .card-wide { grid-column: 1 / -1; min-height: auto; }
+  .card-title {
+    font-size: var(--text-small);
+    font-weight: 600;
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+  .card-hint {
+    display: block;
+    font-weight: 400;
+    color: var(--fg-muted);
+    font-size: var(--text-label);
+    margin-top: 2px;
+  }
+
+  /* Step numbers */
+  :global(.card-step) {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent-color); color: var(--bg);
+    font-size: 0.7rem; font-weight: 700;
+    float: left; margin-right: 8px; margin-top: 1px;
+  }
+
+  /* Phase labels between cards */
+  .phase-label {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0;
+  }
+  .phase-tag {
+    font-size: var(--text-label); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--accent-color); color: var(--bg);
+    padding: 3px 10px; border-radius: var(--radius-full);
+    white-space: nowrap;
+  }
+  .phase-tag-back { background: #6a3; }
+  .phase-tag-result { background: var(--fg-muted); }
+  .phase-desc { font-size: var(--text-label); color: var(--fg-muted); }
+  .phase-arrow { color: var(--fg-muted); font-size: 1rem; }
+
+  /* Loss explanation */
+  :global(.loss-explain) {
+    font-size: var(--text-small); color: var(--fg-muted);
+    line-height: 1.7; min-width: 180px;
+    font-family: var(--font-mono);
+  }
+
+  /* Story card */
+  .story-content {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    line-height: 2;
+  }
+  :global(.ch) {
+    display: inline-block; padding: 2px 6px; margin: 0 1px;
+    border-radius: 4px; background: var(--accent-subtle); color: var(--accent-color);
+    font-weight: 600; font-size: 0.9rem;
+  }
+  :global(.ch-active) { background: var(--accent-color); color: var(--bg); }
+  :global(.ch-target) { background: var(--accent-color); color: var(--bg); opacity: 0.6; }
+  :global(.right) { color: #6a6; font-weight: 600; }
+  :global(.wrong) { color: #b55; font-weight: 600; }
+  :global(.arrow) { color: var(--fg-muted); margin: 0 6px; }
+
+  /* Loss chart */
+  #card-loss { min-height: 200px; }
+  #card-loss svg { width: 100%; height: 160px; }
+
+  /* Input (embedding) */
+  :global(.emb-row) { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  :global(.emb-label) { font-size: 0.7rem; color: var(--fg-muted); width: 80px; flex-shrink: 0; text-align: right; }
+  :global(.emb-bar) { height: 18px; display: flex; gap: 1px; }
+  :global(.emb-cell) { width: 16px; height: 18px; border-radius: 2px; }
+
+  /* Attention */
+  #card-attention { min-height: 220px; }
+
+  /* MLP */
+  :global(.mlp-bar-row) { display: flex; gap: 1px; align-items: flex-end; height: 80px; }
+  :global(.mlp-bar) { width: 6px; border-radius: 1px 1px 0 0; }
+  :global(.mlp-info) { font-size: 0.75rem; color: var(--fg-muted); margin-top: 6px; }
+
+  /* Output */
+  #card-output { min-height: 220px; }
+  #card-output svg { width: 100%; height: 150px; }
+  .verdict {
+    font-size: var(--text-small);
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    min-height: 1.5em;
+  }
+
+  /* Samples */
+  .samples {
+    font-size: 0.9rem; color: var(--accent-color);
+    line-height: 2; min-height: 120px;
+    white-space: pre-wrap;
+  }
+
+  /* Stats */
+  .stats-grid {
+    display: grid; grid-template-columns: auto 1fr;
+    gap: 4px 12px; font-size: var(--text-small);
+    font-family: var(--font-mono);
+  }
+  :global(.stat-label) { color: var(--fg-muted); }
+  :global(.stat-value) { color: var(--fg); }
+
+  /* Buttons */
+  :global(.pg-btn) {
+    background: var(--accent-color); color: #fff; border: none;
+    padding: 6px 16px; border-radius: var(--radius-sm); cursor: pointer;
+    font-family: var(--font-sans); font-size: var(--text-small);
+    transition: opacity 0.2s;
+  }
+  :global(.pg-btn:hover) { opacity: 0.85; }
+  :global(.pg-btn.stop) { background: #b33; }
+  :global(.pg-label) { font-size: var(--text-label); color: var(--fg-muted); display: flex; align-items: center; gap: 4px; }
+  :global(.pg-select) {
+    background: var(--bg-elevated); color: var(--fg); border: 1px solid var(--fg-faint);
+    padding: 4px 8px; border-radius: var(--radius-sm); font-family: var(--font-sans); font-size: var(--text-label);
+  }
+
+  :global(.dash svg text) { fill: var(--fg); font-family: var(--font-sans); }
+  :global(.dash svg .axis text) { font-size: 0.6rem; fill: var(--fg-muted); }
+  :global(.dash svg .axis line), :global(.dash svg .axis path) { stroke: var(--fg-faint); }
+
+  @media (max-width: 768px) {
+    .dash { grid-template-columns: 1fr; }
+    .card-wide { grid-column: 1; }
+  }
+</style>
+
+<script is:inline src="https://d3js.org/d3.v7.min.js"></script>
+<script is:inline>
+// ============================================================
+//  microGPT Playground
+// ============================================================
+
+// === PRNG ===
+var _seed = 42;
+function seedRandom(s) { _seed = s; }
+function rng() {
+  var t = _seed += 0x6D2B79F5;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function gaussRng() {
+  var u, v, s;
+  do { u = 2*rng()-1; v = 2*rng()-1; s = u*u+v*v; } while (s >= 1 || s === 0);
+  return u * Math.sqrt(-2*Math.log(s)/s);
+}
+
+// === Autograd ===
+function V(data, ch, lg) { this.data=data; this.grad=0; this._ch=ch||[]; this._lg=lg||[]; }
+V.prototype.add=function(o){o=o instanceof V?o:new V(o);return new V(this.data+o.data,[this,o],[1,1])};
+V.prototype.mul=function(o){o=o instanceof V?o:new V(o);return new V(this.data*o.data,[this,o],[o.data,this.data])};
+V.prototype.pow=function(n){return new V(this.data**n,[this],[n*this.data**(n-1)])};
+V.prototype.log=function(){return new V(Math.log(this.data),[this],[1/this.data])};
+V.prototype.exp=function(){var e=Math.exp(this.data);return new V(e,[this],[e])};
+V.prototype.relu=function(){return new V(Math.max(0,this.data),[this],[this.data>0?1:0])};
+V.prototype.neg=function(){return this.mul(-1)};
+V.prototype.sub=function(o){o=o instanceof V?o:new V(o);return this.add(o.neg())};
+V.prototype.div=function(o){o=o instanceof V?o:new V(o);return this.mul(o.pow(-1))};
+V.prototype.backward=function(){
+  var topo=[],vis=new Set();
+  function build(v){if(!vis.has(v)){vis.add(v);for(var c of v._ch)build(c);topo.push(v)}}
+  build(this);this.grad=1;
+  for(var i=topo.length-1;i>=0;i--){var v=topo[i];for(var j=0;j<v._ch.length;j++)v._ch[j].grad+=v._lg[j]*v.grad}
+};
+
+// === Model ===
+function vadd(a,b){return a.map(function(ai,i){return ai.add(b[i])})}
+function linear(x,w){return w.map(function(wo){var s=wo[0].mul(x[0]);for(var i=1;i<x.length;i++)s=s.add(wo[i].mul(x[i]));return s})}
+function softmax(L){var mx=-1e30;for(var i=0;i<L.length;i++)if(L[i].data>mx)mx=L[i].data;var ex=L.map(function(v){return v.sub(mx).exp()});var t=ex[0];for(var i=1;i<ex.length;i++)t=t.add(ex[i]);return ex.map(function(e){return e.div(t)})}
+function rmsn(x){var ms=x[0].mul(x[0]);for(var i=1;i<x.length;i++)ms=ms.add(x[i].mul(x[i]));return x.map(function(xi){return xi.mul(ms.mul(1/x.length).add(1e-5).pow(-0.5))})}
+
+var NL=1,NE=16,BS=16,NH=4,HD=4;
+function mat(r,c,std){std=std||.08;return Array.from({length:r},function(){return Array.from({length:c},function(){return new V(gaussRng()*std)})})}
+function initModel(){
+  var sd={wte:mat(vocabSize,NE),wpe:mat(BS,NE),lm_head:mat(vocabSize,NE)};
+  for(var i=0;i<NL;i++){sd['l'+i+'qw']=mat(NE,NE);sd['l'+i+'kw']=mat(NE,NE);sd['l'+i+'vw']=mat(NE,NE);sd['l'+i+'ow']=mat(NE,NE);sd['l'+i+'f1']=mat(4*NE,NE);sd['l'+i+'f2']=mat(NE,4*NE)}
+  return sd;
+}
+
+function gpt(tid,pid,ks,vs,sd){
+  var te=sd.wte[tid],pe=sd.wpe[pid],x=vadd(te,pe);x=rmsn(x);
+  var inter={tokEmb:te.map(function(v){return v.data}),posEmb:pe.map(function(v){return v.data}),combined:x.map(function(v){return v.data}),layers:[]};
+  for(var li=0;li<NL;li++){
+    var info={attnW:[]},xr=x;x=rmsn(x);
+    var q=linear(x,sd['l'+li+'qw']),k=linear(x,sd['l'+li+'kw']),v=linear(x,sd['l'+li+'vw']);
+    ks[li].push(k);vs[li].push(v);
+    var xa=[];
+    for(var h=0;h<NH;h++){var hs=h*HD,qh=q.slice(hs,hs+HD);
+      var kh=ks[li].map(function(ki){return ki.slice(hs,hs+HD)});
+      var vh=vs[li].map(function(vi){return vi.slice(hs,hs+HD)});
+      var al=kh.map(function(kt){var d=qh[0].mul(kt[0]);for(var j=1;j<HD;j++)d=d.add(qh[j].mul(kt[j]));return d.mul(1/Math.sqrt(HD))});
+      var aw=softmax(al);info.attnW.push(aw.map(function(w){return w.data}));
+      for(var j=0;j<HD;j++){var o=aw[0].mul(vh[0][j]);for(var t=1;t<vh.length;t++)o=o.add(aw[t].mul(vh[t][j]));xa.push(o)}}
+    x=vadd(linear(xa,sd['l'+li+'ow']),xr);
+    var xr2=x;x=rmsn(x);
+    var mh=linear(x,sd['l'+li+'f1']);info.preRelu=mh.map(function(v){return v.data});
+    mh=mh.map(function(v){return v.relu()});info.postRelu=mh.map(function(v){return v.data});
+    x=vadd(linear(mh,sd['l'+li+'f2']),xr2);inter.layers.push(info)}
+  var logits=linear(x,sd.lm_head);inter.logits=logits.map(function(v){return v.data});
+  return{logits:logits,intermediates:inter};
+}
+
+// === Data ===
+var NAMES="emma,olivia,ava,isabella,sophia,charlotte,mia,amelia,harper,evelyn,abigail,emily,elizabeth,mila,ella,avery,sofia,camila,aria,scarlett,victoria,madison,luna,grace,chloe,penelope,layla,riley,zoey,nora,lily,eleanor,hannah,lillian,addison,aubrey,ellie,stella,natalie,zoe,leah,hazel,violet,aurora,savannah,audrey,brooklyn,bella,claire,skylar,lucy,paisley,everly,anna,caroline,nova,genesis,emilia,kennedy,samantha,maya,willow,kinsley,naomi,aaliyah,elena,sarah,ariana,allison,gabriella,alice,madelyn,cora,ruby,eva,serenity,autumn,adeline,hailey,gianna,valentina,isla,eliana,quinn,nevaeh,ivy,sadie,piper,lydia,alexa,josephine,emery,julia,delilah,arianna,vivian,kaylee,sophie,brielle,madeline,peyton,rylee,clara,hadley,melanie,mackenzie,reagan,adalynn,liliana,aubree,jade,katherine,isabelle,natalia,raelynn,maria,athena,ximena,arya,leilani,taylor,faith,rose,kylie,alexandra,mary,margaret,lyla,ashley,amaya,eliza,brianna,bailey,andrea,khloe,jasmine,melody,iris,isabel,norah,annabelle,valeria,emerson,adalyn,ryleigh,eden,emersyn,anastasia,kayla,alyssa,juliana,charlie,esther,ariel,cecilia,valerie,alina,molly,reese,aliyah,lilly,parker,finley,morgan,sydney,jordyn,eloise,trinity,daisy,kimberly,lauren,genevieve,sara,arabella,harmony,elise,remi,teagan,alexis,london,sloane,laila,lucia,diana,juliette,sienna,elliana,londyn,ayla,callie,gracie,josie,amara,jocelyn,daniela,everleigh,mya,rachel,summer,alana,brooke,alaina,mckenzie,catherine,amy,presley,journee,rosalie,ember,brynlee,rowan,joanna,paige,rebecca,ana,sawyer,mariah,nicole,brooklynn,payton,marley,fiona,georgia,lila,harley,adelyn,alivia,noelle,gemma,vanessa,journey,makayla,angelina,adaline,catalina,alayna,julianna,leila,lola,adriana,june,juliet,jayla,river,tessa,lia,dakota,delaney,selena,blakely,ada,camille,zara,malia,hope,samara,vera,mckenna,briella,izabella,hayden,raegan,michelle,angela,ruth,freya,kamila,vivienne,aspen,olive,kendall,elaina,thea,kali,destiny,amiyah,evangeline,cali,blake,elsie,juniper,alexandria,myla,ariella,kate,mariana,lilah,charlee,daleyza,nyla,jane,maggie,zuri,aniyah,lucille,leia,melissa,adelaide,amina,giselle,lena,camilla,miriam,millie,brynn,gabrielle,sage,annie,logan,lilliana,haven,jessica,kaia,magnolia,amira,adelynn,makenzie,stephanie,nina,phoebe,arielle,evie,lyric,alessandra,gabriela,paislee,raelyn,madilyn,paris,makenna,kinley,gracelyn,talia,maeve,rylie,kiara,evelynn,brinley,jacqueline,laura,gracelynn,lexi,ariah,fatima,jennifer,kehlani,alani,ariyah,luciana,allie,heidi,maci,phoenix,felicity,joy,kenzie,veronica,margot,addilyn,lana,cassidy,remington,saylor,ryan,keira,harlow,miranda,angel,amanda,daniella,royalty,gwendolyn,ophelia,heaven,jordan,madeleine,esmeralda,kira,miracle,elle,amari,danielle,daphne,willa,haley,gia,kaitlyn,oakley,kailani,winter,alicia,serena,nadia,aviana,demi,jada,braelynn,dylan,ainsley,alison,camryn,avianna,bianca,skyler,scarlet,maddison,nylah,sarai,regina,dahlia,nayeli,raven,helen,adrianna,averie,skye,kelsey,tatum,kensley,maliyah,erin,viviana,jenna,anaya,carolina,shelby,sabrina,mikayla,annalise,octavia,lennon,blair,carmen,yaretzi,kennedi,mabel,zariah,kyla,christina,selah,celeste,eve,mckinley,milani,frances,jimena,kylee,leighton,katie,aitana,kayleigh,sierra,kathryn,rosemary,jolene,alondra,elisa,helena,charleigh,hallie,lainey,avah,jazlyn,kamryn,mira,cheyenne,francesca,antonella,wren,chelsea,amber,emory,lorelei,nia,abby,april,emelia,carter,aylin,cataleya,bethany,marlee,carly,kaylani,emely,liana,madelynn,cadence,matilda,sylvia,myra,fernanda,oaklyn,elianna,hattie,dayana,kendra,maisie,malaysia,kara";
+
+var docs,uchars,BOS,vocabSize;
+function initDataset(text){
+  docs=text.split(/[\n,]/).map(function(s){return s.trim()}).filter(function(s){return s.length>0});
+  for(var i=docs.length-1;i>0;i--){var j=Math.floor(rng()*(i+1));var tmp=docs[i];docs[i]=docs[j];docs[j]=tmp}
+  var seen={};uchars=[];for(var c of docs.join(''))if(!seen[c]){seen[c]=1;uchars.push(c)}
+  uchars.sort();BOS=uchars.length;vocabSize=uchars.length+1;
+}
+
+// === State ===
+var sd,params,mA,vA,step=0,numSteps=1000,running=false;
+var lossHist=[],lastInter=null,allAttnW=[],lastDoc='',lastToks=[],lastN=0,lastGrad={m:0,x:0},lastUpd=[];
+
+function initTrain(){
+  seedRandom(42);
+  var sel=document.getElementById('dataset-select');
+  initDataset(sel&&sel.value==='custom'?document.getElementById('custom-text').value:NAMES);
+  sd=initModel();params=[];
+  for(var k of Object.keys(sd))for(var row of sd[k])for(var p of row)params.push(p);
+  mA=new Float64Array(params.length);vA=new Float64Array(params.length);
+  step=0;lossHist=[];lastInter=null;allAttnW=[];lastDoc='';lastToks=[];lastN=0;lastUpd=[];
+}
+
+function trainStep(){
+  var lrEl=document.getElementById('lr-slider');
+  var lr=lrEl?(parseInt(lrEl.value)/1000):.01;
+  var b1=.85,b2=.99,eps=1e-8;
+  var doc=docs[step%docs.length];
+  var toks=[BOS];for(var c of doc)toks.push(uchars.indexOf(c));toks.push(BOS);
+  var n=Math.min(BS,toks.length-1);
+  lastDoc=doc;lastToks=toks;lastN=n;
+  var ks=Array.from({length:NL},function(){return[]}),vs=Array.from({length:NL},function(){return[]});
+  var losses=[],stepAW=[];
+  for(var pos=0;pos<n;pos++){
+    var r=gpt(toks[pos],pos,ks,vs,sd);
+    if(pos===n-1)lastInter=r.intermediates;
+    for(var li=0;li<NL;li++){if(!stepAW[li])stepAW[li]=[];stepAW[li].push(r.intermediates.layers[li].attnW)}
+    var probs=softmax(r.logits);losses.push(probs[toks[pos+1]].log().neg());
+  }
+  allAttnW=stepAW;
+  var loss=losses[0];for(var i=1;i<losses.length;i++)loss=loss.add(losses[i]);loss=loss.mul(1/n);
+  loss.backward();
+  var gsum=0,gmax=0;
+  for(var i=0;i<params.length;i++){var ag=Math.abs(params[i].grad);gsum+=ag;if(ag>gmax)gmax=ag}
+  lastGrad={m:gsum/params.length,x:gmax};
+  var lrt=lr*(1-step/numSteps),upd=[];
+  for(var i=0;i<params.length;i++){
+    var g=params[i].grad;
+    mA[i]=b1*mA[i]+(1-b1)*g;vA[i]=b2*vA[i]+(1-b2)*g*g;
+    var mh=mA[i]/(1-Math.pow(b1,step+1)),vh=vA[i]/(1-Math.pow(b2,step+1));
+    var u=lrt*mh/(Math.sqrt(vh)+eps);params[i].data-=u;upd.push(Math.abs(u));params[i].grad=0;
+  }
+  lastUpd=upd;lossHist.push({step:step+1,loss:loss.data});step++;
+}
+
+function generate(){
+  var tmp=document.getElementById('temperature');var t=tmp?parseInt(tmp.value)/20:.5;
+  var ks=Array.from({length:NL},function(){return[]}),vs=Array.from({length:NL},function(){return[]});
+  var tid=BOS,out=[];
+  for(var p=0;p<BS;p++){
+    var r=gpt(tid,p,ks,vs,sd);
+    var sc=r.logits.map(function(l){return l.mul(1/t)});
+    var pr=softmax(sc),pd=pr.map(function(p){return p.data});
+    var x=rng(),cum=0;tid=pd.length-1;
+    for(var i=0;i<pd.length;i++){cum+=pd[i];if(x<cum){tid=i;break}}
+    if(tid===BOS)break;out.push(uchars[tid]);
+  }
+  return out.join('');
+}
+
+function cl(id){return id===BOS?'START':uchars[id]||'?'}
+
+// ============================================================
+//  Fixed-size visualization updates — no DOM creation/destruction
+// ============================================================
+
+// --- Story ---
+function updateStory(){
+  var el=document.getElementById('story-content');
+  if(!lastDoc||step===0){el.innerHTML='Press <strong>Train</strong> or <strong>Step</strong> to start';return}
+  var h='<div>Step '+step+' — learning from: ';
+  for(var i=0;i<lastDoc.length;i++) h+='<span class="ch">'+lastDoc[i]+'</span>';
+  h+='</div>';
+  if(lastInter&&lastN>0){
+    var lp=lastN-1;
+    h+='<div style="margin-top:6px">Given ';
+    for(var i=0;i<=lp;i++) h+='<span class="ch'+(i===lp?' ch-active':'')+'">'+cl(lastToks[i])+'</span>';
+    h+='<span class="arrow">&rarr;</span>next should be <span class="ch ch-target">'+cl(lastToks[lp+1])+'</span>';
+    // Model's guess
+    var ld=lastInter.logits,mx=-1e30;for(var i=0;i<ld.length;i++)if(ld[i]>mx)mx=ld[i];
+    var ex=ld.map(function(l){return Math.exp(l-mx)});var sm=ex.reduce(function(a,b){return a+b},0);
+    var pr=ex.map(function(e){return e/sm});var ti=0;for(var i=1;i<pr.length;i++)if(pr[i]>pr[ti])ti=i;
+    var ok=ti===lastToks[lp+1];
+    h+='<span class="arrow">—</span>model says: <strong class="'+(ok?'right':'wrong')+'">'+cl(ti)+'</strong> ('+((pr[ti]*100)|0)+'%)';
+    if(ok) h+=' <span class="right">&#10003;</span>';
+    h+='</div>';
+  }
+  el.innerHTML=h;
+}
+
+// --- Loss ---
+var lossInited=false,lossG,lossXS,lossYS,lossPath,lossXA,lossYA;
+function initLoss(){
+  var svg=d3.select('#loss-svg');
+  var m={top:8,right:12,bottom:24,left:36};
+  var el=document.getElementById('card-loss');
+  var w=el.clientWidth-32-m.left-m.right;if(w<100)w=300;
+  var h=140-m.top-m.bottom;
+  svg.attr('viewBox','0 0 '+(w+m.left+m.right)+' '+(h+m.top+m.bottom));
+  lossG=svg.append('g').attr('transform','translate('+m.left+','+m.top+')');
+  lossXS=d3.scaleLinear().range([0,w]);lossYS=d3.scaleLinear().range([h,0]);
+  lossXA=lossG.append('g').attr('class','axis').attr('transform','translate(0,'+h+')');
+  lossYA=lossG.append('g').attr('class','axis');
+  lossPath=lossG.append('path').attr('fill','none').attr('stroke','var(--accent-color)').attr('stroke-width',1.5);
+  lossInited=true;
+}
+function updateLoss(){
+  if(!lossInited)initLoss();
+  if(!lossHist.length)return;
+  lossXS.domain([0,Math.max(lossHist.length,10)]);
+  lossYS.domain([0,d3.max(lossHist,function(d){return d.loss})*1.1]);
+  lossXA.call(d3.axisBottom(lossXS).ticks(4));lossYA.call(d3.axisLeft(lossYS).ticks(3));
+  lossPath.datum(lossHist).attr('d',d3.line().x(function(d){return lossXS(d.step)}).y(function(d){return lossYS(d.loss)}));
+  // Explain the loss
+  var le=document.getElementById('loss-explain');
+  if(lossHist.length>0){
+    var cur=lossHist[lossHist.length-1].loss;
+    var prev=lossHist.length>1?lossHist[lossHist.length-2].loss:cur;
+    var dir=cur<prev?'<span style="color:#6a6">&darr; improving</span>':'<span style="color:#b55">&uarr; worse</span>';
+    le.innerHTML='Loss: <strong>'+cur.toFixed(4)+'</strong> '+dir+'<br>'+
+      '<span style="font-size:0.7rem">Lower loss = better predictions.<br>'+
+      'The model backpropagates this error<br>through all '+params.length+' weights.</span>';
+  }
+}
+
+// --- Weight Updates ---
+function updateWeightUpdate(){
+  var el=document.getElementById('update-content');
+  if(step===0){el.innerHTML='<span style="color:var(--fg-muted)">No updates yet</span>';return}
+  var meanUpd=lastUpd.length>0?(lastUpd.reduce(function(a,b){return a+b},0)/lastUpd.length):0;
+  var lrEl=document.getElementById('lr-slider');
+  var baseLr=lrEl?(parseInt(lrEl.value)/1000):.01;
+  var lrVal=(baseLr*(1-step/numSteps));
+  el.innerHTML=
+    '<span class="stat-label">Learning rate</span><span class="stat-value">'+lrVal.toFixed(5)+' <span style="color:var(--fg-muted);font-size:0.7rem">(shrinks over time)</span></span>'+
+    '<span class="stat-label">Max |gradient|</span><span class="stat-value">'+lastGrad.x.toExponential(1)+' <span style="color:var(--fg-muted);font-size:0.7rem">(how strongly each weight contributed to the error)</span></span>'+
+    '<span class="stat-label">Mean |weight update|</span><span class="stat-value">'+meanUpd.toExponential(1)+' <span style="color:var(--fg-muted);font-size:0.7rem">(how much weights actually changed)</span></span>';
+}
+
+// --- Input (embedding) ---
+function updateInput(){
+  var el=document.getElementById('input-content');
+  if(!lastInter){el.innerHTML='<span style="color:var(--fg-muted);font-size:0.8rem">Waiting for first step...</span>';return}
+  var rows=[
+    {label:'Character',data:lastInter.tokEmb},
+    {label:'Position',data:lastInter.posEmb},
+    {label:'Combined',data:lastInter.combined}
+  ];
+  var h='';
+  for(var r=0;r<rows.length;r++){
+    var d=rows[r].data,absMax=0;
+    for(var i=0;i<d.length;i++)if(Math.abs(d[i])>absMax)absMax=Math.abs(d[i]);
+    absMax=absMax||1;
+    h+='<div class="emb-row"><span class="emb-label">'+rows[r].label+'</span><div class="emb-bar">';
+    for(var i=0;i<d.length;i++){
+      var norm=d[i]/absMax; // -1 to 1
+      var r2=norm>0?Math.round(180+norm*75):Math.round(180-Math.abs(norm)*75);
+      var g2=norm>0?Math.round(120-norm*60):Math.round(120-Math.abs(norm)*60);
+      var b2=norm>0?Math.round(100-norm*60):Math.round(100+Math.abs(norm)*155);
+      h+='<div class="emb-cell" style="background:rgb('+r2+','+g2+','+b2+')"></div>';
+    }
+    h+='</div></div>';
+  }
+  h+='<div style="font-size:0.75rem;color:var(--fg-muted);margin-top:6px;line-height:1.6">Each colored cell is one dimension of the embedding. The top row is what the character means. The middle row is where it sits in the word. The bottom row combines both, giving the model a complete picture of this character in this position.</div>';
+  el.innerHTML=h;
+}
+
+// --- Attention ---
+function updateAttn(){
+  var el=document.getElementById('attn-content');
+  if(!allAttnW||!allAttnW.length||!allAttnW[0]||!allAttnW[0].length){
+    el.innerHTML='<span style="color:var(--fg-muted);font-size:0.8rem">Waiting...</span>';return;
+  }
+  var lw=allAttnW[0],seq=lw.length;
+  var cell=Math.min(28,Math.max(14,Math.floor(140/seq)));
+  var h='<div style="display:flex;gap:16px;flex-wrap:wrap">';
+  for(var hd=0;hd<NH;hd++){
+    h+='<div><div style="font-size:0.7rem;margin-bottom:4px"><strong>Head '+hd+'</strong></div>';
+    h+='<div style="display:inline-block">';
+    // Top labels
+    h+='<div style="display:flex;margin-left:'+(cell+2)+'px">';
+    for(var k=0;k<seq;k++) h+='<div style="width:'+cell+'px;text-align:center;font-size:0.55rem;color:var(--fg-muted);overflow:hidden">'+cl(lastToks[k])+'</div>';
+    h+='</div>';
+    // Rows
+    for(var q=0;q<seq;q++){
+      h+='<div style="display:flex;align-items:center;height:'+cell+'px">';
+      h+='<div style="width:'+(cell+2)+'px;text-align:right;padding-right:3px;font-size:0.55rem;color:var(--fg-muted)">'+cl(lastToks[q])+'</div>';
+      var weights=lw[q][hd];
+      if(weights){
+        for(var kk=0;kk<weights.length;kk++){
+          var w=weights[kk];
+          // viridis-ish: dark purple → teal → yellow
+          var t2=Math.max(0,Math.min(1,w));
+          var rv=Math.round(68+t2*187), gv=Math.round(1+t2*207), bv=Math.round(84+t2*(230-84)*(.5+t2*.5));
+          if(t2>.6){rv=Math.round(94+t2*161);gv=Math.round(201+t2*28);bv=Math.round(98-t2*60)}
+          h+='<div style="width:'+(cell-1)+'px;height:'+(cell-1)+'px;border-radius:2px;background:rgb('+rv+','+gv+','+bv+')" title="'+w.toFixed(3)+'"></div>';
+        }
+      }
+      h+='</div>';
+    }
+    h+='</div></div>';
+  }
+  h+='</div>';
+  h+='<div style="font-size:0.75rem;color:var(--fg-muted);margin-top:6px;line-height:1.6">Each grid is one attention head. Bright squares mean that character is paying strong attention to another. Early in training these are uniform (the model doesn\'t know what to look at yet). As training progresses, clear patterns emerge: some heads learn to look at nearby characters, others learn to look at vowels or consonants.</div>';
+  el.innerHTML=h;
+}
+
+// --- MLP ---
+function updateMLP(){
+  var el=document.getElementById('mlp-content');
+  if(!lastInter||!lastInter.layers[0]){el.innerHTML='<span style="color:var(--fg-muted);font-size:0.8rem">Waiting...</span>';return}
+  var post=lastInter.layers[0].postRelu;
+  var mx=0;for(var i=0;i<post.length;i++)if(post[i]>mx)mx=post[i];
+  mx=mx||1;
+  var active=0;for(var i=0;i<post.length;i++)if(post[i]>0)active++;
+  var h='<div class="mlp-bar-row">';
+  for(var i=0;i<post.length;i++){
+    var ht=Math.round(post[i]/mx*70);
+    var col=post[i]>0?'var(--accent-color)':'var(--fg-faint)';
+    h+='<div class="mlp-bar" style="height:'+Math.max(1,ht)+'px;background:'+col+'"></div>';
+  }
+  h+='</div>';
+  h+='<div class="mlp-info">'+active+' of '+post.length+' neurons are active for this character. Each bar is one neuron in the hidden layer. Colored bars fired (detected a useful pattern), gray bars stayed silent. Different characters activate different combinations of neurons, which is how the model tells them apart.</div>';
+  el.innerHTML=h;
+}
+
+// --- Output ---
+var outInited=false,outG,outXS,outYS,outXA,outYA;
+function initOutput(){
+  var svg=d3.select('#output-svg');
+  var el=document.getElementById('card-output');
+  var m={top:6,right:8,bottom:32,left:36};
+  var w=el.clientWidth-32-m.left-m.right;if(w<100)w=300;
+  var h=130-m.top-m.bottom;
+  svg.attr('viewBox','0 0 '+(w+m.left+m.right)+' '+(h+m.top+m.bottom));
+  outG=svg.append('g').attr('transform','translate('+m.left+','+m.top+')');
+  outXS=d3.scaleBand().range([0,w]).padding(0.15);
+  outYS=d3.scaleLinear().range([h,0]);
+  outXA=outG.append('g').attr('class','axis').attr('transform','translate(0,'+h+')');
+  outYA=outG.append('g').attr('class','axis');
+  outInited=true;
+}
+function updateOutput(){
+  if(!outInited)initOutput();
+  if(!lastInter)return;
+  var ld=lastInter.logits,mx=-1e30;
+  for(var i=0;i<ld.length;i++)if(ld[i]>mx)mx=ld[i];
+  var ex=ld.map(function(l){return Math.exp(l-mx)});var sm=ex.reduce(function(a,b){return a+b},0);
+  var pr=ex.map(function(e){return e/sm});
+  var labels=uchars.concat(['END']);
+  var targetIdx=lastN>0?lastToks[lastN]:-1;
+  var data=pr.map(function(p,i){return{ch:labels[i]||'?',p:p,i:i}});
+  outXS.domain(labels);outYS.domain([0,d3.max(pr)*1.2]);
+  outXA.call(d3.axisBottom(outXS)).selectAll('text').attr('font-size','0.55rem').attr('transform','rotate(-45)').attr('text-anchor','end');
+  outYA.call(d3.axisLeft(outYS).ticks(3));
+  var bars=outG.selectAll('.bar').data(data,function(d){return d.ch});
+  bars.enter().append('rect').attr('class','bar').merge(bars)
+    .attr('x',function(d){return outXS(d.ch)}).attr('width',outXS.bandwidth())
+    .attr('y',function(d){return outYS(d.p)}).attr('height',function(d){var el=document.getElementById('card-output');return Math.max(0,(130-6-32-6)-outYS(d.p))})
+    .attr('fill',function(d){return d.i===targetIdx?'#6a6':'var(--accent-color)'}).attr('opacity',function(d){return d.i===targetIdx?1:.5});
+  bars.exit().remove();
+  // Verdict
+  var vEl=document.getElementById('output-verdict');
+  if(targetIdx>=0){
+    var tp=(pr[targetIdx]*100).toFixed(1);
+    var topIdx=0;for(var i=1;i<pr.length;i++)if(pr[i]>pr[topIdx])topIdx=i;
+    var isCorrect=topIdx===targetIdx;
+    if(isCorrect){
+      vEl.innerHTML='The model correctly predicts <strong>"'+labels[targetIdx]+'"</strong> with '+tp+'% confidence <span style="color:var(--fg-muted)">(green bar)</span>';
+    } else {
+      vEl.innerHTML='The model guesses <strong>"'+labels[topIdx]+'"</strong> but the right answer is <strong>"'+labels[targetIdx]+'"</strong> at '+tp+'% <span style="color:var(--fg-muted)">(green bar)</span>. It will learn from this mistake.';
+    }
+  }
+}
+
+// --- Samples ---
+function updateSamples(){
+  if(step>0&&step%20===0){
+    var el=document.getElementById('samples-content');
+    var lines=[];for(var i=0;i<8;i++)lines.push(generate());
+    el.textContent=lines.join('\n');
+  }
+}
+
+// --- Stats ---
+function updateStats(){
+  var el=document.getElementById('stats-content');
+  el.innerHTML=
+    '<span class="stat-label">Step</span><span class="stat-value">'+step+' / '+numSteps+'</span>'+
+    '<span class="stat-label">Parameters</span><span class="stat-value">'+params.length.toLocaleString()+' weights</span>'+
+    '<span class="stat-label">Vocabulary</span><span class="stat-value">'+vocabSize+' characters (a-z + start/end)</span>'+
+    '<span class="stat-label">Embedding</span><span class="stat-value">'+NE+' dimensions per character</span>'+
+    '<span class="stat-label">Attention</span><span class="stat-value">'+NH+' heads (each looks for different patterns)</span>'+
+    '<span class="stat-label">MLP</span><span class="stat-value">'+(4*NE)+' neurons per layer</span>'+
+    '<span class="stat-label">Layers</span><span class="stat-value">'+NL+' transformer block</span>';
+  document.getElementById('param-count-inline').textContent=params.length.toLocaleString();
+}
+
+// ============================================================
+//  Main loop
+// ============================================================
+function updateAll(){
+  updateStory();updateInput();updateAttn();updateMLP();updateOutput();updateLoss();updateWeightUpdate();updateSamples();updateStats();
+}
+
+function tick(){
+  if(!running||step>=numSteps){running=false;document.getElementById('btn-start').textContent='\u25B6 Train';document.getElementById('btn-start').className='pg-btn';return}
+  var speed=parseInt(document.getElementById('speed').value);
+  for(var i=0;i<speed&&step<numSteps;i++)trainStep();
+  updateAll();requestAnimationFrame(tick);
+}
+
+function init(){
+  // Controls
+  var el=document.getElementById('controls');
+  el.innerHTML=
+    '<div class="ctrl-row">'+
+      '<button class="pg-btn" id="btn-start">&#9654; Train</button>'+
+      '<button class="pg-btn" id="btn-step">Step</button>'+
+      '<button class="pg-btn" id="btn-reset" style="background:var(--fg-muted)">Reset</button>'+
+      '<select class="pg-select" id="dataset-select"><option value="builtin">Names (500)</option><option value="custom">Custom</option></select>'+
+    '</div>'+
+    '<div class="ctrl-section">'+
+      '<div class="ctrl-heading">Training</div>'+
+      '<div class="ctrl-grid">'+
+        '<label class="pg-knob"><span class="knob-name">Speed</span><span class="knob-desc">Steps per frame. Higher = faster, less detail.</span><span class="knob-control"><input type="range" id="speed" min="1" max="50" value="10"><span class="knob-val" id="speed-val">10</span></span></label>'+
+        '<label class="pg-knob"><span class="knob-name">Learning rate</span><span class="knob-desc">How fast the model learns. Too high = unstable.</span><span class="knob-control"><input type="range" id="lr-slider" min="1" max="50" value="10"><span class="knob-val" id="lr-val">0.010</span></span></label>'+
+        '<label class="pg-knob"><span class="knob-name">Steps</span><span class="knob-desc">Total training iterations. More = better results.</span><span class="knob-control"><input type="number" id="num-steps" class="pg-input" value="1000" min="100" max="10000" step="100"></span></label>'+
+      '</div>'+
+    '</div>'+
+    '<div class="ctrl-section">'+
+      '<div class="ctrl-heading">Model architecture <span style="font-weight:400;color:var(--fg-muted)">(change, then hit Reset)</span></div>'+
+      '<div class="ctrl-grid">'+
+        '<label class="pg-knob"><span class="knob-name">Embedding dim</span><span class="knob-desc">Numbers per character. Higher = richer, slower.</span><span class="knob-control"><input type="number" id="emb-dim" class="pg-input" value="16" min="4" max="64" step="4"></span></label>'+
+        '<label class="pg-knob"><span class="knob-name">Attention heads</span><span class="knob-desc">Parallel attention patterns. Each looks for something different.</span><span class="knob-control"><input type="number" id="num-heads" class="pg-input" value="4" min="1" max="8" step="1"></span></label>'+
+        '<label class="pg-knob"><span class="knob-name">Context window</span><span class="knob-desc">How many characters the model can look back at.</span><span class="knob-control"><input type="number" id="block-size" class="pg-input" value="16" min="4" max="32" step="4"></span></label>'+
+        '<label class="pg-knob"><span class="knob-name">Layers</span><span class="knob-desc">Transformer blocks stacked. More = deeper thinking.</span><span class="knob-control"><input type="number" id="num-layers" class="pg-input" value="1" min="1" max="4" step="1"></span></label>'+
+      '</div>'+
+    '</div>'+
+    '<div class="ctrl-section">'+
+      '<div class="ctrl-heading">Generation</div>'+
+      '<div class="ctrl-grid">'+
+        '<label class="pg-knob"><span class="knob-name">Temperature</span><span class="knob-desc">Randomness of generated names. Low = safe, high = creative.</span><span class="knob-control"><input type="range" id="temperature" min="1" max="20" value="10"><span class="knob-val" id="temp-val">0.50</span></span></label>'+
+      '</div>'+
+    '</div>';
+
+  document.getElementById('dataset-select').addEventListener('change',function(e){
+    document.getElementById('custom-text').style.display=e.target.value==='custom'?'block':'none';
+  });
+  document.getElementById('temperature').addEventListener('input',function(e){
+    document.getElementById('temp-val').textContent=(e.target.value/20).toFixed(2);
+  });
+  document.getElementById('speed').addEventListener('input',function(e){
+    document.getElementById('speed-val').textContent=e.target.value;
+  });
+  document.getElementById('lr-slider').addEventListener('input',function(e){
+    document.getElementById('lr-val').textContent=(e.target.value/1000).toFixed(3);
+  });
+  function readHyperparams(){
+    NE=parseInt(document.getElementById('emb-dim').value)||16;
+    NH=parseInt(document.getElementById('num-heads').value)||4;
+    HD=Math.floor(NE/NH);
+    BS=parseInt(document.getElementById('block-size').value)||16;
+    NL=parseInt(document.getElementById('num-layers').value)||1;
+    numSteps=parseInt(document.getElementById('num-steps').value)||1000;
+  }
+  document.getElementById('btn-reset').addEventListener('click',function(){
+    running=false;document.getElementById('btn-start').textContent='\u25B6 Train';document.getElementById('btn-start').className='pg-btn';
+    readHyperparams();
+    initTrain();lossInited=false;outInited=false;
+    d3.select('#loss-svg').selectAll('*').remove();
+    d3.select('#output-svg').selectAll('*').remove();
+    updateAll();
+  });
+  document.getElementById('btn-start').addEventListener('click',function(){
+    running=!running;
+    if(running){document.getElementById('btn-start').textContent='\u23F8 Pause';document.getElementById('btn-start').className='pg-btn stop';tick()}
+    else{document.getElementById('btn-start').textContent='\u25B6 Train';document.getElementById('btn-start').className='pg-btn'}
+  });
+  document.getElementById('btn-step').addEventListener('click',function(){
+    if(step<numSteps){trainStep();updateAll()}
+  });
+
+  initTrain();
+  updateAll();
+}
+
+init();
+</script>
