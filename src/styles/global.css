@@ -806,6 +806,100 @@ footer a:hover {
   font-size: var(--text-small);
 }
 
+/* Skills grid */
+.skills-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg) var(--space-xl);
+  margin-bottom: var(--space-xl);
+}
+
+.skill-group h3 {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  margin: 0 0 var(--space-sm) 0;
+}
+
+.skill-group p {
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  color: var(--fg);
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* Career timeline */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: var(--space-xl);
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--fg-faint);
+  align-items: baseline;
+}
+
+.timeline-item:first-child {
+  border-top: 1px solid var(--fg-faint);
+}
+
+.timeline-role {
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.timeline-company {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  color: var(--fg-muted);
+  margin-left: 0.5rem;
+}
+
+.timeline-desc {
+  font-size: var(--text-small);
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.resume-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--fg-faint);
+  text-underline-offset: 3px;
+  transition: color var(--duration) var(--ease), text-decoration-color var(--duration) var(--ease);
+}
+
+.resume-link:hover {
+  color: var(--accent-color);
+  text-decoration-color: var(--accent-color);
+}
+
+@media (max-width: 640px) {
+  .skills-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-item {
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+  }
+}
+
 /* ── Empty state ───────────────────────────────── */
 
 .empty-state {
