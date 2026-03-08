@@ -9,17 +9,24 @@ const posts = Object.entries(allPosts)
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
+// links: array of { label, url } for each project
+// supported labels: 'paper', 'github', 'demo', 'docs', 'site'
 const projects = [
   {
     title: 'Lung Cancer Risk Prediction',
     desc: 'Peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records.',
     tags: ['research', 'healthcare', 'machine learning'],
-    url: 'https://doi.org/10.1097/QMH.0000000000000525',
+    links: [
+      { label: 'paper', url: 'https://doi.org/10.1097/QMH.0000000000000525' },
+    ],
   },
   {
     title: 'Trust Bench',
     desc: 'Open-source tool for profiling LLM trustworthiness. Extract trust signals, evaluate, diagnose failures, and improve models.',
     tags: ['AI safety', 'interpretability', 'PyTorch', 'LLM evaluation'],
+    links: [
+      { label: 'github', url: 'https://github.com/amaljithkuttamath/trust-bench' },
+    ],
     details: {
       problem: "Evaluation tools score model outputs but none connect trust scores to what's happening inside the model. The closed loop (profile, diagnose, fix, verify) doesn't exist as open-source infrastructure.",
       approach: 'Extract internal trust signals (logprobs, entropy, layer activations per attention type) from models with full architectural access. Score across TrustLLM dimensions. Apply targeted improvements (RepE, calibration, Constitutional AI). Re-evaluate.',
@@ -141,26 +148,24 @@ const projects = [
     </a>
 
     {projects.map((item) => (
-      item.url ? (
-        <a href={item.url} class="work-item work-item-link" target="_blank" rel="noopener noreferrer" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
-          <div class="work-item-head">
-            <h3>{item.title}</h3>
-            <span class="mono">publication</span>
-          </div>
-          <p>{item.desc}</p>
-          <div class="tags">
-            {item.tags.map((t) => <span class="tag">{t}</span>)}
-          </div>
-        </a>
-      ) : (
+      item.details ? (
       <details class="work-item work-item-expandable" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
         <summary>
           <div class="work-item-head">
             <h3>{item.title}</h3>
           </div>
           <p>{item.desc}</p>
-          <div class="tags">
-            {item.tags.map((t) => <span class="tag">{t}</span>)}
+          <div class="work-item-meta">
+            <div class="tags">
+              {item.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+            {item.links && (
+              <div class="work-links">
+                {item.links.map((link) => (
+                  <a href={link.url} class="work-link" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">{link.label} &rarr;</a>
+                ))}
+              </div>
+            )}
           </div>
         </summary>
         <div class="work-item-details">
@@ -182,6 +187,25 @@ const projects = [
           </div>
         </div>
       </details>
+      ) : (
+        <div class="work-item" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
+          <div class="work-item-head">
+            <h3>{item.title}</h3>
+          </div>
+          <p>{item.desc}</p>
+          <div class="work-item-meta">
+            <div class="tags">
+              {item.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+            {item.links && (
+              <div class="work-links">
+                {item.links.map((link) => (
+                  <a href={link.url} class="work-link" target="_blank" rel="noopener noreferrer">{link.label} &rarr;</a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )
     ))}
   </div>
@@ -258,10 +282,43 @@ const projects = [
     animation: fadeIn 0.2s var(--ease);
   }
 
+  .work-item-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .work-links {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .work-link {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    text-decoration: none;
+    text-transform: lowercase;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .work-link:hover {
+    color: var(--accent-color);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   @media (max-width: 640px) {
     .work-item-head {
       flex-direction: column;
       gap: 0.125rem;
+    }
+
+    .work-item-meta {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
 </style>
