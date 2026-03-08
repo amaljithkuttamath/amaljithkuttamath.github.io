@@ -11,6 +11,23 @@ const formatDate = (date: string) =>
 
 const projects = [
   {
+    title: 'Lung Cancer Risk Prediction',
+    desc: 'Peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records.',
+    tags: ['research', 'healthcare', 'machine learning'],
+    url: 'https://doi.org/10.1097/QMH.0000000000000525',
+  },
+  {
+    title: 'Trust Bench',
+    desc: 'Open-source tool for profiling LLM trustworthiness. Extract trust signals, evaluate, diagnose failures, and improve models.',
+    tags: ['AI safety', 'interpretability', 'PyTorch', 'LLM evaluation'],
+    details: {
+      problem: "Evaluation tools score model outputs but none connect trust scores to what's happening inside the model. The closed loop (profile, diagnose, fix, verify) doesn't exist as open-source infrastructure.",
+      approach: 'Extract internal trust signals (logprobs, entropy, layer activations per attention type) from models with full architectural access. Score across TrustLLM dimensions. Apply targeted improvements (RepE, calibration, Constitutional AI). Re-evaluate.',
+      stack: 'Python, PyTorch, lm-eval-harness, TrustLLM datasets',
+      outcome: 'In progress. First target: Qwen3.5 0.8B hybrid attention architecture, studying how trust signals differ across linear vs full attention layers.',
+    },
+  },
+  {
     title: 'Healthcare RAG Pipeline',
     desc: 'A retrieval system that helps clinicians query medical records and PubMed literature in natural language.',
     tags: ['RAG', 'vertex ai', 'langchain', 'llamaindex'],
@@ -23,7 +40,7 @@ const projects = [
   },
   {
     title: 'Medical Knowledge Graph',
-    desc: 'A graph connecting diseases, drugs, treatments, and clinical trials  making relationships between medical concepts searchable.',
+    desc: 'A graph connecting diseases, drugs, treatments, and clinical trials, making relationships between medical concepts searchable.',
     tags: ['neo4j', 'elasticsearch', 'embeddings'],
     details: {
       problem: 'Medical knowledge is scattered across databases, papers, and records. Relationships between entities (drug → treats → disease → has trial) are lost in flat storage.',
@@ -59,10 +76,21 @@ const projects = [
     desc: 'Over 50 data pipelines moving business data between ERP systems, warehouses, and reporting tools.',
     tags: ['azure', 'databricks', 'ETL'],
     details: {
-      problem: 'Business partners exchange data via EDI  a standardized-in-theory format that varies wildly in practice. Data needs cleaning, transformation, and routing to downstream systems.',
+      problem: 'Business partners exchange data via EDI, a standardized-in-theory format that varies wildly in practice. Data needs cleaning, transformation, and routing to downstream systems.',
       approach: 'Azure Data Factory orchestrates ingestion and routing. Databricks handles transformation, schema normalization, and quality checks.',
       stack: 'Azure Data Factory, Databricks, Azure Data Lake, Python, SQL',
       outcome: 'Processed over 2TB of transaction data. Connected ERP systems, warehouses, and reporting tools into a single pipeline.',
+    },
+  },
+  {
+    title: 'LLM Fine-tuning System',
+    desc: 'Production fine-tuning pipeline for Qwen2.5-3B with GRPO + LoRA, deployed via vLLM with auto-scaling.',
+    tags: ['LLM', 'fine-tuning', 'vLLM'],
+    details: {
+      problem: 'Off-the-shelf models underperform on domain tasks. Fine-tuning at scale requires efficient training and serving infrastructure.',
+      approach: '4-bit quantization with LoRA adapters for memory-efficient training. GRPO for reward-guided optimization. vLLM for high-throughput inference with auto-scaling.',
+      stack: 'PyTorch, Hugging Face, LoRA, vLLM, Python',
+      outcome: 'Fine-tuned 3B parameter model deployed to production, reducing inference costs by 25%.',
     },
   },
   {
@@ -79,7 +107,7 @@ const projects = [
 ];
 ---
 
-<Base title="Work  Amaljith Kuttamath" description="AI/NLP projects, data engineering, and technical writing.">
+<Base title="Work | Amaljith Kuttamath" description="AI/NLP projects, data engineering, and technical writing.">
   <div class="page-header animate-in">
     <h1>Work</h1>
     <p class="subtitle">Projects, writing, and things I've built.</p>
@@ -104,7 +132,7 @@ const projects = [
         <h3>microGPT Playground</h3>
         <span class="mono">interactive</span>
       </div>
-      <p>Train a GPT live in your browser  watch attention, embeddings, and loss evolve in real time.</p>
+      <p>Train a GPT live in your browser. Watch attention, embeddings, and loss evolve in real time.</p>
       <div class="tags">
         <span class="tag">interactive</span>
         <span class="tag">d3.js</span>
@@ -113,6 +141,18 @@ const projects = [
     </a>
 
     {projects.map((item) => (
+      item.url ? (
+        <a href={item.url} class="work-item work-item-link" target="_blank" rel="noopener noreferrer" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
+          <div class="work-item-head">
+            <h3>{item.title}</h3>
+            <span class="mono">publication</span>
+          </div>
+          <p>{item.desc}</p>
+          <div class="tags">
+            {item.tags.map((t) => <span class="tag">{t}</span>)}
+          </div>
+        </a>
+      ) : (
       <details class="work-item work-item-expandable" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
         <summary>
           <div class="work-item-head">
@@ -142,6 +182,7 @@ const projects = [
           </div>
         </div>
       </details>
+      )
     ))}
   </div>
 </Base>

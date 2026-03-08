@@ -2,11 +2,11 @@
 import Base from '../layouts/Base.astro';
 ---
 
-<Base title="microGPT Playground  Amaljith Kuttamath" description="Watch a tiny GPT learn to generate names  one character at a time, live in your browser.">
+<Base title="microGPT Playground | Amaljith Kuttamath" description="Watch a tiny GPT learn to generate names, one character at a time, live in your browser.">
   <div class="pg">
     <div class="pg-head">
       <h1>microGPT Playground</h1>
-      <p>This is a tiny GPT  the same architecture behind ChatGPT, Claude, and every other large language model  running entirely in your browser. It starts knowing nothing. You'll watch it learn, from random noise to inventing plausible human names, by training on 500 real names one character at a time. Every card below shows a different piece of the model's brain as it learns.</p>
+      <p>This is a tiny GPT, the same architecture behind ChatGPT, Claude, and every other large language model, running entirely in your browser. It starts knowing nothing. You'll watch it learn, from random noise to inventing plausible human names, by training on 500 real names one character at a time. Every card below shows a different piece of the model's brain as it learns.</p>
       <p style="margin-top:8px">Read the <a href="/work/understanding-llms" style="color:var(--accent-color)">full explanation</a> of how every piece works.</p>
       <div class="pg-howto">
         <strong>How to use:</strong> Hit <strong>Train</strong> to start training automatically, or <strong>Step</strong> to advance one step at a time and watch each piece update. The cards below show what happens inside the model at every step. Tweak the knobs, hit <strong>Reset</strong>, and train again to see how they change the result.
@@ -16,7 +16,7 @@ import Base from '../layouts/Base.astro';
     <div class="pg-controls" id="controls"></div>
     <textarea id="custom-text" class="pg-textarea" placeholder="One item per line..." style="display:none"></textarea>
 
-    <!-- Fixed dashboard grid  nothing moves -->
+    <!-- Fixed dashboard grid, nothing moves -->
     <div class="dash">
       <!-- Row 1: Story + progress -->
       <div class="card card-wide" id="card-story">
@@ -24,7 +24,7 @@ import Base from '../layouts/Base.astro';
         <div id="story-content" class="story-content">Press <strong>Train</strong> or <strong>Step</strong> to start</div>
       </div>
 
-      <!-- FORWARD PASS  data flows through the model -->
+      <!-- FORWARD PASS: data flows through the model -->
       <div class="phase-label" id="phase-forward">
         <span class="phase-tag">Forward Pass</span>
         <span class="phase-desc">Data flows through the model to make a prediction</span>
@@ -56,10 +56,10 @@ import Base from '../layouts/Base.astro';
         <div id="output-verdict" class="verdict"></div>
       </div>
 
-      <!-- BACKWARD PASS  learning from mistakes -->
+      <!-- BACKWARD PASS: learning from mistakes -->
       <div class="phase-label" id="phase-backward">
         <span class="phase-tag phase-tag-back">Backward Pass</span>
-        <span class="phase-desc">Error flows back through the model  each component learns how to improve</span>
+        <span class="phase-desc">Error flows back through the model. Each component learns how to improve</span>
         <span class="phase-arrow">&#x2191;</span>
       </div>
 
@@ -459,14 +459,14 @@ function generate(){
 function cl(id){return id===BOS?'START':uchars[id]||'?'}
 
 // ============================================================
-//  Fixed-size visualization updates  no DOM creation/destruction
+//  Fixed-size visualization updates, no DOM creation/destruction
 // ============================================================
 
 // --- Story ---
 function updateStory(){
   var el=document.getElementById('story-content');
   if(!lastDoc||step===0){el.innerHTML='Press <strong>Train</strong> or <strong>Step</strong> to start';return}
-  var h='<div>Step '+step+'  learning from: ';
+  var h='<div>Step '+step+', learning from: ';
   for(var i=0;i<lastDoc.length;i++) h+='<span class="ch">'+lastDoc[i]+'</span>';
   h+='</div>';
   if(lastInter&&lastN>0){
@@ -479,7 +479,7 @@ function updateStory(){
     var ex=ld.map(function(l){return Math.exp(l-mx)});var sm=ex.reduce(function(a,b){return a+b},0);
     var pr=ex.map(function(e){return e/sm});var ti=0;for(var i=1;i<pr.length;i++)if(pr[i]>pr[ti])ti=i;
     var ok=ti===lastToks[lp+1];
-    h+='<span class="arrow"></span>model says: <strong class="'+(ok?'right':'wrong')+'">'+cl(ti)+'</strong> ('+((pr[ti]*100)|0)+'%)';
+    h+='<span class="arrow">&rarr;</span>model says: <strong class="'+(ok?'right':'wrong')+'">'+cl(ti)+'</strong> ('+((pr[ti]*100)|0)+'%)';
     if(ok) h+=' <span class="right">&#10003;</span>';
     h+='</div>';
   }
