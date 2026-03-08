@@ -62,8 +62,9 @@ const canonicalURL = new URL(currentPath, Astro.site);
     <nav>
       <a href="/" class="logo" class:list={[{ active: currentPath === '/' }]} aria-label="Home">AK</a>
       <div class="nav-links">
-        <a href="/writing" class:list={[{ active: currentPath.startsWith('/writing') }]}>writing</a>
-        <a href="/projects" class:list={[{ active: currentPath === '/projects' || currentPath === '/projects/' }]}>projects</a>
+        <a href="/" class:list={[{ active: currentPath === '/' }]}>home</a>
+        <a href="/work" class:list={[{ active: currentPath.startsWith('/work') }]}>work</a>
+        <a href="/playground" class:list={[{ active: currentPath === '/playground' || currentPath === '/playground/' }]}>playground</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
       </div>
     </nav>
