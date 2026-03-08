@@ -9,18 +9,13 @@ const posts = Object.entries(allPosts)
 
 const projects = [
   {
-    title: 'Healthcare RAG Pipeline',
-    description: 'Helping doctors find answers in medical literature and patient records using retrieval-augmented generation.',
-    tags: ['RAG', 'vertex ai'],
-  },
-  {
-    title: 'Medical Knowledge Graph',
-    description: 'Connecting diseases, treatments, and clinical trials in a searchable graph that powers downstream AI.',
-    tags: ['neo4j', 'embeddings'],
+    title: 'Trust Bench',
+    description: 'Open-source tool for profiling LLM trustworthiness. Extract trust signals, evaluate, diagnose failures, and improve models.',
+    tags: ['AI safety', 'interpretability', 'PyTorch'],
   },
   {
     title: 'Understanding LLMs From Scratch',
-    description: 'A walkthrough of the transformer algorithm — from tokenization to inference — in 200 lines of Python.',
+    description: 'A walkthrough of the transformer algorithm, from tokenization to inference, in 200 lines of Python.',
     tags: ['deep learning', 'transformers'],
     url: '/writing/understanding-llms',
   },
@@ -34,11 +29,11 @@ const formatDate = (date: string) =>
   <section class="hero animate-in">
     <h1>Amaljith Kuttamath</h1>
     <p class="tagline">
-      AI Engineer building systems that help healthcare professionals
-      find the right information at the right time. Currently at Sorcero,
-      working on RAG pipelines and knowledge graphs for medical data.
+      AI Engineer studying how language models fail — and why.
+      Researching LLM trust and safety through mechanistic interpretability,
+      hallucination detection, and failure mode analysis at the architectural level.
     </p>
-    <div class="status">Building AI for healthcare</div>
+    <div class="status">Researching LLM trust & safety</div>
   </section>
 
   <section class="home-section animate-in animate-in-delay-1">
