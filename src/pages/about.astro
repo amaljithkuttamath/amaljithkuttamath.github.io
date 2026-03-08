@@ -6,21 +6,11 @@ import Base from '../layouts/Base.astro';
   <article class="about-content animate-in">
     <h1>About</h1>
 
-    <section class="about-section">
+    <section class="about-section about-intro">
+      <img src="/amal.jpg" alt="Amaljith Kuttamath" class="about-photo" width="120" height="120" />
       <p>
-        I research how language models fail and build tooling to measure it. Right now that means <strong>Trust Bench</strong>, a framework for profiling LLM trustworthiness: extracting internal signals, evaluating across safety dimensions, and diagnosing failure modes specific to a deployment context. Before that, I spent years building retrieval pipelines and knowledge graphs for healthcare, where I developed methodology for measuring hallucination patterns in retrieval-augmented generation. That work is what pulled me toward the deeper question of what's actually happening inside these models.
+        I research how language models fail and build tooling to measure it. My background is in retrieval systems and knowledge graphs for healthcare, which pulled me toward the deeper question of what's actually happening inside these models. See what I'm working on at <a href="/work">/work</a>.
       </p>
-    </section>
-
-    <section class="about-section">
-      <div class="section-header">
-        <h2>What I Work On</h2>
-      </div>
-      <ul class="focus-list">
-        <li><strong>LLM trust and safety:</strong> failure mode analysis, hallucination detection, mechanistic interpretability</li>
-        <li><strong>Evaluation systems:</strong> building frameworks that profile model behavior beyond standard benchmarks</li>
-        <li><strong>Retrieval and knowledge:</strong> RAG pipelines, knowledge graphs, measuring retrieval fidelity</li>
-      </ul>
     </section>
 
     <section class="about-section">
@@ -77,27 +67,24 @@ import Base from '../layouts/Base.astro';
 </Base>
 
 <style>
+  .about-intro {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-lg);
+  }
+
+  .about-photo {
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+  }
+
   .about-section {
     margin-bottom: var(--space-xl);
   }
 
   .about-section:last-child {
     margin-bottom: 0;
-  }
-
-  .focus-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-
-  .focus-list li {
-    font-size: var(--text-body);
-    color: var(--fg-muted);
-    line-height: 1.6;
   }
 
   .background-brief {
@@ -150,5 +137,13 @@ import Base from '../layouts/Base.astro';
 
   .social-links a:hover {
     color: var(--accent-color);
+  }
+
+  @media (max-width: 480px) {
+    .about-intro {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
   }
 </style>

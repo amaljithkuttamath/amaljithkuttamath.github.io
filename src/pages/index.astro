@@ -43,18 +43,6 @@ const formatDate = (date: string) =>
           <time class="mono">{formatDate(post.frontmatter.date)}</time>
         </li>
       ))}
-      <li class="post-item">
-        <a href="/work#healthcare-rag-pipeline">Healthcare RAG Pipeline</a>
-        <span class="mono project-tag-inline">RAG &middot; vertex ai</span>
-      </li>
-      <li class="post-item">
-        <a href="/work#medical-knowledge-graph">Medical Knowledge Graph</a>
-        <span class="mono project-tag-inline">neo4j &middot; embeddings</span>
-      </li>
-      <li class="post-item">
-        <a href="/work#drug-safety-sentiment-analysis">Drug Safety Sentiment Analysis</a>
-        <span class="mono project-tag-inline">NLP &middot; healthcare</span>
-      </li>
     </ul>
   </section>
 </Base>
@@ -116,9 +104,4 @@ const formatDate = (date: string) =>
     text-underline-offset: 3px;
   }
 
-  .project-tag-inline {
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    white-space: nowrap;
-  }
 </style>
