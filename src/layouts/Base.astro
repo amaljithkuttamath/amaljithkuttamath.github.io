@@ -5,9 +5,44 @@ interface Props {
   ogImage?: string;
 }
 
-const { title, description = 'AI Engineer. Building things that think.', ogImage } = Astro.props;
+const { title, description = 'AI Engineer. Building things that think.', ogImage = '/amal.jpg' } = Astro.props;
 const currentPath = Astro.url.pathname;
 const canonicalURL = new URL(currentPath, Astro.site);
+const ogImageURL = new URL(ogImage, Astro.site);
+
+const navItems = [
+  { href: '/', label: 'Home' },
+  { href: '/work', label: 'Work' },
+  { href: '/playground', label: 'Playground' },
+  { href: '/about', label: 'About' },
+];
+
+const breadcrumbItems: { "@type": string; position: number; name: string; item: string }[] = [
+  { "@type": "ListItem", "position": 1, "name": "Home", "item": new URL('/', Astro.site).href }
+];
+
+const matchedNav = navItems.find(item =>
+  item.href !== '/' && (currentPath === item.href || currentPath === item.href + '/' || currentPath.startsWith(item.href))
+);
+
+if (matchedNav) {
+  breadcrumbItems.push({
+    "@type": "ListItem",
+    "position": 2,
+    "name": matchedNav.label,
+    "item": new URL(matchedNav.href, Astro.site).href
+  });
+
+  const isSubpage = currentPath !== matchedNav.href && currentPath !== matchedNav.href + '/';
+  if (isSubpage) {
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      "position": 3,
+      "name": title.replace(/ \| .+$/, ''),
+      "item": canonicalURL.href
+    });
+  }
+}
 ---
 
 <!DOCTYPE html>
@@ -21,37 +56,63 @@ const canonicalURL = new URL(currentPath, Astro.site);
   <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
   <link rel="canonical" href={canonicalURL} />
 
+  <!-- Preconnect to Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content={canonicalURL} />
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
-  {ogImage && <meta property="og:image" content={new URL(ogImage, Astro.site)} />}
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:site_name" content="Amaljith Kuttamath" />
+  <meta property="og:image" content={ogImageURL} />
 
   <!-- Twitter -->
-  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:card" content={ogImage === '/amal.jpg' ? 'summary' : 'summary_large_image'} />
   <meta name="twitter:site" content="@amaljithkm" />
   <meta name="twitter:title" content={title} />
   <meta name="twitter:description" content={description} />
-  {ogImage && <meta name="twitter:image" content={new URL(ogImage, Astro.site)} />}
+  <meta name="twitter:image" content={ogImageURL} />
 
   <title>{title}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="sitemap" href="/sitemap-index.xml" />
+  <link rel="alternate" type="application/rss+xml" title="Amaljith Kuttamath" href={new URL('/rss.xml', Astro.site)} />
 
-  <!-- JSON-LD structured data -->
+  <!-- JSON-LD: Person -->
   <script type="application/ld+json" set:html={JSON.stringify({
     "@context": "https://schema.org",
     "@type": "Person",
     "name": "Amaljith Kuttamath",
     "url": "https://amaljithkuttamath.github.io",
     "jobTitle": "AI Engineer",
-    "worksFor": { "@type": "Organization", "name": "Sorcero" },
     "sameAs": [
       "https://github.com/amaljithkuttamath",
       "https://linkedin.com/in/amaljithk",
       "https://x.com/amaljithkm"
     ]
+  })} />
+
+  <!-- JSON-LD: WebSite -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Amaljith Kuttamath",
+    "url": "https://amaljithkuttamath.github.io",
+    "description": "AI Engineer. Building things that think.",
+    "author": {
+      "@type": "Person",
+      "name": "Amaljith Kuttamath"
+    }
+  })} />
+
+  <!-- JSON-LD: BreadcrumbList -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": breadcrumbItems
   })} />
 
 </head>
