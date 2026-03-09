@@ -17,23 +17,31 @@ const navItems = [
   { href: '/about', label: 'About' },
 ];
 
-const breadcrumbItems = navItems
-  .filter(item => currentPath === item.href || currentPath === item.href + '/' || (item.href !== '/' && currentPath.startsWith(item.href)))
-  .map((item, i) => ({
-    "@type": "ListItem",
-    "position": i + 1,
-    "name": item.label,
-    "item": new URL(item.href, Astro.site).href
-  }));
+const breadcrumbItems: { "@type": string; position: number; name: string; item: string }[] = [
+  { "@type": "ListItem", "position": 1, "name": "Home", "item": new URL('/', Astro.site).href }
+];
 
-if (breadcrumbItems.length === 0 || breadcrumbItems[0].name !== 'Home') {
-  breadcrumbItems.unshift({
+const matchedNav = navItems.find(item =>
+  item.href !== '/' && (currentPath === item.href || currentPath === item.href + '/' || currentPath.startsWith(item.href))
+);
+
+if (matchedNav) {
+  breadcrumbItems.push({
     "@type": "ListItem",
-    "position": 1,
-    "name": "Home",
-    "item": new URL('/', Astro.site).href
+    "position": 2,
+    "name": matchedNav.label,
+    "item": new URL(matchedNav.href, Astro.site).href
   });
-  breadcrumbItems.forEach((item, i) => item.position = i + 1);
+
+  const isSubpage = currentPath !== matchedNav.href && currentPath !== matchedNav.href + '/';
+  if (isSubpage) {
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      "position": 3,
+      "name": title.replace(/ \| .+$/, ''),
+      "item": canonicalURL.href
+    });
+  }
 }
 ---
 
