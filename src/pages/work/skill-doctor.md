@@ -62,16 +62,16 @@ Three commands. That's the whole interface.
 
 | # | Check | What it catches |
 |---|-------|----------------|
-| 1 | Dynamic injection | Tool calls that should be `!command` |
-| 2 | Invocation safety | Missing `disable-model-invocation` |
-| 3 | Context duplication | Content already in CLAUDE.md |
-| 4 | Tool restrictions | Overly broad tool access |
-| 5 | Argument modes | Missing or misconfigured arguments |
-| 6 | Hook candidates | Patterns that suggest pre/post hooks |
-| 7 | Naming conventions | Inconsistent or unclear skill names |
-| 8 | Description quality | Vague or missing trigger descriptions |
-| 9 | Scope boundaries | Skills doing too many things |
-| 10 | Cross-skill conflicts | Overlapping triggers between skills |
+| 1 | Frontmatter completeness | Missing `allowed-tools`, `disable-model-invocation`, `model` |
+| 2 | Dynamic injection | Tool calls that should be `!command` |
+| 3 | Argument support | Multi-mode skills without `$ARGUMENTS` |
+| 4 | Supporting files | SKILL.md too large, missing templates or references |
+| 5 | Skill-scoped hooks | Pre/post actions that should be hooks, not instructions |
+| 6 | Overlap detection | Multiple skills triggering on the same keywords |
+| 7 | CLAUDE.md audit | Workflows in CLAUDE.md that should be skills |
+| 8 | Agent wiring | Agents referencing missing skills, or skills that should be agent-backed |
+| 9 | Model override | Opus used for tasks sonnet could handle |
+| 10 | Context isolation | Skills that should run in `context: fork` |
 
 ---
 
