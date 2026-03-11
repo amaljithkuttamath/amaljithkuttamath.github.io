@@ -43,7 +43,7 @@ Three commands. That's the whole interface.
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
   <code style="font-size: var(--text-body); color: var(--accent-color); background: none; padding: 0;">/skill-doctor</code>
-  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Scores against 13 checks. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
+  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Scores against a best-practices checklist. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
 </div>
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
@@ -58,23 +58,22 @@ Three commands. That's the whole interface.
 
 </div>
 
-### The 13 checks
+### What it checks
 
-| # | Check | What it catches |
-|---|-------|----------------|
-| 1 | Frontmatter completeness | Missing `allowed-tools`, `disable-model-invocation`, `model` |
-| 2 | Dynamic injection | Tool calls that should be `!command` |
-| 3 | Argument support | Multi-mode skills without `$ARGUMENTS` |
-| 4 | Supporting files | SKILL.md too large, missing templates or references |
-| 5 | Skill-scoped hooks | Pre/post actions that should be hooks, not instructions |
-| 6 | Overlap detection | Multiple skills triggering on the same keywords |
-| 7 | CLAUDE.md audit | Workflows in CLAUDE.md that should be skills |
-| 8 | Agent wiring | Agents referencing missing skills, or skills that should be agent-backed |
-| 9 | Model override | Opus used for tasks sonnet could handle |
-| 10 | Context isolation | Skills that should run in `context: fork` |
-| 11 | Description triggers | Vague descriptions that won't auto-invoke |
-| 12 | Progressive disclosure | Too much in frontmatter, or everything in one file |
-| 13 | Security | XML in frontmatter, reserved names, hardcoded secrets |
+| Check | What it catches |
+|-------|----------------|
+| Frontmatter completeness | Missing `allowed-tools`, `disable-model-invocation` |
+| Dynamic injection | Tool calls that should be `!command` |
+| Argument support | Multi-mode skills without `$ARGUMENTS` |
+| Files & progressive disclosure | SKILL.md too large, not using the three-level system |
+| Skill-scoped hooks | Pre/post actions that should be hooks, not instructions |
+| Overlap detection | Multiple skills triggering on the same keywords |
+| CLAUDE.md audit | Workflows in CLAUDE.md that should be skills |
+| Agent wiring | Agents referencing missing skills, or skills that should be agent-backed |
+| Model override | Opus used for tasks sonnet could handle |
+| Context isolation | Skills that should run in `context: fork` |
+| Description triggers | Vague descriptions that won't auto-invoke |
+| Security | XML in frontmatter, reserved names, hardcoded secrets |
 
 ---
 
