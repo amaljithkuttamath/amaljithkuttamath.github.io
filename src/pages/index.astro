@@ -4,104 +4,147 @@ import Base from '../layouts/Base.astro';
 const allPosts = import.meta.glob('./work/*.md', { eager: true }) as Record<string, any>;
 const posts = Object.entries(allPosts)
   .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') }))
-  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime())
-  .slice(0, 5);
+  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
 const formatDate = (date: string) =>
-  new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 ---
 
 <Base title="Amaljith Kuttamath">
   <section class="hero animate-in">
-    <h1>Amaljith Kuttamath</h1>
-    <p class="tagline">
-      AI Engineer studying how language models fail, and why.
-      Researching LLM trust and safety through mechanistic interpretability,
-      hallucination detection, and failure mode analysis at the architectural level.
-    </p>
     <div class="status">Researching LLM trust & safety</div>
   </section>
 
-  <section class="featured animate-in animate-in-delay-1">
-    <a href="/playground" class="featured-card">
-      <span class="featured-eyebrow">Interactive</span>
-      <h2>microGPT Playground</h2>
-      <p>Watch a tiny GPT learn to write names, live in your browser. Same architecture as ChatGPT, small enough to understand.</p>
-      <span class="featured-cta">Open playground &rarr;</span>
-    </a>
+  <a href="/playground" class="playground-link animate-in animate-in-delay-1">
+    <span class="playground-label">microGPT Playground</span>
+    <span class="playground-cta">Train a transformer in your browser &rarr;</span>
+  </a>
+
+  <section class="animate-in animate-in-delay-1">
+    <div class="section-header">
+      <h2>Writing</h2>
+      <a href="/blog">All &rarr;</a>
+    </div>
+    <div class="home-posts">
+      {posts.map((post) => (
+        <a href={post.url} class="home-post">
+          <span class="home-post-title">{post.frontmatter.title}</span>
+          <span class="home-post-desc">{post.frontmatter.description}</span>
+          {post.frontmatter.tags && (
+            <span class="home-post-tags">
+              {post.frontmatter.tags.map((tag: string) => (
+                <span class="tag">{tag}</span>
+              ))}
+            </span>
+          )}
+          <time class="mono">{formatDate(post.frontmatter.date)}</time>
+        </a>
+      ))}
+    </div>
   </section>
 
-  <section class="home-section animate-in animate-in-delay-2">
-    <div class="section-header">
-      <h2>Recent Work</h2>
-      <a href="/work">View all &rarr;</a>
-    </div>
-    <ul class="post-list">
-      {posts.map((post) => (
-        <li class="post-item">
-          <a href={post.url}>{post.frontmatter.title}</a>
-          <time class="mono">{formatDate(post.frontmatter.date)}</time>
-        </li>
-      ))}
-    </ul>
-  </section>
 </Base>
 
 <style>
-  .featured {
-    margin-bottom: var(--space-3xl);
+  .hero {
+    padding: var(--space-xl) 0 var(--space-lg);
   }
 
-  .featured-card {
-    display: block;
-    padding: var(--space-xl) var(--space-lg);
+  .hero .tagline {
+    color: var(--fg);
+    font-family: var(--font-serif);
+    font-size: var(--text-section);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.75rem;
+  }
+
+
+  /* ── Playground link ── */
+  .playground-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.75rem var(--space-md);
     border: 1px solid var(--fg-faint);
     border-radius: 8px;
     text-decoration: none;
     color: var(--fg);
-    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+    margin-bottom: var(--space-lg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
   }
 
-  .featured-card:hover {
+  .playground-link:hover {
     border-color: var(--accent-color);
     background: var(--bg-elevated);
   }
 
-  .featured-eyebrow {
+  .playground-label {
+    font-weight: 500;
+    font-size: var(--text-body);
+  }
+
+  .playground-cta {
     font-family: var(--font-mono);
     font-size: var(--text-label);
     color: var(--accent-color);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
   }
 
-  .featured-card h2 {
-    font-family: var(--font-serif);
-    font-size: var(--text-section);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    margin: 0.5rem 0;
+  section + section {
+    margin-top: var(--space-xl);
   }
 
-  .featured-card p {
-    color: var(--fg-muted);
-    font-size: var(--text-body);
-    line-height: 1.7;
-    max-width: 520px;
-    margin-bottom: var(--space-md);
+  .home-posts {
+    display: flex;
+    flex-direction: column;
   }
 
-  .featured-cta {
-    font-family: var(--font-mono);
-    font-size: var(--text-small);
-    color: var(--accent-color);
+  .home-post {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 0 var(--space-md);
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    text-decoration: none;
+    color: var(--fg);
     transition: color var(--duration) var(--ease);
   }
 
-  .featured-card:hover .featured-cta {
-    color: var(--accent-color);
-    text-decoration: underline;
-    text-underline-offset: 3px;
+  .home-post:first-child {
+    border-top: 1px solid var(--fg-faint);
   }
 
+  .home-post:hover {
+    color: var(--accent-color);
+  }
+
+  .home-post-title {
+    font-size: var(--text-body);
+    font-weight: 500;
+    grid-column: 1;
+  }
+
+  .home-post-desc {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    grid-column: 1;
+    line-height: 1.5;
+  }
+
+  .home-post-tags {
+    display: flex;
+    gap: 0.375rem;
+    grid-column: 1;
+    flex-wrap: wrap;
+    margin-top: 0.125rem;
+  }
+
+  .home-post time,
+  .home-post .mono {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
 </style>

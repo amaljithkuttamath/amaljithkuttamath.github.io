@@ -5,7 +5,10 @@ interface Props {
   frontmatter: {
     title: string;
     date: string;
+    updated?: string;
     description?: string;
+    tags?: string[];
+    repo?: string;
   };
 }
 
@@ -15,15 +18,40 @@ const formattedDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
   month: 'long',
   day: 'numeric',
 });
+const formattedUpdated = frontmatter.updated && frontmatter.updated !== frontmatter.date
+  ? new Date(frontmatter.updated).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+  : null;
 ---
 
 <Base title={`${frontmatter.title} | Amaljith Kuttamath`} description={frontmatter.description}>
   <article class="prose post-article animate-in">
     <header class="post-header">
-      <time class="mono post-date">{formattedDate}</time>
+      <div class="post-meta">
+        <time class="mono post-date">{formattedDate}</time>
+        {formattedUpdated && (
+          <span class="post-updated mono">updated {formattedUpdated}</span>
+        )}
+        {frontmatter.repo && (
+          <a href={frontmatter.repo} target="_blank" rel="noopener noreferrer" class="post-repo-top" title="View on GitHub">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span>Code</span>
+          </a>
+        )}
+      </div>
       <h1>{frontmatter.title}</h1>
       {frontmatter.description && (
         <p class="post-description">{frontmatter.description}</p>
+      )}
+      {frontmatter.tags && frontmatter.tags.length > 0 && (
+        <div class="post-tags">
+          {frontmatter.tags.map((tag) => (
+            <span class="tag">{tag}</span>
+          ))}
+        </div>
       )}
     </header>
     <script type="application/ld+json" set:html={JSON.stringify({
@@ -32,6 +60,7 @@ const formattedDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
       "headline": frontmatter.title,
       "description": frontmatter.description,
       "datePublished": frontmatter.date,
+      "dateModified": frontmatter.updated || frontmatter.date,
       "author": {
         "@type": "Person",
         "name": "Amaljith Kuttamath",
@@ -41,3 +70,41 @@ const formattedDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
     <slot />
   </article>
 </Base>
+
+<style>
+  .post-meta {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+  }
+
+  .post-updated {
+    color: var(--fg-muted);
+    font-size: var(--text-tag);
+    opacity: 0.7;
+  }
+
+  .post-tags {
+    display: flex;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .post-repo-top {
+    color: var(--fg-muted);
+    text-decoration: none;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    letter-spacing: 0.02em;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .post-repo-top:hover {
+    color: var(--accent-color);
+  }
+</style>

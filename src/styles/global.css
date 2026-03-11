@@ -1,12 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap');
 
 :root {
-  --bg: #0a0a0a;
-  --bg-elevated: #111111;
-  --bg-hover: #161616;
-  --fg: #e8e8e8;
-  --fg-muted: #737373;
-  --fg-faint: #1e1e1e;
+  --bg: #0c0b0a;
+  --bg-elevated: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --fg: #e8e6e3;
+  --fg-muted: #7a7570;
+  --fg-faint: rgba(255, 255, 255, 0.08);
   --link: #d4d4d4;
   --selection-bg: #262626;
   --selection-fg: #fafafa;
@@ -36,7 +36,7 @@
   --space-lg: 1.5rem;
   --space-xl: 2.5rem;
   --space-2xl: 4rem;
-  --space-3xl: 6rem;
+  --space-3xl: 4.5rem;
 
   /* Transitions */
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
@@ -46,12 +46,12 @@
 /* Light mode */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #fafaf9;
-    --bg-elevated: #f5f5f4;
-    --bg-hover: #eeeceb;
+    --bg: #faf9f7;
+    --bg-elevated: rgba(0, 0, 0, 0.03);
+    --bg-hover: rgba(0, 0, 0, 0.05);
     --fg: #1c1917;
     --fg-muted: #78716c;
-    --fg-faint: #e7e5e4;
+    --fg-faint: rgba(0, 0, 0, 0.06);
     --link: #1c1917;
     --selection-bg: #1c1917;
     --selection-fg: #fafaf9;
@@ -111,6 +111,7 @@ body {
   padding: 0 1.5rem;
 }
 
+
 /* Typography */
 h1, h2, h3 {
   font-family: var(--font-serif);
@@ -134,6 +135,24 @@ a {
   transition: color var(--duration) var(--ease);
 }
 
+/* Content links: used in prose, about, and other content areas */
+.prose a,
+.about-content a {
+  color: var(--accent-color);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color var(--duration) var(--ease),
+              color var(--duration) var(--ease);
+}
+
+.prose a:hover,
+.about-content a:hover {
+  color: var(--fg);
+  text-decoration-color: var(--accent-color);
+}
+
 /* Monospace labels */
 .mono {
   font-family: var(--font-mono);
@@ -141,6 +160,15 @@ a {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg-muted);
+}
+
+/* ── Glass / matte surface ────────────────────── */
+
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* ── Navigation ────────────────────────────────── */
@@ -378,7 +406,10 @@ footer a:hover {
 }
 
 .prose h2 {
+  font-family: var(--font-serif);
   font-size: var(--text-section);
+  font-weight: 500;
+  letter-spacing: -0.01em;
   margin-top: 2.5rem;
   margin-bottom: 0.75rem;
 }
@@ -393,19 +424,6 @@ footer a:hover {
   margin-bottom: 1.25rem;
 }
 
-.prose a {
-  text-decoration: underline;
-  text-decoration-color: var(--fg-faint);
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
-  transition: text-decoration-color var(--duration) var(--ease);
-}
-
-.prose a:hover {
-  color: var(--accent-color);
-  text-decoration-color: var(--accent-color);
-}
-
 .prose code {
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -415,14 +433,16 @@ footer a:hover {
 }
 
 .prose pre {
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   padding: 1.25rem;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow-x: auto;
   margin: 1.5rem 0;
   font-size: var(--text-small);
   line-height: 1.6;
-  border: 1px solid var(--fg-faint);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .prose pre code {
@@ -432,12 +452,28 @@ footer a:hover {
 }
 
 .prose blockquote {
-  border-left: 2px solid var(--fg-faint);
+  border-left: 2px solid var(--accent-color);
   padding-left: 1.25rem;
   margin: 1.5rem 0;
   color: var(--fg-muted);
   font-style: italic;
   font-family: var(--font-serif);
+}
+
+.prose em {
+  font-family: var(--font-serif);
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--fg-faint);
+  margin: 2.5rem 0;
+}
+
+.prose > p:first-child {
+  font-size: var(--text-body-lg);
+  line-height: 1.85;
+  color: var(--fg);
 }
 
 .prose ul, .prose ol {
@@ -451,8 +487,66 @@ footer a:hover {
 
 .prose img {
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 8px;
   margin: 1.5rem 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.prose figure {
+  margin: 2rem 0;
+}
+
+.prose figure img {
+  margin-bottom: 0.5rem;
+}
+
+.prose figcaption {
+  font-size: var(--text-small);
+  color: var(--fg-muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ── Prose tables ─────────────────────────────── */
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  font-size: var(--text-small);
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.prose thead {
+  border-bottom: 2px solid var(--fg-faint);
+}
+
+.prose th {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+}
+
+.prose td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--fg-faint);
+  vertical-align: top;
+}
+
+.prose tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.prose tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .prose strong {
@@ -462,7 +556,7 @@ footer a:hover {
 /* ── Page header ───────────────────────────────── */
 
 .page-header {
-  padding: var(--space-3xl) 0 var(--space-xl);
+  padding: var(--space-2xl) 0 var(--space-lg);
 }
 
 .page-header h1 {
@@ -478,7 +572,7 @@ footer a:hover {
 /* ── Home hero ─────────────────────────────────── */
 
 .hero {
-  padding: 8rem 0 var(--space-3xl);
+  padding: 4.5rem 0 var(--space-2xl);
 }
 
 .hero h1 {
@@ -559,7 +653,7 @@ footer a:hover {
 /* ── About page ────────────────────────────────── */
 
 .about-content {
-  padding: var(--space-3xl) 0 var(--space-xl);
+  padding: var(--space-2xl) 0 var(--space-lg);
 }
 
 .about-content h1 {
@@ -578,20 +672,6 @@ footer a:hover {
   color: var(--fg);
   font-size: var(--text-body-lg);
   line-height: 1.75;
-}
-
-.about-content a {
-  color: var(--fg);
-  text-decoration: underline;
-  text-decoration-color: var(--fg-faint);
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
-  transition: text-decoration-color var(--duration) var(--ease);
-}
-
-.about-content a:hover {
-  color: var(--accent-color);
-  text-decoration-color: var(--accent-color);
 }
 
 .about-content hr {
@@ -673,16 +753,6 @@ footer a:hover {
   gap: 0.5rem;
   font-family: var(--font-mono);
   font-size: var(--text-small);
-  color: var(--fg);
-  text-decoration: underline;
-  text-decoration-color: var(--fg-faint);
-  text-underline-offset: 3px;
-  transition: color var(--duration) var(--ease), text-decoration-color var(--duration) var(--ease);
-}
-
-.resume-link:hover {
-  color: var(--accent-color);
-  text-decoration-color: var(--accent-color);
 }
 
 @media (max-width: 640px) {
@@ -729,7 +799,7 @@ footer a:hover {
 
 @media (max-width: 640px) {
   .hero {
-    padding: 5rem 0 3rem;
+    padding: 3rem 0 2rem;
   }
 
   .hero h1 {

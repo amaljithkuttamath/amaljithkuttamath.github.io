@@ -1,0 +1,99 @@
+---
+import Base from '../layouts/Base.astro';
+
+const allPosts = import.meta.glob('./work/*.md', { eager: true }) as Record<string, any>;
+const posts = Object.entries(allPosts)
+  .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') }))
+  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
+
+const formatDate = (date: string) =>
+  new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+---
+
+<Base title="Blog | Amaljith Kuttamath" description="Writing about LLM internals, trust, and what I learn building things.">
+  <div class="blog-header animate-in">
+    <h1>Blog</h1>
+  </div>
+
+  <div class="blog-list animate-in animate-in-delay-1">
+    {posts.map((post) => (
+      <a href={post.url} class="blog-item">
+        <div class="blog-item-main">
+          <h2>{post.frontmatter.title}</h2>
+          <p>{post.frontmatter.description}</p>
+          {post.frontmatter.tags && (
+            <div class="blog-tags">
+              {post.frontmatter.tags.map((tag: string) => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <time class="mono">{formatDate(post.frontmatter.date)}</time>
+      </a>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .blog-header {
+    padding: var(--space-2xl) 0 var(--space-lg);
+  }
+
+  .blog-header h1 {
+    font-family: var(--font-serif);
+    font-size: var(--text-page-title);
+    font-weight: 500;
+    letter-spacing: -0.03em;
+  }
+
+  .blog-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .blog-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-lg);
+    padding: var(--space-lg) 0;
+    border-bottom: 1px solid var(--fg-faint);
+    text-decoration: none;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .blog-item:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .blog-item:hover {
+    color: var(--accent-color);
+  }
+
+  .blog-item h2 {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    margin: 0 0 0.25rem;
+  }
+
+  .blog-item p {
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    margin: 0 0 0.5rem;
+    line-height: 1.5;
+  }
+
+  .blog-tags {
+    display: flex;
+    gap: 0.375rem;
+    flex-wrap: wrap;
+  }
+
+  .blog-item time {
+    flex-shrink: 0;
+    margin-top: 0.125rem;
+  }
+</style>

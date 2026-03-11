@@ -3,6 +3,8 @@ layout: ../../layouts/Post.astro
 title: "How Large Language Models Actually Work"
 date: "2025-03-07"
 description: "A visual, from-scratch deep dive into the algorithm behind GPT, Qwen, Llama, and every other LLM."
+tags: ["transformers", "from-scratch", "deep-dive"]
+repo: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5"
 ---
 
 > Based on Andrej Karpathy's [microgpt](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95). 200 lines of pure Python containing the core algorithm behind every modern LLM. The CUDA kernels, distributed training, and trillion-token datasets are engineering challenges on top of this foundation. But the mechanism itself fits on a napkin.

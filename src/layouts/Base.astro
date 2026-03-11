@@ -121,10 +121,10 @@ if (matchedNav) {
 
   <div class="container">
     <nav>
-      <a href="/" class="logo" class:list={[{ active: currentPath === '/' }]} aria-label="Home">AK</a>
+      <a href="/" class="logo" aria-label="Home">Amaljith Kuttamath</a>
       <div class="nav-links">
-        <a href="/" class:list={[{ active: currentPath === '/' }]}>home</a>
-        <a href="/work" class:list={[{ active: currentPath.startsWith('/work') }]}>work</a>
+        <a href="/work" class:list={[{ active: currentPath.startsWith('/work') && !currentPath.startsWith('/work/hybrid') && !currentPath.startsWith('/work/understanding') }]}>work</a>
+        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') || currentPath.startsWith('/work/hybrid') || currentPath.startsWith('/work/understanding') }]}>blog</a>
         <a href="/playground" class:list={[{ active: currentPath === '/playground' || currentPath === '/playground/' }]}>playground</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
       </div>
