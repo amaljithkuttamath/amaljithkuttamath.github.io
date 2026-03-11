@@ -43,7 +43,7 @@ Three commands. That's the whole interface.
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
   <code style="font-size: var(--text-body); color: var(--accent-color); background: none; padding: 0;">/skill-doctor</code>
-  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Scores against 10 checks. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
+  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Scores against 13 checks. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
 </div>
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
@@ -58,7 +58,7 @@ Three commands. That's the whole interface.
 
 </div>
 
-### The 10 checks
+### The 13 checks
 
 | # | Check | What it catches |
 |---|-------|----------------|
@@ -72,6 +72,9 @@ Three commands. That's the whole interface.
 | 8 | Agent wiring | Agents referencing missing skills, or skills that should be agent-backed |
 | 9 | Model override | Opus used for tasks sonnet could handle |
 | 10 | Context isolation | Skills that should run in `context: fork` |
+| 11 | Description triggers | Vague descriptions that won't auto-invoke |
+| 12 | Progressive disclosure | Too much in frontmatter, or everything in one file |
+| 13 | Security | XML in frontmatter, reserved names, hardcoded secrets |
 
 ---
 
