@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'skill-doctor',
+    metric: 'Claude Code plugin',
+    desc: 'Audits your Claude Code skills against 10 best-practice checks. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
+    tags: ['claude-code', 'skills', 'tooling'],
+    details: {
+      problem: 'Claude Code skills accumulate bad patterns: redundant context, missing tool restrictions, no invocation guards. Existing validators only check YAML syntax.',
+      approach: 'Reads all skills, agents, and CLAUDE.md. Scores against 10 checks covering dynamic injection, duplication, tool restrictions, and invocation safety. Consult mode maps findings to actual workflow pain points.',
+      stack: 'Claude Code plugin, Markdown skills',
+      outcome: 'Found and fixed issues in all 5 of my own skills. Saved ~2,500 tokens per session from context duplication alone.',
+    },
+  },
+  {
     title: 'Healthcare RAG Pipeline',
     metric: '10K+ daily queries',
     desc: 'Production RAG system for clinicians querying medical records and PubMed. Built hallucination-aware retrieval with domain-specific re-ranking.',
