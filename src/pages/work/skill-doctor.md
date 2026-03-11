@@ -43,7 +43,7 @@ Three commands. That's the whole interface.
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
   <code style="font-size: var(--text-body); color: var(--accent-color); background: none; padding: 0;">/skill-doctor</code>
-  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Scores against a best-practices checklist. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
+  <p style="margin: 0.5rem 0 0; font-size: var(--text-small); color: var(--fg-muted); line-height: 1.65;">Reads all your skills, agents, and CLAUDE.md. Uses Claude Code's built-in <code>claude-code-guide</code> agent to evaluate each skill against current best practices. Run as <code>checkup</code> for a report, or <code>consult</code> to map findings to your actual pain points.</p>
 </div>
 
 <div style="border-left: 2px solid var(--accent-color); padding: 1.25rem 1.5rem; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0;">
@@ -58,22 +58,11 @@ Three commands. That's the whole interface.
 
 </div>
 
-### What it checks
+### How it evaluates
 
-| Check | What it catches |
-|-------|----------------|
-| Frontmatter completeness | Missing `allowed-tools`, `disable-model-invocation` |
-| Dynamic injection | Tool calls that should be `!command` |
-| Argument support | Multi-mode skills without `$ARGUMENTS` |
-| Files & progressive disclosure | SKILL.md too large, not using the three-level system |
-| Skill-scoped hooks | Pre/post actions that should be hooks, not instructions |
-| Overlap detection | Multiple skills triggering on the same keywords |
-| CLAUDE.md audit | Workflows in CLAUDE.md that should be skills |
-| Agent wiring | Agents referencing missing skills, or skills that should be agent-backed |
-| Model override | Opus used for tasks sonnet could handle |
-| Context isolation | Skills that should run in `context: fork` |
-| Description triggers | Vague descriptions that won't auto-invoke |
-| Security | XML in frontmatter, reserved names, hardcoded secrets |
+There's no hardcoded checklist. Each skill gets sent to Claude Code's `claude-code-guide` agent, which evaluates it against Claude Code's current documentation. The agent knows the latest hooks system, script support, frontmatter fields, and mechanism tradeoffs. It decides whether your workflow should be a hook, a script, dynamic injection, or an instruction, and tells you why.
+
+It also checks cross-cutting concerns: skill overlap, CLAUDE.md bloat, and agent-skill wiring gaps.
 
 ---
 
@@ -84,6 +73,6 @@ claude plugin marketplace add amaljithkuttamath/skill-doctor
 claude plugin install skill-doctor@skill-doctor-marketplace
 ```
 
-No dependencies. Works standalone. Optionally integrates with [Context7](https://context7.com) for latest docs and [skill-creator](https://github.com/anthropics/skills) for format validation.
+No dependencies beyond Claude Code. Optionally integrates with [skill-creator](https://github.com/anthropics/skills) for format validation and blind comparison evals.
 
 v1.0. [Issues and feature requests welcome.](https://github.com/amaljithkuttamath/skill-doctor/issues)

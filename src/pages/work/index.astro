@@ -36,11 +36,11 @@ const proof = [
   {
     title: 'skill-doctor',
     metric: 'Claude Code plugin',
-    desc: 'Audits your Claude Code skills against 10 best-practice checks. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
+    desc: 'Audits your Claude Code skills using the built-in claude-code-guide agent. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
     tags: ['claude-code', 'skills', 'tooling'],
     details: {
       problem: 'Claude Code skills accumulate bad patterns: redundant context, missing tool restrictions, no invocation guards. Existing validators only check YAML syntax.',
-      approach: 'Reads all skills, agents, and CLAUDE.md. Scores against a best-practices checklist covering dynamic injection, duplication, tool restrictions, invocation safety, and more. Consult mode maps findings to actual workflow pain points.',
+      approach: 'Reads all skills, agents, and CLAUDE.md. Sends each skill to the claude-code-guide agent for evaluation against current Claude Code docs. Consult mode maps findings to actual workflow pain points.',
       stack: 'Claude Code plugin, Markdown skills',
       outcome: 'Found and fixed issues in all 5 of my own skills. Saved ~2,500 tokens per session from context duplication alone.',
     },
