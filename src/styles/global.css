@@ -178,6 +178,9 @@ nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border-bottom: 1px solid var(--fg-faint);
+  margin-bottom: var(--space-sm);
+  padding-bottom: 1.25rem;
 }
 
 nav .logo {

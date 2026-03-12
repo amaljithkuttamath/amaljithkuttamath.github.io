@@ -7,7 +7,7 @@ tags: ["superposition", "interpretability", "anthropic", "pytorch"]
 repo: "https://github.com/amaljithkuttamath/superposition-viz"
 ---
 
-If you read one interpretability paper, make it [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html) by Elhage et al. at Anthropic. It answers a question that blocks almost everything else in mechanistic interpretability: why can't you just read features off individual neurons?
+The paper [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html) by Elhage et al. at Anthropic answers a question that blocks almost everything else in mechanistic interpretability: why can't you just read features off individual neurons?
 
 The answer is superposition. Neural networks learn to represent more features than they have dimensions. A layer with 5 neurons doesn't store 5 features. It might store 10, overlapping them in ways that only work because most features are rarely active at the same time. This means no single neuron maps to a single concept. It's the core reason interpretability is hard.
 
@@ -47,8 +47,7 @@ This matters because it suggests superposition isn't a smooth tradeoff. There's 
 
 5 features projected into a 2D bottleneck, visualized as arrows from the origin. At **sparsity 0.0**, only 2 features get strong arrows pointing in distinct directions. The remaining 3 collapse to near-zero length. The model has 2 dimensions and uses them for the 2 most important features. Everything else is sacrificed.
 
-At **sparsity 0.9 to 0.99**, all 5 features fan out across the 2D plane. They overlap, but the model doesn't care. Features rarely co-activate, so the shared directions cause minimal reconstruction error in practice. You can literally see the model discovering that geometric overlap is acceptable when statistics allow it.
-
+At **sparsity 0.9 to 0.99**, all 5 features fan out across the 2D plane. They overlap, but the model doesn't care. Features rarely co-activate, so the shared directions cause minimal reconstruction error in practice.
 ---
 
 ## Interference structure

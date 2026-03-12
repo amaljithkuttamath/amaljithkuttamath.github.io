@@ -27,7 +27,7 @@ The first convolutional layer is a mess. All ten classes sit on top of each othe
 
 By the second conv layer, you start to see hints of structure. Footwear (sneakers, sandals, ankle boots) drifts away from upper-body clothing (shirts, coats, pullovers). The network has started grouping things by coarse visual similarity, not because it was told to, but because the classification loss pushes representations apart.
 
-The first fully connected layer is where things get interesting. Clusters become visible. Trousers separate cleanly. Bags form their own island. But the confusable categories, T-shirts and shirts, pullovers and coats, still overlap significantly. These items genuinely look alike in 28x28 grayscale. The network is still working on telling them apart.
+The first fully connected layer is shows clear structure. Clusters become visible. Trousers separate cleanly. Bags form their own island. But the confusable categories, T-shirts and shirts, pullovers and coats, still overlap significantly. These items genuinely look alike in 28x28 grayscale. The network is still working on telling them apart.
 
 The final FC layer, right before the classification head, is striking. Ten tight clusters, mostly separated. The network has organized 784 raw pixel values into a compact space where each class occupies its own region. This is the representation the classifier actually uses to make predictions, and you can see why it works.
 
@@ -61,7 +61,7 @@ This connects directly to interpretability research. When Anthropic builds spars
 
 Activation projections are a starting point. They show you that structure exists and how it evolves through the network. They don't tell you what individual neurons or features mean. For that, you need techniques like feature visualization, probing classifiers, or the sparse autoencoder decompositions that have produced compelling results on language models.
 
-But before you reach for the sophisticated tools, it's worth spending time with the simple ones. A UMAP scatter plot of layer activations teaches intuition that no metric can replace.
+A UMAP scatter plot of layer activations builds intuition faster than any metric.
 
 ---
 

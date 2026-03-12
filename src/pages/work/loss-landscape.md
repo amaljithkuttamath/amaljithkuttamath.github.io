@@ -7,7 +7,7 @@ tags: ["loss-landscape", "generalization", "optimization", "pytorch"]
 repo: "https://github.com/amaljithkuttamath/loss-landscape"
 ---
 
-A trained neural network sits at a minimum of its loss function. You know this. What's less obvious is that the shape of that minimum, sharp or flat, predicts whether the model will generalize.
+A trained neural network sits at a minimum of its loss function. What's less obvious is that the shape of that minimum, sharp or flat, predicts whether the model will generalize.
 
 I built a tool to visualize this directly. Train an MLP on FashionMNIST with different hyperparameters, perturb the final weights along two random directions, compute the loss at each point, and plot the resulting surface. The geometry is immediate: some configurations produce tight, steep valleys. Others produce wide, gentle basins.
 
@@ -17,7 +17,7 @@ I built a tool to visualize this directly. Train an MLP on FashionMNIST with dif
 
 The full loss landscape lives in weight space, one dimension per parameter. For even a small MLP, that's tens of thousands of dimensions. You cannot visualize it directly.
 
-The standard approach, from [Li et al. 2018 ("Visualizing the Loss Landscape of Neural Nets")](https://arxiv.org/abs/1802.09556), is to pick two random direction vectors in weight space and sweep perturbations along them. This gives you a 2D slice through the landscape centered at the trained weights. It's a projection, not the full picture. But the structure it reveals is real.
+The standard approach, from [Li et al. 2018 ("Visualizing the Loss Landscape of Neural Nets")](https://arxiv.org/abs/1802.09556), is to pick two random direction vectors in weight space and sweep perturbations along them. This gives you a 2D slice through the landscape centered at the trained weights. It's a projection, not the full picture.
 
 A 2D slice through a sharp minimum looks sharp. A slice through a flat minimum looks flat. The qualitative character survives projection.
 
@@ -25,7 +25,7 @@ A 2D slice through a sharp minimum looks sharp. A slice through a flat minimum l
 
 ## Filter normalization changes everything
 
-Here's a subtlety that matters. If you generate random perturbation directions naively, layers with large weight norms dominate the perturbation. The landscape looks artificially sharp because one layer is being pushed hard while others barely move.
+If you generate random perturbation directions naively, layers with large weight norms dominate the perturbation. The landscape looks artificially sharp because one layer is being pushed hard while others barely move.
 
 Li et al. solved this with filter normalization: scale each direction vector so its norm matches the corresponding layer's weight norm. This ensures each layer contributes proportionally to the perturbation. Without it, you're comparing apples to oranges across layers.
 
@@ -75,4 +75,4 @@ python run.py --grid-size 31 --device cpu
 
 This trains all four configurations and saves plots to `results/`. The grid size controls resolution. 31 is a good balance between detail and runtime. Bump it to 51 if you want smoother surfaces and have a few minutes to spare.
 
-The outputs are four plots: a 3D surface, a contour map, a side-by-side comparison across hyperparameter configs, and the sharpness bar chart. Together they make the abstract connection between optimization and generalization something you can point at.
+The outputs are four plots: a 3D surface, a contour map, a side-by-side comparison across hyperparameter configs, and the sharpness bar chart.

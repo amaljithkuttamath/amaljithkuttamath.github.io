@@ -41,7 +41,7 @@ Pure attention is winning, which I did not expect.
 
 The first thing I tried was making the model bigger. More params, more layers, wider. It got worse every single time. This makes sense if you think about it: a bigger model takes longer per step, and with a fixed 5-minute budget, that means fewer gradient updates. At 8M params you're already undertrained. Making the model bigger just makes that worse. This is basically [Chinchilla](https://arxiv.org/abs/2203.15556) applied to wall clock instead of FLOPs.
 
-Then I halved the batch size. Twice the optimizer steps, half the memory, nearly the best result. And doubling the learning rate beat every architectural change. The learning rate thing is [textbook](https://link.springer.com/chapter/10.1007/978-3-642-35289-8_26), the single most important hyperparameter, but it's easy to forget when you're busy swapping architectures.
+Then I halved the batch size. Twice the optimizer steps, half the memory, nearly the best result. And doubling the learning rate beat every architectural change. The learning rate thing is [textbook](https://link.springer.com/chapter/10.1007/978-3-642-35289-8_26), the single most important hyperparameter.
 
 So why is pure attention winning? There are a few things tangled together here. The hybrid gets half the optimizer steps in the same time, because DeltaNet's chunk recurrence (a Python for-loop) runs at ~345ms/step vs ~180ms for MLX's fused attention. I haven't tuned the hybrid's hyperparameters as carefully as the baseline. And I implemented the chunk-wise DeltaNet from scratch in MLX, not using FLA's optimized kernels. I already found three numerical bugs getting it to train at all. There could be subtler ones that don't produce NaN but quietly hurt quality.
 
@@ -107,9 +107,8 @@ BPB 2.036 means "broken sentences, some patterns." The model learned English wor
 
 ## On the process
 
-Each experiment takes 5 minutes at 8M, 30 minutes at 150M. The agent runs them back to back. Concepts I'd been reading about in papers for weeks (chunked recurrence, decay clamping, batch size vs step count, Neumann series convergence) clicked because I could see them succeed or fail in my own code. The loop from "what if" to "here's what happened" takes minutes instead of days. It's not rigorous, but you learn fast.
-
-Here's the thing, though. I did most of this manually. An agent helped write code and debug, but I was the one deciding what to try next, reading the loss curves, spotting the NaN pattern, choosing to compare against the FLA reference. That's slow. And it's exactly the kind of work that could be automated.
+Each experiment takes 5 minutes at 8M, 30 minutes at 150M. The agent runs them back to back. Concepts I'd been reading about in papers for weeks (chunked recurrence, decay clamping, batch size vs step count, Neumann series convergence) clicked because I could see them succeed or fail in my own code. The loop from "what if" to "here's what happened" takes minutes instead of days.
+I did most of this manually. An agent helped write code and debug, but I was the one deciding what to try next, reading the loss curves, spotting the NaN pattern, choosing to compare against the FLA reference. That's slow. And it's exactly the kind of work that could be automated.
 
 ---
 
@@ -128,14 +127,13 @@ The full loop I ran today looks like this:
 
 Steps 1 through 7 can be agent-automated. An experimenter agent sweeps configs and kicks off runs. A monitor watches loss curves and kills bad runs early. A reviewer generates text and scores quality. A debugger inspects gradients when training fails. Each agent does one thing, runs independently, reports back.
 
-Step 8 is where it gets interesting. The writer agent takes the experiment diffs, the loss curves, the failure logs, and drafts blog updates. The results table grows, the observations update, the "what's next" section changes as questions get answered.
+The writer agent takes the experiment diffs, the loss curves, the failure logs, and drafts blog updates. The results table grows, the observations update, the "what's next" section changes as questions get answered.
 
 But who checks the agents? Who catches a "repeated squaring optimization" that looks fast but computes the wrong answer?
 
-That's the human. I'm not doing the experiments. I'm auditing them. I read the diffs each morning, not the full output. The compression from "read paper, implement, debug, wait, interpret" to "read the diff" is the point. Understanding follows from doing, and the agents do the doing. I make the judgment calls.
+That's the human. I'm not doing the experiments. I'm auditing them. I read the diffs each morning, not the full output. The compression from "read paper, implement, debug, wait, interpret" to "read the diff" is the point. I make the judgment calls.
 
-This is also, not coincidentally, the core question behind [Trust Bench](https://github.com/amaljithkuttamath/trust-bench): how do you know when AI output is trustworthy? I'm living that question every time I review what the agents produced overnight. The audit layer is the human in the loop.
-
+This is also, not coincidentally, the core question behind [Trust Bench](https://github.com/amaljithkuttamath/trust-bench): how do you know when AI output is trustworthy?
 ---
 
 ## What's next

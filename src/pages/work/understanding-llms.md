@@ -23,13 +23,11 @@ Every large language model (GPT-4, Claude, Llama, Qwen) runs the same core loop:
 5. Repeat billions of times
 ```
 
-Simple to state, surprisingly deep to understand. Let's walk through each piece.
+Simple to state. The depth is in the details.
 
 ---
 
 ## 2. The Dataset
-
-*Fuel for the machine*
 
 ```python
 docs = [line.strip() for line in open('input.txt') if line.strip()]
@@ -38,13 +36,11 @@ random.shuffle(docs)
 
 The model loads 32,000 human names ("emma", "olivia", "liam", "noah"), each treated as a tiny document.
 
-At its core, an LLM is a statistical model of language. It learns patterns: feed it names and it learns what sequences of letters *look like* English names. Feed it the entire internet and it learns what sequences of words *look like* human knowledge. Whether that constitutes "understanding" is an open question, and one I think about a lot. What's clear is that the same algorithm works at both ends of the spectrum. The only difference is how much data and how many parameters you give it.
+At its core, an LLM is a statistical model of language. It learns patterns: feed it names and it learns what sequences of letters *look like* English names. Feed it the entire internet and it learns what sequences of words *look like* human knowledge. Whether that constitutes "understanding" is an open question. What's clear is that the same algorithm works at both ends of the spectrum. The only difference is how much data and how many parameters you give it.
 
 ---
 
 ## 3. The Tokenizer
-
-*Teaching machines to read*
 
 ```python
 uchars = sorted(set(''.join(docs)))   # ['a', 'b', 'c', ..., 'z']
@@ -54,8 +50,7 @@ vocab_size = len(uchars) + 1           # 27 total tokens
 
 Neural networks speak numbers, not text. So we need a mapping from every unique symbol to an integer.
 
-**BOS** (Beginning of Sequence) is a special token meaning "a new document starts here." Every LLM uses these structural tokens. ChatGPT has `<|im_start|>` and `<|im_end|>`. They're invisible to users, but they frame every conversation. When I first implemented this, it was surprising how much the model's behavior depends on getting these boundary tokens right.
-
+**BOS** (Beginning of Sequence) is a special token meaning "a new document starts here." Every LLM uses these structural tokens. ChatGPT has `<|im_start|>` and `<|im_end|>`. They're invisible to users, but they frame every conversation.
 Production models like Qwen use **Byte Pair Encoding**, a smarter scheme that merges frequently occurring character pairs into single tokens. "understanding" becomes `[un, der, stand, ing]`: 4 tokens instead of 13 characters. Fewer tokens = faster processing.
 
 ---
@@ -64,7 +59,7 @@ Production models like Qwen use **Byte Pair Encoding**, a smarter scheme that me
 
 *The learning algorithm*
 
-This section is worth spending time on. If you understand autograd, you understand how every neural network learns.
+If you understand autograd, you understand how every neural network learns.
 
 Every calculation the model performs is recorded in a computation graph. Why? Because of **backpropagation**, the algorithm that answers:
 
@@ -78,7 +73,7 @@ child.grad += local_grad * v.grad
 
 That single line is the chain rule, applied recursively through a computation graph. It's the foundation of all gradient-based learning.
 
-I think of the autograd engine as a tape recorder for math. It records every calculation, then plays the tape backwards to figure out how to improve. PyTorch, TensorFlow, JAX all implement variations of this. The elegance here is that no matter how complex your model gets, learning reduces to this same backward pass.
+PyTorch, TensorFlow, JAX all implement variations of this. The elegance here is that no matter how complex your model gets, learning reduces to this same backward pass.
 
 ---
 
@@ -100,15 +95,15 @@ The dot product measures similarity. Divide by `sqrt(head_dim)` to keep values s
 
 ### Multi-Head Attention
 
-Multiple attention heads run in parallel, each learning to look for different patterns. One might track vowels, another tracks position, another tracks repetition. Watching these patterns emerge during training is genuinely interesting. In the playground, you can see heads specialize within the first few hundred steps.
+Multiple attention heads run in parallel, each learning to look for different patterns. One might track vowels, another tracks position, another tracks repetition. In the playground, you can see heads specialize within the first few hundred steps.
 
 ### The MLP
 
-Attention lets tokens communicate with each other. The MLP lets each token process information independently. The MLP expands the representation 4x, applies a non-linearity (ReLU), then compresses back. There's evidence suggesting this is where factual knowledge gets stored (Meng et al., 2022), though the picture is more nuanced than "MLPs = memory." This is one of the open questions in mechanistic interpretability that I find most compelling.
+Attention lets tokens communicate with each other. The MLP lets each token process information independently. The MLP expands the representation 4x, applies a non-linearity (ReLU), then compresses back. There's evidence suggesting this is where factual knowledge gets stored (Meng et al., 2022), though the picture is more nuanced than "MLPs = memory." This remains an open question in mechanistic interpretability.
 
 ### Residual Connections
 
-Without residual connections, gradients vanish after roughly 10 layers. With them, 80+ layer networks train successfully. The key insight: the model learns what to **add** to the existing representation, not what to replace it with. This framing matters for interpretability, because it means each layer's contribution can be studied independently.
+Without residual connections, gradients vanish after roughly 10 layers. With them, 80+ layer networks train successfully. The model learns what to **add** to the existing representation, not what to replace it with. This framing matters for interpretability, because it means each layer's contribution can be studied independently.
 
 ---
 
@@ -172,8 +167,7 @@ LEARN:  loss.backward() → Adam updates all params
 INFER:  BOS → model → sample → feed back → repeat
 ```
 
-The algorithm is simple. Making it work reliably at scale, understanding *why* it works, and figuring out when to trust its outputs are where the hard problems live. Those are the questions I'm most interested in.
-
+The algorithm is simple. Making it work reliably at scale, understanding *why* it works, and figuring out when to trust its outputs are where the hard problems live.
 ---
 
 *Based on Andrej Karpathy's [microgpt](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95) and [Zero to Hero](https://karpathy.ai/zero-to-hero.html) series, and Sebastian Raschka's [Build a Large Language Model From Scratch](https://github.com/rasbt/LLMs-from-scratch) ([book](https://www.manning.com/books/build-a-large-language-model-from-scratch)).*

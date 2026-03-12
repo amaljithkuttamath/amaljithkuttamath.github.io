@@ -7,9 +7,7 @@ tags: ["rust", "tokenizers", "llm", "nlp", "open-source"]
 repo: "https://github.com/amaljithkuttamath/tokenizer-arena"
 ---
 
-Tokenization is one of those things you stop thinking about once you understand the basics. Text goes in, tokens come out, the model sees tokens. Simple enough.
-
-But the details matter more than most people realize. OpenAI has shipped at least four different tokenizer vocabularies over the past few years. Each one encodes the same text differently. The differences affect training efficiency, inference cost, multilingual coverage, and what a model can "see" in its context window. I wanted to understand how these tokenizers actually differ, so I built a tool to compare them.
+OpenAI has shipped at least four different tokenizer vocabularies. Each one encodes the same text differently, affecting training efficiency, inference cost, multilingual coverage, and context window utilization. I wanted to understand how they actually differ, so I built a tool to compare them.
 
 ---
 
@@ -45,11 +43,11 @@ That Fibonacci one-liner takes 23 tokens with cl100k but 31 with p50k. The newer
 
 ## Seeing the boundaries
 
-The `--show-tokens` flag is where it gets interesting. It color-codes each token boundary in the original text, so you can see exactly where each tokenizer decides to split.
+The `--show-tokens` flag reveals boundaries directly. It color-codes each token boundary in the original text, so you can see exactly where each tokenizer decides to split.
 
 Older tokenizers split `fibonacci` into more pieces. Newer ones often keep common programming identifiers whole or split them into larger chunks. Punctuation handling differs too. Things like `(n-1)` might be three tokens or five, depending on the encoding.
 
-This is useful for building intuition. When you see why one encoding produces fewer tokens, you start to understand the vocabulary design choices behind it.
+Seeing why one encoding produces fewer tokens builds intuition about vocabulary design.
 
 ---
 
@@ -90,7 +88,7 @@ It uses tiktoken-rs under the hood and works offline after install. The `--json`
 
 ---
 
-## What I found interesting
+## Observations
 
 The trend in tokenizer design is clearly toward larger vocabularies with broader coverage. But there's a ceiling. At some point, adding more tokens to the vocabulary gives diminishing compression returns while making the embedding layer expensive. Where that ceiling is depends on the target workload.
 

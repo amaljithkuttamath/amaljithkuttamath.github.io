@@ -7,7 +7,7 @@ tags: ["attention", "transformers", "pytorch", "from-scratch"]
 repo: "https://github.com/amaljithkuttamath/attention-bench"
 ---
 
-Every attention variant paper tells you what changed. Fewer of them make it obvious *why*. The clearest way I've found to understand the tradeoffs is to implement each one from scratch and train the same model four times.
+Attention variant papers rarely make the tradeoffs obvious. The clearest way to understand them: to implement each one from scratch and train the same model four times.
 
 That's what attention-bench does. Four attention mechanisms, all in PyTorch, no `nn.MultiheadAttention`. Each one plugs into the same decoder-only transformer (6 layers, 256 dim, 8 heads), trains on TinyStories with the same hyperparameters, and gets measured on perplexity, throughput, and memory.
 

@@ -17,7 +17,7 @@ I built [calibration-probe](https://github.com/amaljithkuttamath/calibration-pro
 
 A model can be 85% accurate and still be poorly calibrated. Calibration measures something different: when the model says "I'm 90% confident," is it actually right 90% of the time? When it says 60%, is it right 60% of the time?
 
-Perfect calibration means the confidence-accuracy curve is a straight diagonal. Every stated confidence level matches its observed accuracy. In practice, no model achieves this. The interesting part is measuring how far off it is, and in which direction.
+Perfect calibration means the confidence-accuracy curve is a straight diagonal. Every stated confidence level matches its observed accuracy. In practice, no model achieves this. The question is how far off it is, and in which direction.
 
 Overconfident models say 90% and are right 80% of the time. Underconfident models say 60% and are right 75% of the time. Both are miscalibrated, but overconfidence is more dangerous. If you build a system that trusts high-confidence answers and defers low-confidence ones to humans, overconfidence means bad answers slip through the filter.
 

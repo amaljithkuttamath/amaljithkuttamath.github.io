@@ -19,8 +19,7 @@ Simple questions first. How much did I spend today? This week? Which project eat
 
 Then harder ones. Is my context window growing out of control? Am I getting good cache hit rates or paying for the same tokens over and over? When should I restart a session instead of pushing through?
 
-These questions matter because Claude Code sessions have a lifecycle. A fresh session starts small. As you work, context grows. Cache fills up, sometimes efficiently, sometimes not. At some point, you're paying for a 150K context window where 80% is stale conversation history. Knowing when that happens changes how you work.
-
+These questions matter because Claude Code sessions have a lifecycle. A fresh session starts small. As you work, context grows. Cache fills up, sometimes efficiently, sometimes not. At some point, you're paying for a 150K context window where 80% is stale conversation history.
 ---
 
 ## What crux does
@@ -39,16 +38,13 @@ There's also an **MCP server** that exposes five analysis tools, so Claude itsel
 
 ## Context growth is the metric that matters
 
-Most of what I built exists to answer one question: how is my context window behaving?
-
 In a typical Claude Code session, you start with a few thousand tokens of context. After 10 messages, you might be at 50K. After 30, you could be at 120K. Each message is more expensive than the last because you're re-sending all the previous context.
 
 crux tracks this as "context growth factor." A session with 3.0x growth means the context tripled from first message to current. Healthy sessions stay under 5x. Sessions above 8x are burning money.
 
 It also detects compactions, moments where Claude Code automatically compresses the conversation to free up context space. A compaction means you hit the limit. crux shows how many compactions happened and how many messages since the last one.
 
-The "context growth premium" metric tells you the extra cost you paid because context grew. It compares your actual cost to what you would have paid if context stayed at its initial size. This number is often surprising.
-
+The "context growth premium" metric tells you the extra cost you paid because context grew. It compares your actual cost to what you would have paid if context stayed at its initial size.
 ---
 
 ## The grading system
@@ -62,7 +58,7 @@ Each session gets an A through F grade based on a simple scoring model:
 
 An A session is one where you got useful output without the context window spiraling. An F session is one where you probably should have restarted 20 messages ago.
 
-I don't take this too seriously. Some F sessions are the ones where I actually got the most work done. But it's useful signal.
+Some F sessions are the ones where I got the most done. Useful signal, not a judgment.
 
 ---
 
@@ -108,4 +104,4 @@ Or as an MCP server:
 }
 ```
 
-The code is MIT licensed. If you use Claude Code regularly, you might find the context growth metrics genuinely useful. I did.
+The code is MIT licensed.

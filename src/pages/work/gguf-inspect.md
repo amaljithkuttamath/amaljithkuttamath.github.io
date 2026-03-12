@@ -73,7 +73,7 @@ rope_freqs.weight: 64, F32
 
 Rotary position encoding frequencies are 64 floats. Full FP32. Quantizing them would save a few hundred bytes and risk breaking position awareness entirely. Not worth it.
 
-This mixed-precision strategy is the key insight of modern quantization. It's not "make everything 4-bit." It's "make everything 4-bit except the parts that break when you do."
+Modern quantization is mixed-precision by design. It's not "make everything 4-bit." It's "make everything 4-bit except the parts that break when you do."
 
 ---
 
@@ -95,7 +95,7 @@ The tensor data alone is 1.87 GB. The remaining ~10 MB is metadata and alignment
 
 The estimated memory of 2.06 GB adds a 10% overhead for runtime buffers, the KV cache, and scratch space. In practice, you can run this model on any machine with 4 GB of RAM. A 3-billion-parameter language model running on a laptop, because quantization turned 12 GB of weights into less than 2.
 
-Context length is another number worth staring at. 131072 tokens. That's baked into the metadata as `llama.context_length`, not a runtime configuration. The model was trained (or fine-tuned with RoPE scaling) to handle 128K context. Whether your inference engine actually allocates a KV cache that large is a separate question, but the model was built for it.
+131072 tokens. That's baked into the metadata as `llama.context_length`, not a runtime configuration. The model was trained (or fine-tuned with RoPE scaling) to handle 128K context. Whether your inference engine actually allocates a KV cache that large is a separate question, but the model was built for it.
 
 ---
 

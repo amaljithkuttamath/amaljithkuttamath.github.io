@@ -47,7 +47,7 @@ Trust Bench is a single tool with three stages:
 2. **Evaluate**: Score across established dimensions (TrustLLM's truthfulness, safety, fairness, robustness, privacy, machine ethics) using peer-reviewed datasets.
 3. **Improve**: Apply targeted techniques (post-hoc calibration, RepE activation steering, Constitutional AI loops) and re-evaluate.
 
-The key insight: connecting extraction to evaluation to improvement in a single tool. Profile before. Fix. Profile after. Did it work?
+The value is connecting extraction to evaluation to improvement in a single tool. Profile before. Fix. Profile after. Did it work?
 
 ---
 

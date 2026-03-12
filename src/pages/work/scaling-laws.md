@@ -49,9 +49,9 @@ After training, I take the final validation loss for each model and fit the powe
 
 ## What happens at toy scale
 
-The short answer: the power law fits. Five data points is not a lot to draw conclusions from, but the R-squared is high and the fitted curve passes through all five points without visible deviation.
+The short answer: the power law fits. Five data points, but the R-squared is high and the fitted curve passes through all five points without visible deviation.
 
-This is a bit surprising. TinyStories is a narrow domain. The vocabulary is simple, the grammar is repetitive, and the stories follow predictable patterns. You might expect the scaling behavior to break down because the dataset itself has limited complexity. A 10M parameter model might be overkill for predicting "Once upon a time" over and over.
+TinyStories is a narrow domain. The vocabulary is simple, the grammar is repetitive, and the stories follow predictable patterns. You might expect the scaling behavior to break down because the dataset itself has limited complexity. A 10M parameter model might be overkill for predicting "Once upon a time" over and over.
 
 But the power law doesn't care about the domain. It describes how reducible loss shrinks as you add capacity. Even in a simple domain, there's structure at every scale. The 100K model can learn common words and basic grammar. The 500K model picks up longer-range dependencies. The 3M model starts capturing narrative patterns. Each jump in parameters buys you something, and the rate at which it buys you something follows the curve.
 
@@ -65,7 +65,7 @@ Scaling laws are not just a frontier lab concern. If you're training any model, 
 
 The fact that the power law holds at toy scale means you can run these experiments cheaply. Train three or four small models, fit the curve, and predict whether scaling up will actually help before committing the compute.
 
-It also means scaling laws are more fundamental than they might appear. They're not an artifact of specific datasets or specific model families. The relationship between capacity and loss seems to hold across a wide range of scales, from children's stories to internet-scale pretraining.
+It also means scaling laws are more fundamental than they might appear. The relationship between capacity and loss seems to hold across a wide range of scales, from children's stories to internet-scale pretraining.
 
 ---
 
