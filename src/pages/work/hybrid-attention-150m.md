@@ -57,7 +57,7 @@ First run: NaN by step 190. But I didn't know that for 25 minutes.
 
 The training loop displays a smoothed loss (exponential moving average). When the actual loss goes NaN, the EMA stops updating and just holds its last value. So the terminal showed `loss: 5.587242` for 400 steps while the model was completely dead. The gradients were NaN, the parameters were frozen, and the loop kept running, burning electricity for nothing.
 
-That's the kind of thing you only learn by doing.
+I added NaN early stopping after that. Abort after 10 consecutive NaN steps.
 
 ### The bug that looked like a hyperparameter problem
 
