@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'attention-bench',
+    metric: '4 variants, from scratch',
+    desc: 'Benchmarks MHA, GQA, MQA, and Sliding Window attention by training small transformers on the same data and comparing perplexity, throughput, and memory.',
+    tags: ['attention', 'pytorch', 'transformers', 'from-scratch'],
+    details: {
+      problem: 'Attention variants like GQA and MQA are described in papers with theoretical tradeoffs, but direct empirical comparison on identical setups is rare.',
+      approach: 'Four attention mechanisms implemented from scratch in PyTorch. Each plugs into the same decoder-only transformer LM. Trained on TinyStories with identical hyperparameters.',
+      stack: 'PyTorch, tiktoken, matplotlib, HuggingFace datasets',
+      outcome: 'MQA uses 25% fewer KV parameters than MHA. GQA sits between them. SWA trades global context for linear memory scaling. All with 25 passing tests.',
+    },
+  },
+  {
     title: 'crux',
     metric: 'Real-time token analytics',
     desc: 'Terminal dashboard for Claude Code usage. Tracks context growth, cache efficiency, cost breakdowns, and session health grades from local session logs.',
