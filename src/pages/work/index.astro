@@ -34,6 +34,30 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'activation-atlas',
+    metric: 'Layer-by-layer UMAP projections',
+    desc: 'Visualizes how a CNN transforms raw pixels into class-separable representations. Hooks every layer, extracts activations, projects with UMAP.',
+    tags: ['activations', 'umap', 'interpretability', 'visualization'],
+    details: {
+      problem: 'Neural networks learn hierarchical representations, but this is invisible during training. Understanding what each layer "sees" requires extracting and projecting activations.',
+      approach: 'Train a small CNN on FashionMNIST. Forward hooks capture activations at every layer. Global average pooling for conv layers. UMAP projects to 2D, colored by class.',
+      stack: 'PyTorch, torchvision, umap-learn, scikit-learn, matplotlib',
+      outcome: 'Early layers: classes overlap. Final layers: tight, separated clusters. PCA variance shows representations compressing from distributed to compact. GitHub Action generates fresh results.',
+    },
+  },
+  {
+    title: 'scaling-laws',
+    metric: '5 model sizes, power law fit',
+    desc: 'Tests whether Chinchilla scaling laws hold at toy scale. Trains transformers from 100K to 10M params on TinyStories and fits L(N) = aN^(-b) + c.',
+    tags: ['scaling-laws', 'chinchilla', 'transformers', 'training'],
+    details: {
+      problem: 'Scaling laws predict loss as a function of model size and training tokens. They guide billion-dollar training decisions. But do they hold at small scale?',
+      approach: 'Five decoder-only transformers (100K to 10M params) trained on TinyStories with identical setup. Power law fitted with scipy. Log-log plots reveal the relationship.',
+      stack: 'PyTorch, tiktoken, scipy, matplotlib, HuggingFace datasets',
+      outcome: 'GitHub Action generates fresh results on manual dispatch. Produces scaling curves, loss trajectories, and compute-optimal frontier plots.',
+    },
+  },
+  {
     title: 'loss-landscape',
     metric: '3D loss surface visualization',
     desc: 'Visualizes the loss landscape around trained weights using filter-normalized random directions. Compares sharpness across learning rates and batch sizes.',
