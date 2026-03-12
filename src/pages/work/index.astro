@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'sae-explorer',
+    metric: 'Cross-lingual feature found in 6 languages',
+    desc: 'Found a single SAE feature in Gemma 2 2B that detects conjunctions (and/et/und/y/e) across 6 languages with zero false positives. Uses Gemma Scope pre-trained sparse autoencoders.',
+    tags: ['interpretability', 'sae', 'gemma', 'cross-lingual', 'mechanistic-interpretability'],
+    details: {
+      problem: 'Do multilingual models store concepts once or per-language? SAEs can decompose activations into interpretable features, but finding genuinely monosemantic cross-lingual features requires systematic probing.',
+      approach: 'Load Gemma Scope layer 12 SAE (16K features). Run parallel sentences in 6 languages through Gemma 2 2B. Track which features fire on which tokens. Filter for narrow, selective features.',
+      stack: 'SAELens, TransformerLens, PyTorch, Gemma 2 2B, matplotlib',
+      outcome: 'Feature #10543: conjunction-only, 6 languages, 0 false positives. Also found cross-lingual "cat" feature (#4497) and sentence-initial determiner feature (#1178).',
+    },
+  },
+  {
     title: 'activation-atlas',
     metric: 'Layer-by-layer UMAP projections',
     desc: 'Visualizes how a CNN transforms raw pixels into class-separable representations. Hooks every layer, extracts activations, projects with UMAP.',
