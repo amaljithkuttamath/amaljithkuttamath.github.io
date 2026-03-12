@@ -34,6 +34,30 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'crux',
+    metric: 'Real-time token analytics',
+    desc: 'Terminal dashboard for Claude Code usage. Tracks context growth, cache efficiency, cost breakdowns, and session health grades from local session logs.',
+    tags: ['rust', 'tui', 'claude-code', 'open-source'],
+    details: {
+      problem: 'Claude Code users have no visibility into token usage patterns. Sessions vary wildly in cost and efficiency with no way to diagnose why.',
+      approach: 'Rust TUI that reads Claude Code JSONL session logs in real-time. Computes rolling statistics, cache hit ratios, context growth rates, and assigns health grades per session.',
+      stack: 'Rust, ratatui, tokio, serde, MCP server',
+      outcome: 'Open-source, published to GitHub with CI/CD and cross-platform releases. Reveals usage patterns invisible from the Claude Code interface.',
+    },
+  },
+  {
+    title: 'tokenizer-arena',
+    metric: 'Compare 4 encodings',
+    desc: 'CLI tool that runs the same text through multiple LLM tokenizers and shows differences in token count, compression ratio, and token boundaries.',
+    tags: ['rust', 'tokenizers', 'cli', 'open-source'],
+    details: {
+      problem: 'Tokenizer choice affects training efficiency, inference cost, and multilingual performance, but comparing tokenizers requires writing custom scripts each time.',
+      approach: 'Wraps tiktoken-rs to compare cl100k_base (GPT-4/Claude), o200k_base (GPT-4o), p50k_base, and r50k_base side by side. Color-coded token boundary visualization.',
+      stack: 'Rust, tiktoken-rs, comfy-table, clap',
+      outcome: 'Shows newer tokenizers are ~25% more efficient on code. Works fully offline. JSON output for scripting.',
+    },
+  },
+  {
     title: 'skill-doctor',
     metric: 'Claude Code plugin',
     desc: 'Audits your Claude Code skills using the built-in claude-code-guide agent. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
