@@ -58,6 +58,18 @@ const proof = [
     },
   },
   {
+    title: 'gguf-inspect',
+    metric: 'Parse models byte by byte',
+    desc: 'CLI that reads GGUF model files and prints architecture details, quantization info, tensor shapes, and memory estimates. Hand-rolled binary parser, no external GGUF crates.',
+    tags: ['rust', 'gguf', 'model-internals', 'open-source'],
+    details: {
+      problem: 'Understanding what is inside a quantized model file requires reading llama.cpp source or scattered documentation. No simple tool shows the full picture.',
+      approach: 'From-scratch GGUF binary parser in Rust. Reads the header, metadata KV pairs, and tensor info. Computes parameter counts, memory estimates, and identifies quantization schemes per layer.',
+      stack: 'Rust, byteorder, comfy-table, clap',
+      outcome: 'Tested on Llama 3.2 3B. Reveals mixed-precision quantization (Q6_K embeddings, Q4_K attention), GQA head ratios from tensor shapes, and 6.7x compression from FP32.',
+    },
+  },
+  {
     title: 'skill-doctor',
     metric: 'Claude Code plugin',
     desc: 'Audits your Claude Code skills using the built-in claude-code-guide agent. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
