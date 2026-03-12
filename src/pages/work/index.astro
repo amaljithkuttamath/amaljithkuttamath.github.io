@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'superposition-viz',
+    metric: 'Phase transition at 0.7 sparsity',
+    desc: 'Reproduces key findings from Anthropic\'s Toy Models of Superposition paper. Visualizes how neural networks pack more features than they have dimensions.',
+    tags: ['superposition', 'interpretability', 'anthropic', 'pytorch'],
+    details: {
+      problem: 'Superposition is a fundamental obstacle for mechanistic interpretability. If 10 features share 5 dimensions, no single neuron maps to a single feature.',
+      approach: 'Toy model with linear encoder, ReLU bottleneck, and tied-weight decoder. Trains at multiple sparsity levels. Generates phase diagrams, feature geometry plots, dimensionality curves, and interference matrices.',
+      stack: 'PyTorch, matplotlib, numpy',
+      outcome: 'Clear phase transition at 0.7 sparsity. Model jumps from representing 4 to 5+ features in a 5-dim bottleneck. Matches the Anthropic paper\'s Figure 2.',
+    },
+  },
+  {
     title: 'calibration-probe',
     metric: 'ECE 0.107, overconfident by 3%',
     desc: 'Measures whether LLMs know when they are wrong. Asks 102 factual questions, forces stated confidence, and plots calibration curves.',
