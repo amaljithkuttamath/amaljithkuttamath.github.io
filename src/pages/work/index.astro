@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'loss-landscape',
+    metric: '3D loss surface visualization',
+    desc: 'Visualizes the loss landscape around trained weights using filter-normalized random directions. Compares sharpness across learning rates and batch sizes.',
+    tags: ['optimization', 'generalization', 'pytorch', 'visualization'],
+    details: {
+      problem: 'Sharp minima generalize poorly, flat minima generalize well. But the loss landscape is invisible during training. No standard tool makes it concrete.',
+      approach: 'Filter-normalized perturbations (Li et al. 2018) along two random directions. Trains MLP on FashionMNIST with varying LR and batch size. Maps loss on a 2D grid around the minimum.',
+      stack: 'PyTorch, torchvision, matplotlib, numpy',
+      outcome: 'Large LR and small batch size produce flatter minima. 3D surface plots, contour maps, and quantified sharpness comparison across training configs.',
+    },
+  },
+  {
     title: 'superposition-viz',
     metric: 'Phase transition at 0.7 sparsity',
     desc: 'Reproduces key findings from Anthropic\'s Toy Models of Superposition paper. Visualizes how neural networks pack more features than they have dimensions.',
