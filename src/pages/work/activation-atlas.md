@@ -31,6 +31,8 @@ The first fully connected layer is shows clear structure. Clusters become visibl
 
 The final FC layer, right before the classification head, is striking. Ten tight clusters, mostly separated. The network has organized 784 raw pixel values into a compact space where each class occupies its own region. This is the representation the classifier actually uses to make predictions, and you can see why it works.
 
+<!-- TODO: add result image when generated -->
+
 ---
 
 ## PCA tells the same story differently

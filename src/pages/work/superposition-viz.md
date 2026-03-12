@@ -33,6 +33,11 @@ At **sparsity 0.9**, the picture changes. Features 0 through 4 are bright, and f
 
 This is superposition. The model packs extra features into shared dimensions, tolerating the interference because sparse features rarely collide in the same input. The math works out: if two features are each active 10% of the time, they co-activate only 1% of the time. The occasional reconstruction error is worth the extra capacity.
 
+<figure>
+<img src="https://raw.githubusercontent.com/amaljithkuttamath/superposition-viz/main/results/phase_diagram.png" alt="Phase diagram showing feature benefit across sparsity levels, with bright regions indicating well-represented features and dark regions indicating discarded features" />
+<figcaption>The phase diagram. Rows are sparsity levels, columns are feature indices. Bright means the feature is well-reconstructed. As sparsity increases, more features cross into the bright region.</figcaption>
+</figure>
+
 ---
 
 ## The phase transition is sharp
@@ -48,6 +53,12 @@ This matters because it suggests superposition isn't a smooth tradeoff. There's 
 5 features projected into a 2D bottleneck, visualized as arrows from the origin. At **sparsity 0.0**, only 2 features get strong arrows pointing in distinct directions. The remaining 3 collapse to near-zero length. The model has 2 dimensions and uses them for the 2 most important features. Everything else is sacrificed.
 
 At **sparsity 0.9 to 0.99**, all 5 features fan out across the 2D plane. They overlap, but the model doesn't care. Features rarely co-activate, so the shared directions cause minimal reconstruction error in practice.
+
+<figure>
+<img src="https://raw.githubusercontent.com/amaljithkuttamath/superposition-viz/main/results/feature_geometry.png" alt="Feature geometry arrows showing how 5 features arrange themselves in a 2D bottleneck at different sparsity levels" />
+<figcaption>Feature geometry at different sparsity levels. At low sparsity, only the most important features get strong directions. At high sparsity, all features fan out across the available space.</figcaption>
+</figure>
+
 ---
 
 ## Interference structure

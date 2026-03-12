@@ -51,6 +51,8 @@ After training, I take the final validation loss for each model and fit the powe
 
 The short answer: the power law fits. Five data points, but the R-squared is high and the fitted curve passes through all five points without visible deviation.
 
+<!-- TODO: add result image when generated -->
+
 TinyStories is a narrow domain. The vocabulary is simple, the grammar is repetitive, and the stories follow predictable patterns. You might expect the scaling behavior to break down because the dataset itself has limited complexity. A 10M parameter model might be overkill for predicting "Once upon a time" over and over.
 
 But the power law doesn't care about the domain. It describes how reducible loss shrinks as you add capacity. Even in a simple domain, there's structure at every scale. The 100K model can learn common words and basic grammar. The 500K model picks up longer-range dependencies. The 3M model starts capturing narrative patterns. Each jump in parameters buys you something, and the rate at which it buys you something follows the curve.

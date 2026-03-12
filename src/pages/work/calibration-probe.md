@@ -77,4 +77,11 @@ python probe.py
 python probe.py --dry-run
 ```
 
-The dry run generates a reliability diagram from the included sample data. That plot is the core output: a calibration curve against the perfect diagonal, with bin sizes shown so you can see where the model had enough data to be statistically meaningful. The code is MIT licensed.
+The dry run generates a reliability diagram from the included sample data. That plot is the core output: a calibration curve against the perfect diagonal, with bin sizes shown so you can see where the model had enough data to be statistically meaningful.
+
+<figure>
+<img src="https://raw.githubusercontent.com/amaljithkuttamath/calibration-probe/main/results/calibration_curve.png" alt="Reliability diagram showing model confidence vs actual accuracy, with the diagonal representing perfect calibration and bars showing the model's overconfidence gap" />
+<figcaption>The reliability diagram. The diagonal is perfect calibration. The bars show actual accuracy per confidence bin. The gap between the bars and the diagonal is the overconfidence.</figcaption>
+</figure>
+
+The code is MIT licensed.

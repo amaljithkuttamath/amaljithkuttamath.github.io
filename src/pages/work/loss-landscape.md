@@ -31,6 +31,11 @@ Li et al. solved this with filter normalization: scale each direction vector so 
 
 The difference in the resulting plots is striking. Raw perturbations produce jagged, spiky surfaces. Normalized perturbations produce smooth surfaces where the geometry reflects actual landscape curvature, not layer scale artifacts.
 
+<figure>
+<img src="https://raw.githubusercontent.com/amaljithkuttamath/loss-landscape/main/results/surface_3d.png" alt="3D surface plot of the loss landscape around trained weights, showing the shape of the minimum" />
+<figcaption>The loss surface around trained weights, swept along two random directions with filter normalization. The shape of the basin reveals whether the model found a sharp or flat minimum.</figcaption>
+</figure>
+
 ---
 
 ## Sharp minima overfit. Flat minima generalize.
@@ -52,6 +57,11 @@ Two hyperparameters have the most visible effect on landscape shape: learning ra
 **Batch size.** Small batches produce noisy gradient estimates. That noise serves the same function as a large learning rate. It destabilizes sharp minima. The model gets pushed out of narrow valleys and toward flatter regions. Large batches produce cleaner gradients that can settle into sharp minima undisturbed.
 
 The project trains four configurations (high/low LR crossed with large/small batch) and plots their landscapes side by side. The visual difference is clear. High LR with small batches produces the widest, flattest basin. Low LR with large batches produces the sharpest.
+
+<figure>
+<img src="https://raw.githubusercontent.com/amaljithkuttamath/loss-landscape/main/results/comparison.png" alt="Side-by-side comparison of loss landscapes across four hyperparameter configurations showing sharp vs flat minima" />
+<figcaption>Four configurations compared. High learning rate with small batches (top left) produces a wide, flat basin. Low learning rate with large batches (bottom right) produces a sharp, narrow valley.</figcaption>
+</figure>
 
 ---
 
