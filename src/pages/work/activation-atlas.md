@@ -31,7 +31,15 @@ The first fully connected layer is shows clear structure. Clusters become visibl
 
 The final FC layer, right before the classification head, is striking. Ten tight clusters, mostly separated. The network has organized 784 raw pixel values into a compact space where each class occupies its own region. This is the representation the classifier actually uses to make predictions, and you can see why it works.
 
-<!-- TODO: add result image when generated -->
+<figure>
+  <img src="https://raw.githubusercontent.com/amaljithkuttamath/activation-atlas/main/results/layer_progression.png" alt="UMAP projections of CNN activations across five layers, showing representations evolving from diffuse noise to separated clusters" />
+  <figcaption>UMAP projections from conv1 through fc2. Early layers are noise. Final layers show clean class separation.</figcaption>
+</figure>
+
+<figure>
+  <img src="https://raw.githubusercontent.com/amaljithkuttamath/activation-atlas/main/results/class_separation.png" alt="Class separation at the final fully connected layer, showing 10 distinct clusters labeled by FashionMNIST category" />
+  <figcaption>Final layer: shirts, coats, and pullovers cluster nearby. Sneakers and ankle boots form their own group. Bags are isolated.</figcaption>
+</figure>
 
 ---
 
