@@ -34,6 +34,18 @@ const spotlight = [
 // ── Proof: shipped systems with hard numbers ──
 const proof = [
   {
+    title: 'calibration-probe',
+    metric: 'ECE 0.107, overconfident by 3%',
+    desc: 'Measures whether LLMs know when they are wrong. Asks 102 factual questions, forces stated confidence, and plots calibration curves.',
+    tags: ['calibration', 'llm-safety', 'evaluation', 'python'],
+    details: {
+      problem: 'A model that says "90% confident" but is only right 75% of the time is dangerous. Calibration measures this gap, which matters for safety-critical deployments.',
+      approach: '102 factual questions across 5 categories. Model states confidence 0-100. Responses binned by confidence, actual accuracy measured per bin. Supports direct, chain-of-thought, and step-by-step prompting strategies.',
+      stack: 'Python, matplotlib, Anthropic API, OpenAI API',
+      outcome: 'Models are slightly overconfident (89% confidence, 86% accuracy). Geography worst calibrated. Math best calibrated. ECE = 0.107. Dry-run mode works without API keys.',
+    },
+  },
+  {
     title: 'attention-bench',
     metric: '4 variants, from scratch',
     desc: 'Benchmarks MHA, GQA, MQA, and Sliding Window attention by training small transformers on the same data and comparing perplexity, throughput, and memory.',
