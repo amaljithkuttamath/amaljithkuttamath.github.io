@@ -7,6 +7,7 @@ tags: ["trust-bench", "llm-safety", "evaluation", "interpretability"]
 thread: "trust"
 type: "deep-dive"
 featured: true
+project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/trust-bench"
 ---
 

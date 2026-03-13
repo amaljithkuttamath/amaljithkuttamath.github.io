@@ -6,6 +6,7 @@ description: "Measuring LLM calibration by asking 102 factual questions and chec
 tags: ["calibration", "llm-safety", "evaluation", "python"]
 thread: "trust"
 type: "experiment"
+project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/calibration-probe"
 ---
 

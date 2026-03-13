@@ -7,6 +7,7 @@ tags: ["interpretability", "sae", "gemma", "cross-lingual", "mechanistic-interpr
 thread: "interpretability"
 type: "experiment"
 featured: true
+project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/sae-explorer"
 ---
 

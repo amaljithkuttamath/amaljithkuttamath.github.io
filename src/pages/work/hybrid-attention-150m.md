@@ -7,6 +7,7 @@ tags: ["mlx", "attention", "deltanet", "training", "apple-silicon"]
 thread: "architecture"
 type: "experiment"
 featured: true
+project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5"
 ---
 
