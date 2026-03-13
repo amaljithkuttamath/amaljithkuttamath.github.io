@@ -4,6 +4,9 @@ title: "Hybrid Attention at 8M Params (and What Broke at 150M)"
 date: "2026-03-10"
 description: "I trained Qwen3.5's hybrid DeltaNet+attention architecture from scratch on a MacBook. Pure attention won at 8M. Scaling to 150M hit a math bug that looked like a hyperparameter problem."
 tags: ["mlx", "attention", "deltanet", "training", "apple-silicon"]
+thread: "architecture"
+type: "experiment"
+featured: true
 repo: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5"
 ---
 

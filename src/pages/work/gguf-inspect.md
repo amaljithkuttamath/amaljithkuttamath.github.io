@@ -4,6 +4,8 @@ title: "What's Actually Inside a GGUF File?"
 date: "2026-03-11"
 description: "I parsed a Llama 3.2 model file byte by byte. Here's what the format reveals about quantization, architecture, and how inference engines load models."
 tags: ["gguf", "llama", "quantization", "rust", "model-internals"]
+thread: "tools"
+type: "tool"
 repo: "https://github.com/amaljithkuttamath/gguf-inspect"
 ---
 

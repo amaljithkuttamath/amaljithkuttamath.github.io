@@ -4,6 +4,8 @@ title: "How Neural Networks Learn to See"
 date: "2026-03-12"
 description: "Projecting activations from every layer of a CNN trained on FashionMNIST. Watching representations go from noise to clean clusters."
 tags: ["activations", "umap", "interpretability", "visualization"]
+thread: "interpretability"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/activation-atlas"
 ---
 

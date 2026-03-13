@@ -4,6 +4,8 @@ title: "Do Scaling Laws Hold at Toy Scale?"
 date: "2026-03-12"
 description: "Training transformers from 100K to 10M parameters and fitting power laws. Testing whether the Chinchilla scaling relationship holds on TinyStories."
 tags: ["scaling-laws", "chinchilla", "transformers", "training"]
+thread: "architecture"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/scaling-laws"
 ---
 

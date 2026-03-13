@@ -4,6 +4,12 @@ title: "I Built a Terminal Dashboard to See Where My Tokens Go"
 date: "2026-03-11"
 description: "crux is a TUI that reads Claude Code session logs and shows you real-time context growth, cache efficiency, cost breakdowns, and session health grades."
 tags: ["rust", "tui", "claude-code", "tooling", "open-source"]
+thread: "tools"
+type: "tool"
+featured: true
+install:
+  brew: "brew install amaljithkuttamath/tap/crux"
+  cargo: "cargo install crux-cli"
 repo: "https://github.com/amaljithkuttamath/crux"
 ---
 

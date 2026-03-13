@@ -4,6 +4,8 @@ title: "What the Loss Landscape Tells You About Generalization"
 date: "2026-03-12"
 description: "Visualizing the loss surface around trained weights. Sharp minima vs flat minima, and how learning rate and batch size control which one you find."
 tags: ["loss-landscape", "generalization", "optimization", "pytorch"]
+thread: "interpretability"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/loss-landscape"
 ---
 

@@ -4,6 +4,8 @@ title: "When an LLM Says 90%, Should You Believe It?"
 date: "2026-03-12"
 description: "Measuring LLM calibration by asking 102 factual questions and checking if stated confidence matches actual accuracy. The answer: models are overconfident."
 tags: ["calibration", "llm-safety", "evaluation", "python"]
+thread: "trust"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/calibration-probe"
 ---
 

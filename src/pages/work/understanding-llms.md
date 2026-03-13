@@ -4,6 +4,8 @@ title: "How Large Language Models Actually Work"
 date: "2025-03-07"
 description: "A visual, from-scratch deep dive into the algorithm behind GPT, Qwen, Llama, and every other LLM."
 tags: ["transformers", "from-scratch", "deep-dive"]
+thread: "architecture"
+type: "deep-dive"
 repo: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5"
 ---
 

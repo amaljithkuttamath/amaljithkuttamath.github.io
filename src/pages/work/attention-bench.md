@@ -4,6 +4,8 @@ title: "Four Attention Variants, One Training Loop"
 date: "2026-03-11"
 description: "I implemented MHA, GQA, MQA, and Sliding Window attention from scratch and trained small transformers to compare them."
 tags: ["attention", "transformers", "pytorch", "from-scratch"]
+thread: "architecture"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/attention-bench"
 ---
 

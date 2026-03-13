@@ -4,6 +4,10 @@ title: "Comparing LLM Tokenizers Side by Side"
 date: "2026-03-11"
 description: "tokenizer-arena is a Rust CLI that shows how different LLM tokenizers encode the same text, revealing surprising differences in efficiency."
 tags: ["rust", "tokenizers", "llm", "nlp", "open-source"]
+thread: "tools"
+type: "tool"
+install:
+  cargo: "cargo install tokenizer-arena"
 repo: "https://github.com/amaljithkuttamath/tokenizer-arena"
 ---
 

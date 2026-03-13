@@ -4,6 +4,8 @@ title: "Watching Superposition Emerge in a Toy Model"
 date: "2026-03-12"
 description: "Reproducing the key finding from Anthropic's Toy Models of Superposition paper. A 30-line model shows how neural networks pack more features than they have dimensions."
 tags: ["superposition", "interpretability", "anthropic", "pytorch"]
+thread: "interpretability"
+type: "experiment"
 repo: "https://github.com/amaljithkuttamath/superposition-viz"
 ---
 

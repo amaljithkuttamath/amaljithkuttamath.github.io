@@ -4,6 +4,9 @@ title: "A Single Neuron for 'And' in Six Languages"
 date: "2026-03-12"
 description: "Using Gemma Scope's pre-trained sparse autoencoders to find cross-lingual features in Gemma 2 2B. Feature #10543 fires on 'and', 'et', 'und', 'y', and 'e' with zero activation on control sentences."
 tags: ["interpretability", "sae", "gemma", "cross-lingual", "mechanistic-interpretability"]
+thread: "interpretability"
+type: "experiment"
+featured: true
 repo: "https://github.com/amaljithkuttamath/sae-explorer"
 ---
 

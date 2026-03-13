@@ -4,6 +4,9 @@ title: "Why I'm Building Trust Bench"
 date: "2026-03-08"
 description: "Evaluation tools score LLM outputs. They don't tell you why models fail. Trust Bench connects profiling, diagnosis, and repair into a single open-source tool."
 tags: ["trust-bench", "llm-safety", "evaluation", "interpretability"]
+thread: "trust"
+type: "deep-dive"
+featured: true
 repo: "https://github.com/amaljithkuttamath/trust-bench"
 ---
 
