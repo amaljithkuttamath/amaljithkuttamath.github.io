@@ -6,59 +6,277 @@ const posts = Object.entries(allPosts)
   .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') }))
   .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
+// Pick featured posts: one from each thread, prioritize featured flag
+const threads = ['trust', 'interpretability', 'architecture'];
+const featured = threads
+  .map((t) => {
+    const threadPosts = posts.filter((p) => p.frontmatter.thread === t);
+    return threadPosts.find((p) => p.frontmatter.featured) || threadPosts[0];
+  })
+  .filter(Boolean);
+
+// Installable tools
+const tools = posts.filter(
+  (p) => p.frontmatter.type === 'tool' && p.frontmatter.install
+);
+
 const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 ---
 
 <Base title="Amaljith Kuttamath">
   <section class="hero animate-in">
-    <div class="status">Researching LLM trust & safety</div>
+    <h1 class="hero-headline">I study how language models fail and build tools to catch it.</h1>
+    <p class="hero-sub">AI Engineer, 7 years. I design agents for production and research LLM trust at the architectural level.</p>
   </section>
 
-  <a href="/playground" class="playground-link animate-in animate-in-delay-1">
-    <span class="playground-label">microGPT Playground</span>
-    <span class="playground-cta">Train a transformer in your browser &rarr;</span>
-  </a>
+  <section class="now animate-in animate-in-delay-1">
+    <div class="section-label">Now</div>
+    <a href="/work/why-trust-bench" class="now-card">
+      <div class="now-head">
+        <span class="now-title">Trust Bench</span>
+        <span class="status-pill">in progress</span>
+      </div>
+      <p>Open-source profiler that looks inside LLMs to find failure modes benchmarks miss. Next: training sparse autoencoders on Qwen3.5's hybrid DeltaNet layers.</p>
+    </a>
+  </section>
 
   <section class="animate-in animate-in-delay-1">
     <div class="section-header">
-      <h2>Writing</h2>
-      <a href="/blog">All &rarr;</a>
+      <span class="section-label">Writing</span>
+      <a href="/blog" class="section-link">all &rarr;</a>
     </div>
     <div class="home-posts">
-      {posts.map((post) => (
+      {featured.map((post) => (
         <a href={post.url} class="home-post">
-          <span class="home-post-title">{post.frontmatter.title}</span>
-          <span class="home-post-desc">{post.frontmatter.description}</span>
-          {post.frontmatter.tags && (
-            <span class="home-post-tags">
-              {post.frontmatter.tags.map((tag: string) => (
-                <span class="tag">{tag}</span>
-              ))}
-            </span>
-          )}
+          <div class="home-post-main">
+            <span class="home-post-title">{post.frontmatter.title}</span>
+            <span class="home-post-desc">{post.frontmatter.description}</span>
+          </div>
           <time class="mono">{formatDate(post.frontmatter.date)}</time>
         </a>
       ))}
     </div>
   </section>
 
+  <section class="animate-in animate-in-delay-2">
+    <div class="section-label">Tools</div>
+    <div class="tools-grid">
+      {tools.map((tool) => (
+        <a href={tool.url} class="tool-card">
+          <span class="tool-name">{tool.frontmatter.title.includes('Token') ? 'crux' : tool.frontmatter.title.includes('Tokenizer') ? 'tokenizer-arena' : tool.frontmatter.tags?.[0]}</span>
+          <span class="tool-desc">{tool.frontmatter.description.split('.')[0]}</span>
+          <code class="tool-install">{Object.values(tool.frontmatter.install)[0] as string}</code>
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <a href="/playground" class="playground-link animate-in animate-in-delay-2">
+    <span class="playground-label">microGPT Playground</span>
+    <span class="playground-cta">Train a transformer in your browser &rarr;</span>
+  </a>
 </Base>
 
 <style>
+  /* ── Hero ── */
   .hero {
-    padding: var(--space-xl) 0 var(--space-lg);
+    padding: var(--space-2xl) 0 var(--space-xl);
   }
 
-  .hero .tagline {
-    color: var(--fg);
+  .hero-headline {
     font-family: var(--font-serif);
     font-size: var(--text-section);
     font-weight: 500;
-    letter-spacing: -0.01em;
-    margin: 0 0 0.75rem;
+    letter-spacing: -0.02em;
+    line-height: 1.4;
+    max-width: 520px;
+    margin: 0 0 0.5rem;
   }
 
+  .hero-sub {
+    font-size: var(--text-body);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    max-width: 500px;
+    margin: 0;
+  }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.75rem;
+  }
+
+  .section-link {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .section-link:hover {
+    color: var(--accent-color);
+  }
+
+  /* ── Now card ── */
+  .now {
+    margin-bottom: var(--space-xl);
+  }
+
+  .now-card {
+    display: block;
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+
+  .now-card:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-hover);
+  }
+
+  .now-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .now-title {
+    font-size: var(--text-subsection);
+    font-weight: 500;
+  }
+
+  .status-pill {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color);
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--accent-color);
+    border-radius: 100px;
+  }
+
+  .now-card p {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* ── Writing section ── */
+  section + section {
+    margin-top: var(--space-xl);
+  }
+
+  .home-posts {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .home-post {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    text-decoration: none;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .home-post:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .home-post:hover {
+    color: var(--accent-color);
+  }
+
+  .home-post-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .home-post-title {
+    font-size: var(--text-body);
+    font-weight: 500;
+  }
+
+  .home-post-desc {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+
+  .home-post time {
+    flex-shrink: 0;
+    font-size: var(--text-tag);
+    margin-top: 0.125rem;
+  }
+
+  /* ── Tools grid ── */
+  .tools-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: var(--space-xl);
+  }
+
+  .tool-card {
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+
+  .tool-card:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-hover);
+  }
+
+  .tool-name {
+    font-size: var(--text-body);
+    font-weight: 500;
+  }
+
+  .tool-desc {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin: 0.15rem 0 0.4rem;
+    line-height: 1.4;
+  }
+
+  .tool-install {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: #5a9a6e;
+  }
 
   /* ── Playground link ── */
   .playground-link {
@@ -70,9 +288,8 @@ const formatDate = (date: string) =>
     border-radius: 8px;
     text-decoration: none;
     color: var(--fg);
-    margin-bottom: var(--space-lg);
-    transition: border-color var(--duration) var(--ease),
-                background var(--duration) var(--ease);
+    margin-top: var(--space-lg);
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
   }
 
   .playground-link:hover {
@@ -91,60 +308,15 @@ const formatDate = (date: string) =>
     color: var(--accent-color);
   }
 
-  section + section {
-    margin-top: var(--space-xl);
-  }
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .tools-grid {
+      grid-template-columns: 1fr;
+    }
 
-  .home-posts {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .home-post {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-    gap: 0 var(--space-md);
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    text-decoration: none;
-    color: var(--fg);
-    transition: color var(--duration) var(--ease);
-  }
-
-  .home-post:first-child {
-    border-top: 1px solid var(--fg-faint);
-  }
-
-  .home-post:hover {
-    color: var(--accent-color);
-  }
-
-  .home-post-title {
-    font-size: var(--text-body);
-    font-weight: 500;
-    grid-column: 1;
-  }
-
-  .home-post-desc {
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-    grid-column: 1;
-    line-height: 1.5;
-  }
-
-  .home-post-tags {
-    display: flex;
-    gap: 0.375rem;
-    grid-column: 1;
-    flex-wrap: wrap;
-    margin-top: 0.125rem;
-  }
-
-  .home-post time,
-  .home-post .mono {
-    grid-column: 2;
-    grid-row: 1;
-    align-self: center;
+    .playground-link {
+      flex-direction: column;
+      gap: 0.25rem;
+    }
   }
 </style>

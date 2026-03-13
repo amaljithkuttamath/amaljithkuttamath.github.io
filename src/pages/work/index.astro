@@ -6,324 +6,344 @@ const posts = Object.entries(allPosts)
   .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./', '').replace('.md', '') }))
   .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
-const formatDate = (date: string) =>
-  new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-
-// ── Spotlight: defines who you are right now ──
-const spotlight = [
-  {
-    title: 'Trust Bench',
-    desc: 'Framework for profiling LLM trustworthiness. Extracts internal signals, evaluates across safety dimensions (truthfulness, fairness, robustness), diagnoses failure modes, and measures trust boundaries specific to deployment context.',
-    tags: ['AI safety', 'mechanistic interpretability', 'PyTorch', 'evaluation'],
-    status: 'in progress',
-    links: [],
-  },
-  {
-    title: 'Predicting Risk of Lung Cancer From Medical History',
-    desc: 'Peer-reviewed research achieving AUC 0.82 in lung cancer risk prediction using Electronic Health Records. Developed methodology for clinical risk modeling with structured EHR data.',
-    journal: 'Quality Management in Health Care',
-    year: 2025,
-    tags: ['research', 'healthcare', 'machine learning'],
-    links: [
-      { label: 'paper', url: 'https://doi.org/10.1097/QMH.0000000000000525' },
-      { label: 'pubmed', url: 'https://pubmed.ncbi.nlm.nih.gov/40197410/' },
-    ],
-  },
-];
-
-// ── Proof: shipped systems with hard numbers ──
-const proof = [
+// ── Research & Experiments (open-source repos with blog posts) ──
+const research = [
   {
     title: 'sae-explorer',
     metric: 'Cross-lingual feature found in 6 languages',
-    desc: 'Found a single SAE feature in Gemma 2 2B that detects conjunctions (and/et/und/y/e) across 6 languages with zero false positives. Uses Gemma Scope pre-trained sparse autoencoders.',
-    tags: ['interpretability', 'sae', 'gemma', 'cross-lingual', 'mechanistic-interpretability'],
+    desc: 'Found a single SAE feature in Gemma 2 2B that detects conjunctions across 6 languages with zero false positives.',
+    tags: ['interpretability', 'sae', 'gemma'],
+    post: '/work/sae-explorer',
+    repo: 'https://github.com/amaljithkuttamath/sae-explorer',
     details: {
       problem: 'Do multilingual models store concepts once or per-language? SAEs can decompose activations into interpretable features, but finding genuinely monosemantic cross-lingual features requires systematic probing.',
-      approach: 'Load Gemma Scope layer 12 SAE (16K features). Run parallel sentences in 6 languages through Gemma 2 2B. Track which features fire on which tokens. Filter for narrow, selective features.',
-      stack: 'SAELens, TransformerLens, PyTorch, Gemma 2 2B, matplotlib',
+      approach: 'Load Gemma Scope layer 12 SAE (16K features). Run parallel sentences in 6 languages through Gemma 2 2B. Filter for narrow, selective features.',
+      stack: 'SAELens, TransformerLens, PyTorch, Gemma 2 2B',
       outcome: 'Feature #10543: conjunction-only, 6 languages, 0 false positives. Also found cross-lingual "cat" feature (#4497) and sentence-initial determiner feature (#1178).',
     },
   },
   {
-    title: 'activation-atlas',
-    metric: 'Layer-by-layer UMAP projections',
-    desc: 'Visualizes how a CNN transforms raw pixels into class-separable representations. Hooks every layer, extracts activations, projects with UMAP.',
-    tags: ['activations', 'umap', 'interpretability', 'visualization'],
+    title: 'hybrid-attention-150m',
+    metric: 'DeltaNet from scratch on Apple Silicon',
+    desc: 'Trained Qwen3.5 hybrid architecture at 8M and 150M params. Found and fixed a numerical bug in the triangular solve.',
+    tags: ['mlx', 'deltanet', 'training'],
+    post: '/work/hybrid-attention-150m',
+    repo: 'https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5',
     details: {
-      problem: 'Neural networks learn hierarchical representations, but this is invisible during training. Understanding what each layer "sees" requires extracting and projecting activations.',
-      approach: 'Train a small CNN on FashionMNIST. Forward hooks capture activations at every layer. Global average pooling for conv layers. UMAP projects to 2D, colored by class.',
-      stack: 'PyTorch, torchvision, umap-learn, scikit-learn, matplotlib',
-      outcome: 'Early layers: classes overlap. Final layers: tight, separated clusters. PCA variance shows representations compressing from distributed to compact. GitHub Action generates fresh results.',
-    },
-  },
-  {
-    title: 'scaling-laws',
-    metric: '5 model sizes, power law fit',
-    desc: 'Tests whether Chinchilla scaling laws hold at toy scale. Trains transformers from 100K to 10M params on TinyStories and fits L(N) = aN^(-b) + c.',
-    tags: ['scaling-laws', 'chinchilla', 'transformers', 'training'],
-    details: {
-      problem: 'Scaling laws predict loss as a function of model size and training tokens. They guide billion-dollar training decisions. But do they hold at small scale?',
-      approach: 'Five decoder-only transformers (100K to 10M params) trained on TinyStories with identical setup. Power law fitted with scipy. Log-log plots reveal the relationship.',
-      stack: 'PyTorch, tiktoken, scipy, matplotlib, HuggingFace datasets',
-      outcome: 'GitHub Action generates fresh results on manual dispatch. Produces scaling curves, loss trajectories, and compute-optimal frontier plots.',
-    },
-  },
-  {
-    title: 'loss-landscape',
-    metric: '3D loss surface visualization',
-    desc: 'Visualizes the loss landscape around trained weights using filter-normalized random directions. Compares sharpness across learning rates and batch sizes.',
-    tags: ['optimization', 'generalization', 'pytorch', 'visualization'],
-    details: {
-      problem: 'Sharp minima generalize poorly, flat minima generalize well. But the loss landscape is invisible during training. No standard tool makes it concrete.',
-      approach: 'Filter-normalized perturbations (Li et al. 2018) along two random directions. Trains MLP on FashionMNIST with varying LR and batch size. Maps loss on a 2D grid around the minimum.',
-      stack: 'PyTorch, torchvision, matplotlib, numpy',
-      outcome: 'Large LR and small batch size produce flatter minima. 3D surface plots, contour maps, and quantified sharpness comparison across training configs.',
-    },
-  },
-  {
-    title: 'superposition-viz',
-    metric: 'Phase transition at 0.7 sparsity',
-    desc: 'Reproduces key findings from Anthropic\'s Toy Models of Superposition paper. Visualizes how neural networks pack more features than they have dimensions.',
-    tags: ['superposition', 'interpretability', 'anthropic', 'pytorch'],
-    details: {
-      problem: 'Superposition is a fundamental obstacle for mechanistic interpretability. If 10 features share 5 dimensions, no single neuron maps to a single feature.',
-      approach: 'Toy model with linear encoder, ReLU bottleneck, and tied-weight decoder. Trains at multiple sparsity levels. Generates phase diagrams, feature geometry plots, dimensionality curves, and interference matrices.',
-      stack: 'PyTorch, matplotlib, numpy',
-      outcome: 'Clear phase transition at 0.7 sparsity. Model jumps from representing 4 to 5+ features in a 5-dim bottleneck. Matches the Anthropic paper\'s Figure 2.',
+      problem: 'Qwen3.5 uses a novel 3:1 linear/full attention pattern. Understanding it requires training it, not just reading about it.',
+      approach: 'From-scratch MLX implementation. Trained at 8M (works) and 150M (NaN). Debugged the repeated-squaring triangular solve to find missing terms in the Neumann series.',
+      stack: 'MLX, Python, Apple Silicon M-series',
+      outcome: '150M model trained to BPB 2.036. Found that MLX lacks tri_inv VJP and associative_scan, limiting DeltaNet training.',
     },
   },
   {
     title: 'calibration-probe',
     metric: 'ECE 0.107, overconfident by 3%',
-    desc: 'Measures whether LLMs know when they are wrong. Asks 102 factual questions, forces stated confidence, and plots calibration curves.',
-    tags: ['calibration', 'llm-safety', 'evaluation', 'python'],
+    desc: 'Measures whether LLMs know when they are wrong. 102 factual questions, forced confidence, calibration curves.',
+    tags: ['calibration', 'llm-safety', 'evaluation'],
+    post: '/work/calibration-probe',
+    repo: 'https://github.com/amaljithkuttamath/calibration-probe',
     details: {
-      problem: 'A model that says "90% confident" but is only right 75% of the time is dangerous. Calibration measures this gap, which matters for safety-critical deployments.',
-      approach: '102 factual questions across 5 categories. Model states confidence 0-100. Responses binned by confidence, actual accuracy measured per bin. Supports direct, chain-of-thought, and step-by-step prompting strategies.',
+      problem: 'A model that says "90% confident" but is only right 75% of the time is dangerous in production.',
+      approach: '102 factual questions across 5 categories. Model states confidence 0-100. Binned by confidence, actual accuracy measured per bin.',
       stack: 'Python, matplotlib, Anthropic API, OpenAI API',
-      outcome: 'Models are slightly overconfident (89% confidence, 86% accuracy). Geography worst calibrated. Math best calibrated. ECE = 0.107. Dry-run mode works without API keys.',
+      outcome: 'Models are slightly overconfident (89% confidence, 86% accuracy). Geography worst calibrated. ECE = 0.107.',
+    },
+  },
+  {
+    title: 'superposition-viz',
+    metric: 'Phase transition at 0.7 sparsity',
+    desc: 'Reproduces key findings from Anthropic\'s Toy Models of Superposition paper.',
+    tags: ['superposition', 'interpretability', 'anthropic'],
+    post: '/work/superposition-viz',
+    repo: 'https://github.com/amaljithkuttamath/superposition-viz',
+    details: {
+      problem: 'Superposition blocks mechanistic interpretability. If features share dimensions, no single neuron maps to a single concept.',
+      approach: 'Toy model: linear encoder, ReLU bottleneck, tied decoder. Trains at multiple sparsity levels. Phase diagrams and interference matrices.',
+      stack: 'PyTorch, matplotlib, numpy',
+      outcome: 'Clear phase transition at 0.7 sparsity. Model jumps from 4 to 5+ features in a 5-dim bottleneck. Matches Anthropic Figure 2.',
     },
   },
   {
     title: 'attention-bench',
-    metric: '4 variants, from scratch',
-    desc: 'Benchmarks MHA, GQA, MQA, and Sliding Window attention by training small transformers on the same data and comparing perplexity, throughput, and memory.',
-    tags: ['attention', 'pytorch', 'transformers', 'from-scratch'],
+    metric: '4 variants from scratch',
+    desc: 'Benchmarks MHA, GQA, MQA, and Sliding Window attention by training small transformers on identical data.',
+    tags: ['attention', 'pytorch', 'from-scratch'],
+    post: '/work/attention-bench',
+    repo: 'https://github.com/amaljithkuttamath/attention-bench',
     details: {
-      problem: 'Attention variants like GQA and MQA are described in papers with theoretical tradeoffs, but direct empirical comparison on identical setups is rare.',
-      approach: 'Four attention mechanisms implemented from scratch in PyTorch. Each plugs into the same decoder-only transformer LM. Trained on TinyStories with identical hyperparameters.',
-      stack: 'PyTorch, tiktoken, matplotlib, HuggingFace datasets',
-      outcome: 'MQA uses 25% fewer KV parameters than MHA. GQA sits between them. SWA trades global context for linear memory scaling. All with 25 passing tests.',
+      problem: 'Attention variant papers describe tradeoffs theoretically. Direct empirical comparison on identical setups is rare.',
+      approach: 'Four attention mechanisms from scratch. Same decoder-only transformer, same data, same hyperparameters.',
+      stack: 'PyTorch, tiktoken, HuggingFace datasets',
+      outcome: 'MQA uses 25% fewer KV parameters than MHA. GQA sits between. SWA trades global context for linear memory scaling.',
     },
   },
   {
-    title: 'crux',
-    metric: 'Real-time token analytics',
-    desc: 'Terminal dashboard for Claude Code usage. Tracks context growth, cache efficiency, cost breakdowns, and session health grades from local session logs.',
-    tags: ['rust', 'tui', 'claude-code', 'open-source'],
+    title: 'scaling-laws',
+    metric: '5 model sizes, power law fit',
+    desc: 'Tests whether Chinchilla scaling laws hold at toy scale. Trains 100K to 10M param transformers.',
+    tags: ['scaling-laws', 'chinchilla', 'training'],
+    post: '/work/scaling-laws',
+    repo: 'https://github.com/amaljithkuttamath/scaling-laws',
     details: {
-      problem: 'Claude Code users have no visibility into token usage patterns. Sessions vary wildly in cost and efficiency with no way to diagnose why.',
-      approach: 'Rust TUI that reads Claude Code JSONL session logs in real-time. Computes rolling statistics, cache hit ratios, context growth rates, and assigns health grades per session.',
-      stack: 'Rust, ratatui, tokio, serde, MCP server',
-      outcome: 'Open-source, published to GitHub with CI/CD and cross-platform releases. Reveals usage patterns invisible from the Claude Code interface.',
+      problem: 'Scaling laws guide billion-dollar training decisions. Do they hold when you go small?',
+      approach: 'Five decoder-only transformers (100K-10M params) trained on TinyStories. Power law fitted with scipy.',
+      stack: 'PyTorch, tiktoken, scipy, matplotlib',
+      outcome: 'GitHub Action auto-generates scaling curves and compute-optimal frontier plots.',
     },
   },
   {
-    title: 'tokenizer-arena',
-    metric: 'Compare 4 encodings',
-    desc: 'CLI tool that runs the same text through multiple LLM tokenizers and shows differences in token count, compression ratio, and token boundaries.',
-    tags: ['rust', 'tokenizers', 'cli', 'open-source'],
+    title: 'activation-atlas',
+    metric: 'Layer-by-layer UMAP projections',
+    desc: 'Visualizes how a CNN transforms raw pixels into class-separable representations.',
+    tags: ['activations', 'umap', 'visualization'],
+    post: '/work/activation-atlas',
+    repo: 'https://github.com/amaljithkuttamath/activation-atlas',
     details: {
-      problem: 'Tokenizer choice affects training efficiency, inference cost, and multilingual performance, but comparing tokenizers requires writing custom scripts each time.',
-      approach: 'Wraps tiktoken-rs to compare cl100k_base (GPT-4/Claude), o200k_base (GPT-4o), p50k_base, and r50k_base side by side. Color-coded token boundary visualization.',
-      stack: 'Rust, tiktoken-rs, comfy-table, clap',
-      outcome: 'Shows newer tokenizers are ~25% more efficient on code. Works fully offline. JSON output for scripting.',
+      problem: 'Neural networks learn hierarchical representations, but this is invisible during training.',
+      approach: 'Forward hooks capture activations at every layer. UMAP projects to 2D, colored by class.',
+      stack: 'PyTorch, umap-learn, scikit-learn, matplotlib',
+      outcome: 'Early layers: classes overlap. Final layers: tight clusters. PCA shows compression from distributed to compact.',
     },
   },
   {
-    title: 'gguf-inspect',
-    metric: 'Parse models byte by byte',
-    desc: 'CLI that reads GGUF model files and prints architecture details, quantization info, tensor shapes, and memory estimates. Hand-rolled binary parser, no external GGUF crates.',
-    tags: ['rust', 'gguf', 'model-internals', 'open-source'],
+    title: 'loss-landscape',
+    metric: '3D loss surface visualization',
+    desc: 'Visualizes the loss landscape around trained weights. Sharp vs flat minima and what controls which one you find.',
+    tags: ['optimization', 'generalization', 'pytorch'],
+    post: '/work/loss-landscape',
+    repo: 'https://github.com/amaljithkuttamath/loss-landscape',
     details: {
-      problem: 'Understanding what is inside a quantized model file requires reading llama.cpp source or scattered documentation. No simple tool shows the full picture.',
-      approach: 'From-scratch GGUF binary parser in Rust. Reads the header, metadata KV pairs, and tensor info. Computes parameter counts, memory estimates, and identifies quantization schemes per layer.',
-      stack: 'Rust, byteorder, comfy-table, clap',
-      outcome: 'Tested on Llama 3.2 3B. Reveals mixed-precision quantization (Q6_K embeddings, Q4_K attention), GQA head ratios from tensor shapes, and 6.7x compression from FP32.',
+      problem: 'Sharp minima generalize poorly. No standard tool makes the landscape concrete.',
+      approach: 'Filter-normalized perturbations (Li et al. 2018) along two random directions. Maps loss on a 2D grid around the minimum.',
+      stack: 'PyTorch, matplotlib, numpy',
+      outcome: 'Large LR and small batch size produce flatter minima. 3D surface plots and quantified sharpness comparison.',
     },
   },
-  {
-    title: 'skill-doctor',
-    metric: 'Claude Code plugin',
-    desc: 'Audits your Claude Code skills using the built-in claude-code-guide agent. Diagnoses issues, builds upgrades in a staging directory, and migrates with rollback.',
-    tags: ['claude-code', 'skills', 'tooling'],
-    details: {
-      problem: 'Claude Code skills accumulate bad patterns: redundant context, missing tool restrictions, no invocation guards. Existing validators only check YAML syntax.',
-      approach: 'Reads all skills, agents, and CLAUDE.md. Sends each skill to the claude-code-guide agent for evaluation against current Claude Code docs. Consult mode maps findings to actual workflow pain points.',
-      stack: 'Claude Code plugin, Markdown skills',
-      outcome: 'Found and fixed issues in all 5 of my own skills. Saved ~2,500 tokens per session from context duplication alone.',
-    },
-  },
+];
+
+// ── Production Systems (professional work, no public repos) ──
+const production = [
   {
     title: 'Healthcare RAG Pipeline',
     metric: '10K+ daily queries',
-    desc: 'Production RAG system for clinicians querying medical records and PubMed. Built hallucination-aware retrieval with domain-specific re-ranking.',
+    desc: 'Production RAG system for clinicians. Hallucination-aware retrieval with domain-specific re-ranking.',
     tags: ['RAG', 'vertex ai', 'hallucination detection'],
     details: {
-      problem: 'Clinicians need accurate, grounded answers from medical records and research. Standard retrieval surfaces irrelevant context, leading to hallucinated outputs in clinical settings.',
-      approach: 'Retrieval-augmented generation on Vertex AI with hallucination-aware retrieval. Domain-specific re-ranking ensures clinical relevance. Measurement of retrieval fidelity across query types.',
-      stack: 'Vertex AI, Gemini Pro, LangChain, LlamaIndex, Python',
-      outcome: 'Serves 10,000+ daily clinical queries. Developed methodology for measuring retrieval fidelity and hallucination rates in domain-specific RAG.',
-    },
-  },
-  {
-    title: 'Medical Knowledge Graph',
-    metric: '5 entity types, cross-format search',
-    desc: 'Knowledge graph connecting diseases, drugs, treatments, and clinical trials. Powers retrieval grounding for the RAG system.',
-    tags: ['neo4j', 'knowledge graphs', 'embeddings'],
-    details: {
-      problem: 'Medical knowledge is scattered across databases, papers, and records. Flat storage loses entity relationships critical for accurate retrieval.',
-      approach: 'Graph schema mapping diseases, treatments, drugs, clinical trials, and expert opinions. Multi-modal embeddings for cross-format querying. Provides structured grounding for RAG retrieval.',
-      stack: 'Neo4j, Elasticsearch, Python, sentence-transformers',
-      outcome: 'Powers the retrieval grounding layer. Enables entity-aware queries across text, structured data, and metadata.',
+      problem: 'Clinicians need grounded answers from medical records and research. Standard retrieval surfaces irrelevant context, leading to hallucinated outputs.',
+      approach: 'Retrieval-augmented generation on Vertex AI with hallucination-aware retrieval. Domain-specific re-ranking for clinical relevance.',
+      stack: 'Vertex AI, Gemini Pro, LangChain, LlamaIndex',
+      outcome: 'Serves 10,000+ daily clinical queries. Developed methodology for measuring retrieval fidelity and hallucination rates.',
     },
   },
   {
     title: 'LLM Fine-tuning System',
     metric: '25% lower inference cost',
-    desc: 'Fine-tuning Qwen2.5-3B with GRPO + LoRA. Studied how reward-guided optimization changes model behavior at the output distribution level.',
-    tags: ['LLM', 'fine-tuning', 'GRPO', 'vLLM'],
+    desc: 'Fine-tuning Qwen2.5-3B with GRPO + LoRA. Studied how reward-guided optimization changes model behavior.',
+    tags: ['fine-tuning', 'GRPO', 'vLLM'],
     details: {
-      problem: 'Off-the-shelf models underperform on domain tasks. Understanding how fine-tuning alters model behavior requires both training infrastructure and evaluation methodology.',
-      approach: '4-bit quantization with LoRA adapters for memory-efficient training. GRPO for reward-guided optimization. vLLM for high-throughput inference with auto-scaling.',
-      stack: 'PyTorch, Hugging Face, LoRA, vLLM, Python',
-      outcome: 'Deployed fine-tuned 3B parameter model to production, reducing inference costs by 25%. Developed evaluation pipeline for measuring behavioral shift pre/post fine-tuning.',
+      problem: 'Off-the-shelf models underperform on domain tasks. Understanding how fine-tuning alters behavior requires both training infra and evaluation methodology.',
+      approach: '4-bit quantization with LoRA adapters. GRPO for reward-guided optimization. vLLM for high-throughput inference.',
+      stack: 'PyTorch, Hugging Face, LoRA, vLLM',
+      outcome: 'Deployed fine-tuned 3B model to production, reducing inference costs by 25%.',
+    },
+  },
+  {
+    title: 'Medical Knowledge Graph',
+    metric: '5 entity types, cross-format search',
+    desc: 'Knowledge graph connecting diseases, drugs, treatments, and clinical trials. Powers retrieval grounding.',
+    tags: ['neo4j', 'knowledge graphs', 'embeddings'],
+    details: {
+      problem: 'Medical knowledge is scattered across databases, papers, and records. Flat storage loses entity relationships.',
+      approach: 'Graph schema mapping diseases, treatments, drugs, clinical trials. Multi-modal embeddings for cross-format querying.',
+      stack: 'Neo4j, Elasticsearch, sentence-transformers',
+      outcome: 'Powers the retrieval grounding layer. Enables entity-aware queries across text, structured data, and metadata.',
     },
   },
   {
     title: 'Drug Safety Sentiment Analysis',
-    metric: 'early warning signals',
-    desc: 'Transformer classifiers detecting sentiment shifts in medical expert opinions to flag safety signals for pharmaceutical products.',
+    metric: 'Early warning signals',
+    desc: 'Transformer classifiers detecting sentiment shifts in medical expert opinions for pharmacovigilance.',
     tags: ['NLP', 'safety signals', 'healthcare'],
     details: {
-      problem: 'Pharmaceutical safety teams need to detect early warning signs in expert opinions before adverse events escalate. Manual review doesn\'t scale.',
-      approach: 'Fine-tuned transformer classifiers on domain-specific medical language. Tracks sentiment shifts per drug per condition over time. Measures classifier reliability against pharmacovigilance ground truth.',
-      stack: 'PyTorch, Hugging Face Transformers, spaCy, Python',
-      outcome: 'Surfaces drugs with increasing negative sentiment for safety review. Integrated into existing pharmacovigilance workflows.',
-    },
-  },
-  {
-    title: 'NL-to-Insights',
-    metric: '5,000+ SKUs',
-    desc: 'Ask a question in plain English about your inventory, get back a chart.',
-    tags: ['RAG', 'GPT', 'plotly'],
-    details: {
-      problem: "Warehouse managers need inventory analytics but can't write SQL. Analysts become bottlenecks for routine data questions.",
-      approach: 'Natural language to SQL translation via GPT-3.5 Turbo. Queries execute against inventory and sales databases. Results render as interactive Plotly charts.',
-      stack: 'GPT-3.5 Turbo, Plotly, PostgreSQL, Python, FastAPI',
-      outcome: 'Used for demand forecasting across 5,000+ SKUs. Eliminated analyst dependency for standard inventory queries.',
-    },
-  },
-  {
-    title: 'EDI Pipelines',
-    metric: '2TB+ processed, 50+ pipelines',
-    desc: 'Data pipelines moving business data between ERP systems, warehouses, and reporting tools.',
-    tags: ['azure', 'databricks', 'ETL'],
-    details: {
-      problem: 'Business partners exchange data via EDI, a standardized-in-theory format that varies wildly in practice.',
-      approach: 'Azure Data Factory orchestrates ingestion and routing. Databricks handles transformation, schema normalization, and quality checks.',
-      stack: 'Azure Data Factory, Databricks, Azure Data Lake, Python, SQL',
-      outcome: 'Processed over 2TB of transaction data. Connected ERP systems, warehouses, and reporting tools into a single pipeline.',
+      problem: 'Pharmaceutical safety teams need to detect early warning signs before adverse events escalate.',
+      approach: 'Fine-tuned transformer classifiers on domain-specific medical language. Tracks sentiment per drug per condition over time.',
+      stack: 'PyTorch, Hugging Face, spaCy',
+      outcome: 'Surfaces drugs with increasing negative sentiment. Integrated into pharmacovigilance workflows.',
     },
   },
   {
     title: 'Predictive Maintenance',
     metric: '90%+ accuracy, 50% less downtime',
-    desc: 'Digital twin platform for industrial machinery. Anomaly detection and time-to-failure prediction from IoT sensor streams.',
+    desc: 'Digital twin platform for industrial machinery. Anomaly detection and time-to-failure prediction from IoT streams.',
     tags: ['anomaly detection', 'time series', 'digital twins'],
     details: {
-      problem: "Unplanned machine downtime is expensive. Raw sensor data exists but isn't used for proactive failure prediction.",
-      approach: 'Signal processing pipeline ingesting IoT sensor streams. Feature extraction, anomaly detection, and time-to-failure models trained on historical failure data.',
+      problem: 'Unplanned machine downtime is expensive. Raw sensor data exists but is not used for proactive failure prediction.',
+      approach: 'Signal processing pipeline ingesting IoT sensor streams. Feature extraction and time-to-failure models trained on historical failure data.',
       stack: 'Python, scikit-learn, Azure Data Lake, Power BI',
-      outcome: '90%+ anomaly detection accuracy. 95% time-to-failure prediction. Reduced machine downtime by 50% across deployed sites.',
+      outcome: '90%+ anomaly detection accuracy. Reduced machine downtime by 50% across deployed sites.',
     },
   },
 ];
+
+// ── Open-Source Tools (installable CLIs) ──
+const tools = [
+  {
+    title: 'crux',
+    metric: 'Real-time token analytics',
+    desc: 'Terminal dashboard for Claude Code usage. Tracks context growth, cache efficiency, cost breakdowns, and session health.',
+    tags: ['rust', 'tui', 'claude-code'],
+    post: '/work/crux',
+    repo: 'https://github.com/amaljithkuttamath/crux',
+    install: { brew: 'brew install amaljithkuttamath/tap/crux', cargo: 'cargo install crux-cli' },
+    details: {
+      problem: 'Claude Code users have no visibility into token usage patterns. Sessions vary wildly in cost with no way to diagnose why.',
+      approach: 'Rust TUI that reads Claude Code JSONL session logs in real-time. Computes rolling statistics, cache hit ratios, and health grades.',
+      stack: 'Rust, ratatui, tokio, serde, MCP server',
+      outcome: 'Open-source with cross-platform releases. Reveals usage patterns invisible from the Claude Code interface.',
+    },
+  },
+  {
+    title: 'tokenizer-arena',
+    metric: 'Compare 4 encodings',
+    desc: 'CLI that runs the same text through multiple LLM tokenizers and shows differences in token count and boundaries.',
+    tags: ['rust', 'tokenizers', 'cli'],
+    post: '/work/tokenizer-arena',
+    repo: 'https://github.com/amaljithkuttamath/tokenizer-arena',
+    install: { cargo: 'cargo install tokenizer-arena' },
+    details: {
+      problem: 'Tokenizer choice affects training efficiency and inference cost, but comparing tokenizers requires custom scripts.',
+      approach: 'Wraps tiktoken-rs to compare cl100k_base, o200k_base, p50k_base, and r50k_base side by side.',
+      stack: 'Rust, tiktoken-rs, comfy-table, clap',
+      outcome: 'Newer tokenizers are ~25% more efficient on code. Works fully offline. JSON output for scripting.',
+    },
+  },
+  {
+    title: 'gguf-inspect',
+    metric: 'Parse models byte by byte',
+    desc: 'CLI that reads GGUF model files and prints architecture, quantization, tensor shapes, and memory estimates.',
+    tags: ['rust', 'gguf', 'model-internals'],
+    post: '/work/gguf-inspect',
+    repo: 'https://github.com/amaljithkuttamath/gguf-inspect',
+    details: {
+      problem: 'Understanding what is inside a quantized model file requires reading llama.cpp source or scattered docs.',
+      approach: 'From-scratch GGUF binary parser in Rust. Reads header, metadata, tensor info. Computes parameter counts and memory estimates.',
+      stack: 'Rust, byteorder, comfy-table, clap',
+      outcome: 'Tested on Llama 3.2 3B. Reveals mixed-precision quantization, GQA head ratios, and 6.7x compression from FP32.',
+    },
+  },
+  {
+    title: 'skill-doctor',
+    metric: 'Claude Code plugin',
+    desc: 'Audits your Claude Code skills and diagnoses issues. Builds upgrades in staging with rollback.',
+    tags: ['claude-code', 'skills', 'tooling'],
+    post: '/work/skill-doctor',
+    repo: 'https://github.com/amaljithkuttamath/skill-doctor',
+    details: {
+      problem: 'Claude Code skills accumulate bad patterns: redundant context, missing guards, no tool restrictions.',
+      approach: 'Reads all skills and sends each to the claude-code-guide agent for evaluation against current docs.',
+      stack: 'Claude Code plugin, Markdown skills',
+      outcome: 'Found and fixed issues in all 5 of my own skills. Saved ~2,500 tokens per session from context duplication.',
+    },
+  },
+];
+
+// ── Spotlight ──
+const spotlight = {
+  title: 'Trust Bench',
+  desc: 'Open-source profiler for LLM trustworthiness. Extracts internal signals, evaluates across safety dimensions, diagnoses failure modes, and measures trust boundaries specific to deployment context.',
+  tags: ['AI safety', 'mechanistic interpretability', 'PyTorch', 'evaluation'],
+  status: 'in progress',
+};
+
+const paper = {
+  title: 'Predicting Risk of Lung Cancer From Medical History',
+  journal: 'Quality Management in Health Care',
+  year: 2025,
+  links: [
+    { label: 'paper', url: 'https://doi.org/10.1097/QMH.0000000000000525' },
+    { label: 'pubmed', url: 'https://pubmed.ncbi.nlm.nih.gov/40197410/' },
+  ],
+};
 ---
 
-<Base title="Work | Amaljith Kuttamath" description="Research in LLM trust and safety, production AI systems, and technical writing on mechanistic interpretability.">
+<Base title="Work | Amaljith Kuttamath" description="Research in LLM trust and safety, production AI systems, and open-source developer tools.">
 
   <div class="page-header animate-in">
     <h1>Work</h1>
   </div>
 
   <!-- ── Spotlight ── -->
-  <section class="spotlight animate-in animate-in-delay-1">
-    {spotlight.map((item) => (
-      <div class="spotlight-card">
-        <div class="spotlight-head">
-          <h2>{item.title}</h2>
-          {item.status && <span class="status-badge">{item.status}</span>}
-          {item.journal && (
-            <span class="citation">{item.journal}, {item.year}</span>
-          )}
-        </div>
-        <p>{item.desc}</p>
-        <div class="spotlight-footer">
-          <div class="tags">
-            {item.tags.map((t) => <span class="tag">{t}</span>)}
-          </div>
-          {item.links && (
-            <div class="work-links">
-              {item.links.map((link) => (
-                <a href={link.url} class="work-link" target="_blank" rel="noopener noreferrer">{link.label} &rarr;</a>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    ))}
-  </section>
-
-  <!-- ── Interactive ── -->
   <section class="animate-in animate-in-delay-1">
-    <div class="section-label">Interactive</div>
-    <a href="/playground" class="playground-card">
-      <div class="playground-head">
-        <h3>microGPT Playground</h3>
-        <span class="playground-cta">try it live &rarr;</span>
+    <div class="section-label">Spotlight</div>
+    <div class="spotlight-card">
+      <div class="spotlight-head">
+        <h2>{spotlight.title}</h2>
+        <span class="status-badge">{spotlight.status}</span>
       </div>
-      <p>Train a transformer in your browser. Watch attention patterns, embeddings, and loss evolve in real time. Same architecture as frontier models, small enough to inspect every component.</p>
+      <p>{spotlight.desc}</p>
       <div class="tags">
-        <span class="tag">interactive</span>
-        <span class="tag">d3.js</span>
-        <span class="tag">transformers</span>
+        {spotlight.tags.map((t) => <span class="tag">{t}</span>)}
       </div>
-    </a>
+    </div>
+    <div class="paper-row">
+      <span class="paper-title">{paper.title}</span>
+      <span class="paper-meta">
+        <em>{paper.journal}, {paper.year}</em>
+        {paper.links.map((link) => (
+          <a href={link.url} class="paper-link" target="_blank" rel="noopener noreferrer">{link.label} &rarr;</a>
+        ))}
+      </span>
+    </div>
   </section>
 
-  <!-- ── Writing ── -->
-  {posts.length > 0 && (
-    <section class="animate-in animate-in-delay-2">
-      <div class="section-label">Writing</div>
-      <div class="writing-list">
-        {posts.map((post) => (
-          <a href={post.url} class="writing-item">
-            <h3>{post.frontmatter.title}</h3>
-            <time class="mono">{formatDate(post.frontmatter.date)}</time>
-          </a>
-        ))}
-      </div>
-    </section>
-  )}
-
-  <!-- ── Shipped ── -->
-  <section class="animate-in animate-in-delay-2">
-    <div class="section-label">Shipped</div>
+  <!-- ── Research & Experiments ── -->
+  <section class="animate-in animate-in-delay-1">
+    <div class="section-label">Research &amp; Experiments</div>
     <div class="proof-grid">
-      {proof.map((item) => (
-        <details class="proof-card" id={item.title.toLowerCase().replace(/\s+/g, '-')}>
+      {research.map((item) => (
+        <details class="proof-card">
+          <summary>
+            <span class="proof-metric">{item.metric}</span>
+            <h3>{item.title}</h3>
+            <p>{item.desc}</p>
+            <div class="tags">
+              {item.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+          </summary>
+          <div class="work-item-details">
+            <div class="detail-row">
+              <span class="detail-label">Problem</span>
+              <span class="detail-value">{item.details.problem}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Approach</span>
+              <span class="detail-value">{item.details.approach}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Stack</span>
+              <span class="detail-value detail-stack">{item.details.stack}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Outcome</span>
+              <span class="detail-value">{item.details.outcome}</span>
+            </div>
+            <div class="detail-links">
+              {item.post && <a href={item.post} class="work-link">read more &rarr;</a>}
+              {item.repo && <a href={item.repo} class="work-link" target="_blank" rel="noopener noreferrer">code &rarr;</a>}
+            </div>
+          </div>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <!-- ── Production Systems ── -->
+  <section class="animate-in animate-in-delay-2">
+    <div class="section-label">Production Systems</div>
+    <div class="proof-grid">
+      {production.map((item) => (
+        <details class="proof-card">
           <summary>
             <span class="proof-metric">{item.metric}</span>
             <h3>{item.title}</h3>
@@ -355,6 +375,71 @@ const proof = [
     </div>
   </section>
 
+  <!-- ── Open-Source Tools ── -->
+  <section class="animate-in animate-in-delay-2">
+    <div class="section-label">Open-Source Tools</div>
+    <div class="proof-grid">
+      {tools.map((item) => (
+        <details class="proof-card">
+          <summary>
+            <span class="proof-metric">{item.metric}</span>
+            <h3>{item.title}</h3>
+            <p>{item.desc}</p>
+            {item.install && (
+              <div class="install-row">
+                {Object.entries(item.install).map(([key, cmd]) => (
+                  <code class={`install-cmd ${key === 'brew' ? 'install-primary' : ''}`}>{cmd}</code>
+                ))}
+              </div>
+            )}
+            <div class="tags">
+              {item.tags.map((t) => <span class="tag">{t}</span>)}
+            </div>
+          </summary>
+          <div class="work-item-details">
+            <div class="detail-row">
+              <span class="detail-label">Problem</span>
+              <span class="detail-value">{item.details.problem}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Approach</span>
+              <span class="detail-value">{item.details.approach}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Stack</span>
+              <span class="detail-value detail-stack">{item.details.stack}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Outcome</span>
+              <span class="detail-value">{item.details.outcome}</span>
+            </div>
+            <div class="detail-links">
+              {item.post && <a href={item.post} class="work-link">read more &rarr;</a>}
+              {item.repo && <a href={item.repo} class="work-link" target="_blank" rel="noopener noreferrer">code &rarr;</a>}
+            </div>
+          </div>
+        </details>
+      ))}
+    </div>
+  </section>
+
+  <!-- ── Interactive ── -->
+  <section class="animate-in animate-in-delay-2">
+    <div class="section-label">Interactive</div>
+    <a href="/playground" class="playground-card">
+      <div class="playground-head">
+        <h3>microGPT Playground</h3>
+        <span class="playground-cta">try it live &rarr;</span>
+      </div>
+      <p>Train a transformer in your browser. Watch attention patterns, embeddings, and loss evolve in real time.</p>
+      <div class="tags">
+        <span class="tag">interactive</span>
+        <span class="tag">d3.js</span>
+        <span class="tag">transformers</span>
+      </div>
+    </a>
+  </section>
+
 </Base>
 
 <style>
@@ -370,13 +455,6 @@ const proof = [
   }
 
   /* ── Spotlight ── */
-  .spotlight {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-lg);
-    margin-top: var(--space-lg);
-  }
-
   .spotlight-card {
     padding: var(--space-lg);
     border: 1px solid var(--fg-faint);
@@ -411,13 +489,6 @@ const proof = [
     border-radius: 100px;
   }
 
-  .citation {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-  }
-
   .spotlight-card p {
     font-size: var(--text-body);
     color: var(--fg-muted);
@@ -426,12 +497,40 @@ const proof = [
     max-width: 580px;
   }
 
-  .spotlight-footer {
+  .paper-row {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: baseline;
     flex-wrap: wrap;
     gap: 0.5rem;
+    padding: 0.75rem 0;
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .paper-title {
+    font-size: var(--text-small);
+    font-weight: 500;
+  }
+
+  .paper-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+  }
+
+  .paper-link {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    text-decoration: none;
+  }
+
+  .paper-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   /* ── Playground card ── */
@@ -463,11 +562,6 @@ const proof = [
     font-weight: 500;
     letter-spacing: -0.02em;
     margin: 0;
-    transition: color var(--duration) var(--ease);
-  }
-
-  .playground-card:hover h3 {
-    color: var(--accent-color);
   }
 
   .playground-cta {
@@ -483,38 +577,6 @@ const proof = [
     line-height: 1.7;
     margin: 0 0 var(--space-md);
     max-width: 580px;
-  }
-
-  /* ── Writing ── */
-  .writing-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .writing-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.625rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    text-decoration: none;
-    color: var(--fg);
-    transition: color var(--duration) var(--ease);
-  }
-
-  .writing-item:first-child {
-    border-top: 1px solid var(--fg-faint);
-  }
-
-  .writing-item:hover {
-    color: var(--accent-color);
-  }
-
-  .writing-item h3 {
-    font-family: var(--font-sans);
-    font-size: var(--text-body);
-    font-weight: 500;
-    margin: 0;
   }
 
   /* ── Proof grid ── */
@@ -585,10 +647,35 @@ const proof = [
     animation: fadeIn 0.2s var(--ease);
   }
 
-  /* ── Links ── */
-  .work-links {
+  /* ── Install row ── */
+  .install-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+
+  .install-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--fg-muted);
+    padding: 0.2rem 0.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--fg-faint);
+    border-radius: 6px;
+  }
+
+  .install-primary {
+    color: #5a9a6e;
+    background: rgba(90, 154, 110, 0.08);
+    border-color: rgba(90, 154, 110, 0.15);
+  }
+
+  /* ── Detail links ── */
+  .detail-links {
     display: flex;
     gap: 0.75rem;
+    margin-top: 0.25rem;
   }
 
   .work-link {
@@ -619,16 +706,6 @@ const proof = [
     .playground-head {
       flex-direction: column;
       gap: 0.25rem;
-    }
-
-    .spotlight-footer {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
-    .writing-item {
-      flex-direction: column;
-      gap: 0.125rem;
     }
   }
 </style>
