@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Post.astro
 title: "What's Actually Inside a GGUF File?"
-date: "2026-03-11"
+date: "2026-03-18"
 description: "I parsed a Llama 3.2 model file byte by byte. Here's what the format reveals about quantization, architecture, and how inference engines load models."
 tags: ["gguf", "llama", "quantization", "rust", "model-internals"]
 thread: "tools"
@@ -9,7 +9,7 @@ type: "tool"
 repo: "https://github.com/amaljithkuttamath/gguf-inspect"
 ---
 
-I wanted to understand what llama.cpp actually reads when it loads a model. Not the documentation. The bytes. So I wrote a parser from scratch in Rust, pointed it at a Llama 3.2 3B Instruct GGUF file, and printed everything it found.
+I've been training and profiling models for [Trust Bench](/work/why-trust-bench), which means loading quantized weights constantly. I realized I was treating GGUF files as black boxes, just feeding them to llama.cpp without understanding what was inside. So I wrote a parser from scratch in Rust, pointed it at a Llama 3.2 3B Instruct GGUF file, and printed everything it found.
 
 The format is simpler than I expected.
 

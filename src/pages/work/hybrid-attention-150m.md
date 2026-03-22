@@ -11,7 +11,7 @@ project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5"
 ---
 
-I wanted to understand how Qwen3.5's hybrid attention works. Not from the paper, from training it myself.
+I wanted to understand how Qwen3.5's hybrid attention works. Not from the paper, from training it myself. This is the architecture Trust Bench will instrument, and the [foundation experiments](/work/building-intuition) I'd been running pointed me toward questions that only training could answer.
 
 Qwen3.5 swaps most of its attention layers for [Gated DeltaNet](https://arxiv.org/abs/2412.06464), a linear attention variant with a recurrent state, and keeps a few full softmax layers in the mix. I wanted to see what happens when you shrink that down to 8 million parameters and train it on a laptop.
 

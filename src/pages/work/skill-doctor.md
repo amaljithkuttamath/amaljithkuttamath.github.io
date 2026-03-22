@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Post.astro
 title: "I Built a Tool to Fix Claude Code Skills"
-date: "2026-03-10"
+date: "2026-03-22"
 description: "I audited my own Claude Code skills and found problems in every one. So I built a plugin to do the audit for anyone."
 tags: ["claude-code", "skills", "tooling"]
 thread: "tools"

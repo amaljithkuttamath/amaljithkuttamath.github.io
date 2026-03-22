@@ -11,17 +11,21 @@ project: "trust-bench"
 repo: "https://github.com/amaljithkuttamath/sae-explorer"
 ---
 
-Does a multilingual language model store "and" as one concept or six? If you decompose Gemma 2 2B's activations with a sparse autoencoder, the answer is clear: one.
+Trust Bench needs to extract interpretable features from model activations. The [experiments I've been running](/work/building-intuition) showed me that superposition makes individual neurons unreliable, so I need sparse autoencoders to decompose activations into meaningful features.
 
-Feature #10543 in Gemma Scope's layer 12 SAE fires on conjunction words across English, French, German, Spanish, Italian, and Portuguese. It activates on "and", "et", "und", "y", and "e" with similar strength (24-34 activation units), and it fires on nothing else. Zero activation on control sentences without conjunctions.
+Before I build that into Trust Bench, I wanted to understand what SAE features actually look like in a real model. Specifically: if I decompose a multilingual model's activations, do I find features that represent concepts across languages? Or does each language get its own features?
+
+This matters for Trust Bench because if safety-relevant concepts (deception, harmful intent, refusal) are stored in language-independent features, monitoring a small set of features might generalize across all languages. If they're language-specific, that's a concrete alignment concern.
+
+I used Google's [Gemma Scope](https://huggingface.co/google/gemma-scope) pre-trained SAEs to find out.
 
 ---
 
 ## Setup
 
-Google's [Gemma Scope](https://huggingface.co/google/gemma-scope) provides pre-trained JumpReLU sparse autoencoders for every layer of Gemma 2 2B. Each SAE decomposes the 2304-dimensional residual stream into 16,384 sparse features. The idea, from Anthropic's [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/) work, is that individual neurons are polysemantic (they respond to many unrelated things), but SAE features can be monosemantic (each responds to one interpretable concept).
+Gemma Scope provides pre-trained JumpReLU sparse autoencoders for every layer of Gemma 2 2B. Each SAE decomposes the 2304-dimensional residual stream into 16,384 sparse features. The idea, from Anthropic's [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/) work, is that individual neurons are polysemantic (they respond to many unrelated things), but SAE features can be monosemantic (each responds to one interpretable concept).
 
-I loaded the layer 12 SAE using [SAELens](https://github.com/jbloomAus/SAELens), ran 31 diverse prompts through Gemma 2 2B, and recorded which features fired on which tokens. Layer 12 sits in the middle of the 26-layer model, where representations have moved past surface-level token identity but haven't yet committed to final predictions.
+I loaded the layer 12 SAE using [SAELens](https://github.com/jbloomAus/SAELens), ran 31 diverse prompts through Gemma 2 2B, and recorded which features fired on which tokens. Layer 12 sits in the middle of the 26-layer model, where representations have moved past surface-level token identity but haven't yet committed to final predictions. My [activation projection experiments](/work/building-intuition#2-how-representations-evolve-through-layers) pointed me toward middle layers for exactly this reason.
 
 ---
 
@@ -76,22 +80,22 @@ The conjunction feature is not unique. The broader search found 631 features tha
 
 **Feature #2987** responds to domestic objects, firing on translations of "mat", "water", "house", and "morning" across all six languages.
 
-These features suggest that by layer 12, Gemma 2 2B has organized its representations around language-independent concepts. The model does not maintain separate "English and" and "French et" representations. It has converged on a shared abstraction that captures the grammatical role regardless of surface form.
+By layer 12, Gemma 2 2B has organized its representations around language-independent concepts. The model does not maintain separate "English and" and "French et" representations. It has converged on a shared abstraction that captures the grammatical role regardless of surface form.
 
 <figure>
-  <img src="https://raw.githubusercontent.com/amaljithkuttamath/sae-explorer/main/results/conjunction_selectivity.png" alt="Bar chart comparing conjunction vs control activation for 8 candidate features, showing Feature 10543 and Feature 8 as the only truly selective ones" />
+  <img src="https://raw.githubusercontent.com/amaljithkuttamath/sae-explorer/main/results/conjunction_selectivity.png" alt="Bar chart comparing conjunction vs control activation for 8 candidate features" />
   <figcaption>Most features that fire on conjunctions also fire on other tokens (red bars). Features #10543 and #8 are the only ones with zero control activation.</figcaption>
 </figure>
 
 ---
 
-## What this tells us about multilingual representations
-
-The standard explanation for cross-lingual transfer in multilingual models is that languages with shared training data develop overlapping representations. But that explanation is vague. SAE features make it concrete: you can point to specific directions in activation space that encode language-independent concepts.
+## What this means for Trust Bench
 
 Feature #10543 is not just "correlated with conjunctions." It has a threshold (the JumpReLU activation function), it fires with similar magnitude across languages (24-34 units), and it is silent on everything else. This is a discrete computational unit that the model uses when processing conjunctions, regardless of which language it is processing.
 
-This has implications for interpretability at scale. If safety-relevant concepts (deception, harmful intent, refusal) are also stored in language-independent features, then monitoring a small set of SAE features might generalize across all languages the model speaks. Conversely, if some safety features are language-specific, that would be a concrete alignment concern.
+The question I started with was whether safety-relevant features would be language-independent. This experiment doesn't answer that directly, but it shows the mechanism exists. Concrete concepts get stored as language-independent features. If deception or harmful intent follow the same pattern, then Trust Bench's feature monitoring could generalize across languages. If they don't, that's a finding too, and it means Trust Bench needs per-language safety profiles.
+
+The next step is finding features that correlate with trust-relevant behaviors: hedging, overconfidence, refusal, factual grounding. That's what Trust Bench's extraction stage is designed to do.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 layout: ../../layouts/Post.astro
 title: "I Built a Terminal Dashboard to See Where My Tokens Go"
-date: "2026-03-11"
+date: "2026-03-16"
 description: "crux is a TUI that reads Claude Code session logs and shows you real-time context growth, cache efficiency, cost breakdowns, and session health grades."
 tags: ["rust", "tui", "claude-code", "tooling", "open-source"]
 thread: "tools"
