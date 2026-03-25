@@ -64,7 +64,7 @@ const formatDate = (date: string) =>
     <div class="tools-grid">
       {tools.map((tool) => (
         <a href={tool.url} class="tool-card">
-          <span class="tool-name">{tool.frontmatter.title.includes('Token') ? 'crux' : tool.frontmatter.title.includes('Tokenizer') ? 'tokenizer-arena' : tool.frontmatter.tags?.[0]}</span>
+          <span class="tool-name">{tool.url.split('/').pop()}</span>
           <span class="tool-desc">{tool.frontmatter.description.split('.')[0]}</span>
           <code class="tool-install">{Object.values(tool.frontmatter.install)[0] as string}</code>
         </a>

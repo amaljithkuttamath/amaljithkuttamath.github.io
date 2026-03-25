@@ -13,6 +13,7 @@ const ogImageURL = new URL(ogImage, Astro.site);
 const navItems = [
   { href: '/', label: 'Home' },
   { href: '/work', label: 'Work' },
+  { href: '/blog', label: 'Blog' },
   { href: '/playground', label: 'Playground' },
   { href: '/about', label: 'About' },
 ];
@@ -123,8 +124,8 @@ if (matchedNav) {
     <nav>
       <a href="/" class="logo" aria-label="Home">Amaljith Kuttamath</a>
       <div class="nav-links">
-        <a href="/work" class:list={[{ active: (currentPath.startsWith('/work') && !currentPath.startsWith('/work/hybrid') && !currentPath.startsWith('/work/understanding')) || currentPath.startsWith('/trust-bench') }]}>work</a>
-        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') || currentPath.startsWith('/work/hybrid') || currentPath.startsWith('/work/understanding') }]}>blog</a>
+        <a href="/work" class:list={[{ active: (currentPath === '/work' || currentPath === '/work/') || currentPath.startsWith('/trust-bench') }]}>work</a>
+        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') || (currentPath.startsWith('/work/') && currentPath !== '/work/') }]}>blog</a>
         <a href="/playground" class:list={[{ active: currentPath === '/playground' || currentPath === '/playground/' }]}>playground</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
       </div>
