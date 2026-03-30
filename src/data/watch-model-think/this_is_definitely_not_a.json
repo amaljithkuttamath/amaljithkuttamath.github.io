@@ -1,0 +1,189 @@
+{
+  "step": 2,
+  "title": "Features don't work alone",
+  "prompt": "This is definitely not a",
+  "input_tokens": [
+    "This",
+    " is",
+    " definitely",
+    " not",
+    " a"
+  ],
+  "generated_tokens": [
+    {
+      "token": " good",
+      "features": [
+        {
+          "id": 2556,
+          "label": "phrases with a negative connotation indicating problems or challenges",
+          "activation": 32.5,
+          "logit_attr": 19.5
+        },
+        {
+          "id": 5864,
+          "label": "unlabeled feature",
+          "activation": 18.8,
+          "logit_attr": 12.5
+        },
+        {
+          "id": 13501,
+          "label": "unlabeled feature",
+          "activation": 8.9,
+          "logit_attr": 1.6
+        },
+        {
+          "id": 24412,
+          "label": "words related to locations or settings",
+          "activation": 7.4,
+          "logit_attr": 3.5
+        },
+        {
+          "id": 6915,
+          "label": "unlabeled feature",
+          "activation": 5.3,
+          "logit_attr": 1.0
+        }
+      ],
+      "predictions": [
+        {
+          "token": " good",
+          "prob": 0.044,
+          "chosen": true
+        },
+        {
+          "token": " bad",
+          "prob": 0.032
+        },
+        {
+          "token": " joke",
+          "prob": 0.019
+        },
+        {
+          "token": " game",
+          "prob": 0.019
+        },
+        {
+          "token": " new",
+          "prob": 0.019
+        }
+      ]
+    },
+    {
+      "token": " idea",
+      "features": [
+        {
+          "id": 329,
+          "label": "unlabeled feature",
+          "activation": 27.0,
+          "logit_attr": 31.0
+        },
+        {
+          "id": 15770,
+          "label": "expressions of dissatisfaction or disapproval",
+          "activation": 18.6,
+          "logit_attr": 5.5
+        },
+        {
+          "id": 19998,
+          "label": "the word \"good\" and related words indicating positivity or high quality",
+          "activation": 15.8,
+          "logit_attr": 9.7
+        },
+        {
+          "id": 1851,
+          "label": "unlabeled feature",
+          "activation": 11.8,
+          "logit_attr": 11.7
+        },
+        {
+          "id": 3895,
+          "label": "unlabeled feature",
+          "activation": 7.4,
+          "logit_attr": 3.5
+        }
+      ],
+      "predictions": [
+        {
+          "token": " idea",
+          "prob": 0.134,
+          "chosen": true
+        },
+        {
+          "token": " time",
+          "prob": 0.125
+        },
+        {
+          "token": " look",
+          "prob": 0.056
+        },
+        {
+          "token": " thing",
+          "prob": 0.05
+        },
+        {
+          "token": " day",
+          "prob": 0.03
+        }
+      ]
+    },
+    {
+      "token": ".",
+      "features": [
+        {
+          "id": 11772,
+          "label": "unlabeled feature",
+          "activation": 18.7,
+          "logit_attr": 3.3
+        },
+        {
+          "id": 12861,
+          "label": "unlabeled feature",
+          "activation": 11.3,
+          "logit_attr": 7.0
+        },
+        {
+          "id": 20381,
+          "label": "unlabeled feature",
+          "activation": 10.6,
+          "logit_attr": 5.0
+        },
+        {
+          "id": 15770,
+          "label": "expressions of dissatisfaction or disapproval",
+          "activation": 9.8,
+          "logit_attr": 1.8
+        },
+        {
+          "id": 3679,
+          "label": "unlabeled feature",
+          "activation": 7.7,
+          "logit_attr": 1.4
+        }
+      ],
+      "predictions": [
+        {
+          "token": ".",
+          "prob": 0.446,
+          "chosen": true
+        },
+        {
+          "token": ",",
+          "prob": 0.138
+        },
+        {
+          "token": " for",
+          "prob": 0.093
+        },
+        {
+          "token": " to",
+          "prob": 0.049
+        },
+        {
+          "token": "!",
+          "prob": 0.033
+        }
+      ]
+    }
+  ],
+  "callout": "A 'negative connotation' feature and a 'negation' feature both fire, but the model still says 'good.' In 'not a good idea,' the word 'good' is part of a negative phrase. Features don't work in isolation."
+}

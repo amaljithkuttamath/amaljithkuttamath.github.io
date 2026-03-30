@@ -1,0 +1,770 @@
+{
+  "step": 1,
+  "title": "The right concept, the wrong answer",
+  "prompt": "Water boils at a temperature of",
+  "input_tokens": [
+    "Water",
+    " boils",
+    " at",
+    " a",
+    " temperature",
+    " of"
+  ],
+  "generated_tokens": [
+    {
+      "token": " about",
+      "features": [
+        {
+          "id": 10279,
+          "label": "percentages or rates",
+          "activation": 27.9,
+          "logit_attr": 13.7
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 15.3,
+          "logit_attr": 4.8
+        },
+        {
+          "id": 23685,
+          "label": "phrases related to a specific condition or state of being",
+          "activation": 6.8,
+          "logit_attr": 1.1
+        },
+        {
+          "id": 302,
+          "label": "descriptions of weather conditions, especially related to the sun and snow",
+          "activation": 4.9,
+          "logit_attr": 0.8
+        },
+        {
+          "id": 5806,
+          "label": "financial values and estimations",
+          "activation": 4.8,
+          "logit_attr": 2.3
+        }
+      ],
+      "predictions": [
+        {
+          "token": " about",
+          "prob": 0.082,
+          "chosen": true
+        },
+        {
+          "token": " -",
+          "prob": 0.05
+        },
+        {
+          "token": " 1",
+          "prob": 0.036
+        },
+        {
+          "token": " around",
+          "prob": 0.032
+        },
+        {
+          "token": " 100",
+          "prob": 0.015
+        }
+      ]
+    },
+    {
+      "token": " 1",
+      "features": [
+        {
+          "id": 5931,
+          "label": "instances of numeric information preceded by the word \"about\"",
+          "activation": 37.3,
+          "logit_attr": 22.4
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 16.2,
+          "logit_attr": 3.0
+        },
+        {
+          "id": 23125,
+          "label": "dollar values and numerical ranges",
+          "activation": 12.8,
+          "logit_attr": 6.9
+        },
+        {
+          "id": 5806,
+          "label": "financial values and estimations",
+          "activation": 5.7,
+          "logit_attr": 3.3
+        },
+        {
+          "id": 6277,
+          "label": "quantitative comparisons or approximations",
+          "activation": 4.7,
+          "logit_attr": 2.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": " 1",
+          "prob": 0.038,
+          "chosen": true
+        },
+        {
+          "token": " -",
+          "prob": 0.035
+        },
+        {
+          "token": " 100",
+          "prob": 0.023
+        },
+        {
+          "token": " 2",
+          "prob": 0.018
+        },
+        {
+          "token": " 200",
+          "prob": 0.018
+        }
+      ]
+    },
+    {
+      "token": ",",
+      "features": [
+        {
+          "id": 14318,
+          "label": "numerical figures in the format of '1 X' where X ranges from the single digit to a double-digit number",
+          "activation": 33.3,
+          "logit_attr": 6.0
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 14.7,
+          "logit_attr": 1.3
+        },
+        {
+          "id": 14081,
+          "label": "percentage values",
+          "activation": 11.9,
+          "logit_attr": 4.1
+        },
+        {
+          "id": 9202,
+          "label": "numbers that are related to quantities or measurements",
+          "activation": 9.6,
+          "logit_attr": 1.2
+        },
+        {
+          "id": 23281,
+          "label": "time-related information",
+          "activation": 8.0,
+          "logit_attr": 1.7
+        }
+      ],
+      "predictions": [
+        {
+          "token": ",",
+          "prob": 0.58,
+          "chosen": true
+        },
+        {
+          "token": ".",
+          "prob": 0.142
+        },
+        {
+          "token": "\u00b0",
+          "prob": 0.072
+        },
+        {
+          "token": " degree",
+          "prob": 0.023
+        },
+        {
+          "token": " \u00b0",
+          "prob": 0.013
+        }
+      ]
+    },
+    {
+      "token": "000",
+      "features": [
+        {
+          "id": 11261,
+          "label": "characters commonly used as separators",
+          "activation": 41.1,
+          "logit_attr": 55.7
+        },
+        {
+          "id": 11143,
+          "label": "sequences related to instructions or steps in a process",
+          "activation": 14.8,
+          "logit_attr": 8.2
+        },
+        {
+          "id": 12993,
+          "label": "comma characters in a list",
+          "activation": 8.8,
+          "logit_attr": 14.3
+        },
+        {
+          "id": 2170,
+          "label": "time-related information like specific hours, dates, and measurements",
+          "activation": 6.5,
+          "logit_attr": 2.0
+        },
+        {
+          "id": 17129,
+          "label": "mathematical ratios and calculations",
+          "activation": 6.1,
+          "logit_attr": 2.3
+        }
+      ],
+      "predictions": [
+        {
+          "token": "000",
+          "prob": 0.286,
+          "chosen": true
+        },
+        {
+          "token": "200",
+          "prob": 0.152
+        },
+        {
+          "token": "500",
+          "prob": 0.146
+        },
+        {
+          "token": "600",
+          "prob": 0.042
+        },
+        {
+          "token": "400",
+          "prob": 0.039
+        }
+      ]
+    },
+    {
+      "token": " degrees",
+      "features": [
+        {
+          "id": 5185,
+          "label": "numerical figures related to quantities, measurements, or statistics",
+          "activation": 28.3,
+          "logit_attr": 13.7
+        },
+        {
+          "id": 11629,
+          "label": "numerical values indicating distances and measurements",
+          "activation": 13.5,
+          "logit_attr": 13.9
+        },
+        {
+          "id": 16622,
+          "label": "large numerical quantities mentioned in the text",
+          "activation": 12.2,
+          "logit_attr": 6.3
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 12.0,
+          "logit_attr": 9.7
+        },
+        {
+          "id": 16898,
+          "label": "numeric values representing large sums of money",
+          "activation": 6.3,
+          "logit_attr": 3.4
+        }
+      ],
+      "predictions": [
+        {
+          "token": " degrees",
+          "prob": 0.824,
+          "chosen": true
+        },
+        {
+          "token": "\u00b0",
+          "prob": 0.056
+        },
+        {
+          "token": " \u00b0",
+          "prob": 0.029
+        },
+        {
+          "token": "\u00ba",
+          "prob": 0.021
+        },
+        {
+          "token": " F",
+          "prob": 0.012
+        }
+      ]
+    },
+    {
+      "token": " Fahrenheit",
+      "features": [
+        {
+          "id": 13823,
+          "label": "temperature values",
+          "activation": 56.6,
+          "logit_attr": 83.1
+        },
+        {
+          "id": 7174,
+          "label": "references to measurements of altitude, speed, distance, and capacity",
+          "activation": 13.3,
+          "logit_attr": 6.0
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 10.2,
+          "logit_attr": 10.1
+        },
+        {
+          "id": 13467,
+          "label": "specific temperatures in degrees Celsius",
+          "activation": 7.2,
+          "logit_attr": 5.7
+        },
+        {
+          "id": 10587,
+          "label": "instructions related to cooking or food preparation",
+          "activation": 4.6,
+          "logit_attr": 3.7
+        }
+      ],
+      "predictions": [
+        {
+          "token": " Fahrenheit",
+          "prob": 0.621,
+          "chosen": true
+        },
+        {
+          "token": " Celsius",
+          "prob": 0.122
+        },
+        {
+          "token": " F",
+          "prob": 0.119
+        },
+        {
+          "token": ".",
+          "prob": 0.037
+        },
+        {
+          "token": " C",
+          "prob": 0.027
+        }
+      ]
+    },
+    {
+      "token": " (",
+      "features": [
+        {
+          "id": 13467,
+          "label": "specific temperatures in degrees Celsius",
+          "activation": 29.1,
+          "logit_attr": 12.6
+        },
+        {
+          "id": 4856,
+          "label": "phrases related to high speeds",
+          "activation": 11.5,
+          "logit_attr": 4.8
+        },
+        {
+          "id": 23857,
+          "label": "mentions of large measurements, especially related to physical spaces like square feet or kilometers",
+          "activation": 8.8,
+          "logit_attr": 4.7
+        },
+        {
+          "id": 13823,
+          "label": "temperature values",
+          "activation": 7.2,
+          "logit_attr": 1.3
+        },
+        {
+          "id": 12354,
+          "label": "information related to locations and statistics",
+          "activation": 6.1,
+          "logit_attr": 2.6
+        }
+      ],
+      "predictions": [
+        {
+          "token": " (",
+          "prob": 0.47,
+          "chosen": true
+        },
+        {
+          "token": ".",
+          "prob": 0.204
+        },
+        {
+          "token": ",",
+          "prob": 0.107
+        },
+        {
+          "token": " in",
+          "prob": 0.029
+        },
+        {
+          "token": " or",
+          "prob": 0.028
+        }
+      ]
+    },
+    {
+      "token": "1",
+      "features": [
+        {
+          "id": 12087,
+          "label": " measurements expressed in kilometers or miles",
+          "activation": 43.8,
+          "logit_attr": 22.1
+        },
+        {
+          "id": 6028,
+          "label": "times of events or pricing details enclosed in parentheses",
+          "activation": 12.7,
+          "logit_attr": 9.8
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 9.2,
+          "logit_attr": 1.7
+        },
+        {
+          "id": 20712,
+          "label": "acronyms in parentheses",
+          "activation": 6.8,
+          "logit_attr": 2.4
+        },
+        {
+          "id": 16160,
+          "label": "references to laws or regulations",
+          "activation": 5.1,
+          "logit_attr": -0.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": "1",
+          "prob": 0.219,
+          "chosen": true
+        },
+        {
+          "token": "2",
+          "prob": 0.087
+        },
+        {
+          "token": "3",
+          "prob": 0.073
+        },
+        {
+          "token": "0",
+          "prob": 0.044
+        },
+        {
+          "token": "4",
+          "prob": 0.025
+        }
+      ]
+    },
+    {
+      "token": ",",
+      "features": [
+        {
+          "id": 15407,
+          "label": "numerical measurements of distance expressed in kilometers or miles",
+          "activation": 31.1,
+          "logit_attr": 3.2
+        },
+        {
+          "id": 14318,
+          "label": "numerical figures in the format of '1 X' where X ranges from the single digit to a double-digit number",
+          "activation": 30.7,
+          "logit_attr": 5.5
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 10.7,
+          "logit_attr": 1.0
+        },
+        {
+          "id": 9707,
+          "label": "dates and scores from sports events",
+          "activation": 7.4,
+          "logit_attr": 1.7
+        },
+        {
+          "id": 14447,
+          "label": "large numbers or numerical information",
+          "activation": 4.9,
+          "logit_attr": 3.1
+        }
+      ],
+      "predictions": [
+        {
+          "token": ",",
+          "prob": 0.978,
+          "chosen": true
+        },
+        {
+          "token": ".",
+          "prob": 0.015
+        },
+        {
+          "token": " million",
+          "prob": 0.001
+        },
+        {
+          "token": "C",
+          "prob": 0.0
+        },
+        {
+          "token": "\u00b0",
+          "prob": 0.0
+        }
+      ]
+    },
+    {
+      "token": "200",
+      "features": [
+        {
+          "id": 11261,
+          "label": "characters commonly used as separators",
+          "activation": 31.3,
+          "logit_attr": 36.0
+        },
+        {
+          "id": 15407,
+          "label": "numerical measurements of distance expressed in kilometers or miles",
+          "activation": 17.8,
+          "logit_attr": 4.8
+        },
+        {
+          "id": 11143,
+          "label": "sequences related to instructions or steps in a process",
+          "activation": 17.0,
+          "logit_attr": 13.3
+        },
+        {
+          "id": 10346,
+          "label": " measurements expressed as numbers and units",
+          "activation": 16.3,
+          "logit_attr": 8.2
+        },
+        {
+          "id": 20188,
+          "label": "dollar amounts in various currencies",
+          "activation": 10.2,
+          "logit_attr": 11.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": "200",
+          "prob": 0.169,
+          "chosen": true
+        },
+        {
+          "token": "000",
+          "prob": 0.098
+        },
+        {
+          "token": "500",
+          "prob": 0.086
+        },
+        {
+          "token": "600",
+          "prob": 0.056
+        },
+        {
+          "token": "800",
+          "prob": 0.049
+        }
+      ]
+    },
+    {
+      "token": " degrees",
+      "features": [
+        {
+          "id": 15407,
+          "label": "numerical measurements of distance expressed in kilometers or miles",
+          "activation": 34.7,
+          "logit_attr": 10.8
+        },
+        {
+          "id": 24117,
+          "label": "specific numbers that refer to addresses or locations",
+          "activation": 18.0,
+          "logit_attr": 8.1
+        },
+        {
+          "id": 5636,
+          "label": "times expressed in hours and minutes",
+          "activation": 12.3,
+          "logit_attr": 1.4
+        },
+        {
+          "id": 19375,
+          "label": "information related to temperature in degrees Fahrenheit and Celsius",
+          "activation": 11.0,
+          "logit_attr": 8.9
+        },
+        {
+          "id": 4185,
+          "label": "numbers in a specific range",
+          "activation": 10.5,
+          "logit_attr": 4.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": " degrees",
+          "prob": 0.742,
+          "chosen": true
+        },
+        {
+          "token": " Celsius",
+          "prob": 0.155
+        },
+        {
+          "token": " C",
+          "prob": 0.032
+        },
+        {
+          "token": " to",
+          "prob": 0.012
+        },
+        {
+          "token": "\u00b0",
+          "prob": 0.011
+        }
+      ]
+    },
+    {
+      "token": " Celsius",
+      "features": [
+        {
+          "id": 13823,
+          "label": "temperature values",
+          "activation": 43.4,
+          "logit_attr": 66.3
+        },
+        {
+          "id": 15407,
+          "label": "numerical measurements of distance expressed in kilometers or miles",
+          "activation": 18.4,
+          "logit_attr": 5.1
+        },
+        {
+          "id": 22783,
+          "label": "distances expressed in miles or kilometers",
+          "activation": 15.9,
+          "logit_attr": 5.6
+        },
+        {
+          "id": 11565,
+          "label": "numbers and numerical patterns within text",
+          "activation": 11.4,
+          "logit_attr": 2.2
+        },
+        {
+          "id": 16472,
+          "label": "words related to scientific concepts, particularly related to cosmology and technology",
+          "activation": 7.6,
+          "logit_attr": 0.9
+        }
+      ],
+      "predictions": [
+        {
+          "token": " Celsius",
+          "prob": 0.967,
+          "chosen": true
+        },
+        {
+          "token": " C",
+          "prob": 0.028
+        },
+        {
+          "token": " F",
+          "prob": 0.002
+        },
+        {
+          "token": " Fahrenheit",
+          "prob": 0.001
+        },
+        {
+          "token": " Cent",
+          "prob": 0.0
+        }
+      ]
+    },
+    {
+      "token": ").",
+      "features": [
+        {
+          "id": 22783,
+          "label": "distances expressed in miles or kilometers",
+          "activation": 29.6,
+          "logit_attr": 28.3
+        },
+        {
+          "id": 13467,
+          "label": "specific temperatures in degrees Celsius",
+          "activation": 28.8,
+          "logit_attr": 3.3
+        },
+        {
+          "id": 895,
+          "label": "text snippets related to retail activities or items for sale",
+          "activation": 11.7,
+          "logit_attr": 18.1
+        },
+        {
+          "id": 13623,
+          "label": "mentions of temperature measurement or conditions",
+          "activation": 10.1,
+          "logit_attr": 1.0
+        },
+        {
+          "id": 22318,
+          "label": "words related to sharp objects or tools",
+          "activation": 7.3,
+          "logit_attr": -0.3
+        }
+      ],
+      "predictions": [
+        {
+          "token": ").",
+          "prob": 0.369,
+          "chosen": true
+        },
+        {
+          "token": ")",
+          "prob": 0.356
+        },
+        {
+          "token": "),",
+          "prob": 0.249
+        },
+        {
+          "token": ".)",
+          "prob": 0.004
+        },
+        {
+          "token": ",",
+          "prob": 0.003
+        }
+      ]
+    }
+  ],
+  "callout": "The model has a 'temperature' feature (#19375) that fires correctly. But it says 1,000 degrees Fahrenheit. Water boils at 212F. Having the right concept does not guarantee the right answer."
+}

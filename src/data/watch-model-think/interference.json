@@ -1,0 +1,155 @@
+[
+  {
+    "prompt": "This is definitely not a",
+    "token": " good",
+    "confidence": 0.0442,
+    "feature_1": {
+      "id": 2556,
+      "label": "phrases with a negative connotation indicating problems or challenges",
+      "activation": 32.5,
+      "logit_attr": 19.5
+    },
+    "feature_2": {
+      "id": 5864,
+      "label": null,
+      "activation": 18.8,
+      "logit_attr": 12.5
+    }
+  },
+  {
+    "prompt": "This is definitely not a",
+    "token": " idea",
+    "confidence": 0.1344,
+    "feature_1": {
+      "id": 329,
+      "label": null,
+      "activation": 27.0,
+      "logit_attr": 31.0
+    },
+    "feature_2": {
+      "id": 15770,
+      "label": "expressions of dissatisfaction or disapproval",
+      "activation": 18.6,
+      "logit_attr": 5.5
+    }
+  },
+  {
+    "prompt": "This is definitely not a",
+    "token": "I",
+    "confidence": 0.0877,
+    "feature_1": {
+      "id": 6662,
+      "label": "special characters and symbols",
+      "activation": 14.8,
+      "logit_attr": 13.8
+    },
+    "feature_2": {
+      "id": 6316,
+      "label": null,
+      "activation": 10.2,
+      "logit_attr": 13.1
+    }
+  },
+  {
+    "prompt": "This is definitely not a",
+    "token": "'m",
+    "confidence": 0.1122,
+    "feature_1": {
+      "id": 13990,
+      "label": null,
+      "activation": 13.4,
+      "logit_attr": 17.0
+    },
+    "feature_2": {
+      "id": 12445,
+      "label": "personal pronouns 'I' followed by strong emotional statements",
+      "activation": 13.1,
+      "logit_attr": 19.0
+    }
+  },
+  {
+    "prompt": "This is definitely not a",
+    "token": " a",
+    "confidence": 0.1476,
+    "feature_1": {
+      "id": 7891,
+      "label": null,
+      "activation": 27.4,
+      "logit_attr": 12.7
+    },
+    "feature_2": {
+      "id": 12698,
+      "label": null,
+      "activation": 13.0,
+      "logit_attr": 8.0
+    }
+  },
+  {
+    "prompt": "The big red ball rolled down the",
+    "token": " hill",
+    "confidence": 0.0636,
+    "feature_1": {
+      "id": 11090,
+      "label": null,
+      "activation": 40.9,
+      "logit_attr": 35.9
+    },
+    "feature_2": {
+      "id": 8620,
+      "label": null,
+      "activation": 9.9,
+      "logit_attr": 6.0
+    }
+  },
+  {
+    "prompt": "Do re mi fa sol la",
+    "token": " de",
+    "confidence": 0.068,
+    "feature_1": {
+      "id": 14042,
+      "label": "words related to criminal acts and law enforcement in Guatemala",
+      "activation": 11.6,
+      "logit_attr": 10.1
+    },
+    "feature_2": {
+      "id": 7978,
+      "label": "words related to programming languages and code elements",
+      "activation": 11.4,
+      "logit_attr": 6.1
+    }
+  },
+  {
+    "prompt": "Do re mi fa sol la",
+    "token": " la",
+    "confidence": 0.0874,
+    "feature_1": {
+      "id": 21476,
+      "label": "mentions of locations or government-related terms",
+      "activation": 38.1,
+      "logit_attr": 42.1
+    },
+    "feature_2": {
+      "id": 7978,
+      "label": "words related to programming languages and code elements",
+      "activation": 11.2,
+      "logit_attr": 6.9
+    }
+  },
+  {
+    "prompt": "Do re mi fa sol la",
+    "token": " de",
+    "confidence": 0.1429,
+    "feature_1": {
+      "id": 14042,
+      "label": "words related to criminal acts and law enforcement in Guatemala",
+      "activation": 15.5,
+      "logit_attr": 13.5
+    },
+    "feature_2": {
+      "id": 7978,
+      "label": "words related to programming languages and code elements",
+      "activation": 10.0,
+      "logit_attr": 5.4
+    }
+  }
+]

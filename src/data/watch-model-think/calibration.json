@@ -1,0 +1,438 @@
+[
+  {
+    "prompt": "Water boils at a temperature of",
+    "tokens": [
+      {
+        "token": " about",
+        "confidence": 0.0818,
+        "attribution_coverage": 1.8201,
+        "total_feature_logit": 30.5,
+        "actual_logit": 16.7,
+        "error_logit": 3.5
+      },
+      {
+        "token": " 1",
+        "confidence": 0.038,
+        "attribution_coverage": 2.6802,
+        "total_feature_logit": 45.4,
+        "actual_logit": 17.0,
+        "error_logit": -0.0
+      },
+      {
+        "token": ",",
+        "confidence": 0.5795,
+        "attribution_coverage": 1.1721,
+        "total_feature_logit": 20.5,
+        "actual_logit": 17.5,
+        "error_logit": -1.5
+      },
+      {
+        "token": "000",
+        "confidence": 0.2861,
+        "attribution_coverage": 5.5424,
+        "total_feature_logit": 107.8,
+        "actual_logit": 19.4,
+        "error_logit": 1.9
+      },
+      {
+        "token": " degrees",
+        "confidence": 0.8239,
+        "attribution_coverage": 3.5137,
+        "total_feature_logit": 70.4,
+        "actual_logit": 20.0,
+        "error_logit": 14.9
+      },
+      {
+        "token": " Fahrenheit",
+        "confidence": 0.6208,
+        "attribution_coverage": 6.4367,
+        "total_feature_logit": 126.5,
+        "actual_logit": 19.7,
+        "error_logit": 17.8
+      },
+      {
+        "token": " (",
+        "confidence": 0.4701,
+        "attribution_coverage": 2.9241,
+        "total_feature_logit": 54.2,
+        "actual_logit": 18.5,
+        "error_logit": 4.6
+      },
+      {
+        "token": "1",
+        "confidence": 0.2188,
+        "attribution_coverage": 2.3116,
+        "total_feature_logit": 41.5,
+        "actual_logit": 18.0,
+        "error_logit": 2.5
+      },
+      {
+        "token": ",",
+        "confidence": 0.9783,
+        "attribution_coverage": 0.7372,
+        "total_feature_logit": 15.5,
+        "actual_logit": 21.0,
+        "error_logit": 0.5
+      },
+      {
+        "token": "200",
+        "confidence": 0.1685,
+        "attribution_coverage": 4.4882,
+        "total_feature_logit": 88.2,
+        "actual_logit": 19.6,
+        "error_logit": 7.5
+      },
+      {
+        "token": " degrees",
+        "confidence": 0.7424,
+        "attribution_coverage": 3.285,
+        "total_feature_logit": 66.8,
+        "actual_logit": 20.3,
+        "error_logit": 18.6
+      },
+      {
+        "token": " Celsius",
+        "confidence": 0.967,
+        "attribution_coverage": 4.7625,
+        "total_feature_logit": 114.6,
+        "actual_logit": 24.1,
+        "error_logit": 23.6
+      },
+      {
+        "token": ").",
+        "confidence": 0.3693,
+        "attribution_coverage": 3.8937,
+        "total_feature_logit": 78.2,
+        "actual_logit": 20.1,
+        "error_logit": 5.6
+      }
+    ]
+  },
+  {
+    "prompt": "This is definitely not a",
+    "tokens": [
+      {
+        "token": " good",
+        "confidence": 0.0442,
+        "attribution_coverage": 3.717,
+        "total_feature_logit": 47.5,
+        "actual_logit": 12.8,
+        "error_logit": -2.3
+      },
+      {
+        "token": " idea",
+        "confidence": 0.1344,
+        "attribution_coverage": 4.8381,
+        "total_feature_logit": 71.8,
+        "actual_logit": 14.8,
+        "error_logit": 6.3
+      },
+      {
+        "token": ".",
+        "confidence": 0.4464,
+        "attribution_coverage": 2.0792,
+        "total_feature_logit": 34.3,
+        "actual_logit": 16.5,
+        "error_logit": 3.5
+      },
+      {
+        "token": "\n",
+        "confidence": 0.202,
+        "attribution_coverage": 2.644,
+        "total_feature_logit": 42.9,
+        "actual_logit": 16.2,
+        "error_logit": 0.1
+      },
+      {
+        "token": "\n",
+        "confidence": 0.982,
+        "attribution_coverage": 1.6846,
+        "total_feature_logit": 38.5,
+        "actual_logit": 22.9,
+        "error_logit": 0.0
+      },
+      {
+        "token": "I",
+        "confidence": 0.0877,
+        "attribution_coverage": 3.6087,
+        "total_feature_logit": 67.7,
+        "actual_logit": 18.8,
+        "error_logit": 8.3
+      },
+      {
+        "token": "'m",
+        "confidence": 0.1122,
+        "attribution_coverage": 5.8728,
+        "total_feature_logit": 97.4,
+        "actual_logit": 16.6,
+        "error_logit": -4.8
+      },
+      {
+        "token": " not",
+        "confidence": 0.2642,
+        "attribution_coverage": 3.3445,
+        "total_feature_logit": 55.5,
+        "actual_logit": 16.6,
+        "error_logit": 11.5
+      },
+      {
+        "token": " sure",
+        "confidence": 0.1973,
+        "attribution_coverage": 4.2092,
+        "total_feature_logit": 71.4,
+        "actual_logit": 17.0,
+        "error_logit": 10.5
+      },
+      {
+        "token": " if",
+        "confidence": 0.2594,
+        "attribution_coverage": 2.9898,
+        "total_feature_logit": 50.9,
+        "actual_logit": 17.0,
+        "error_logit": -1.7
+      },
+      {
+        "token": " it",
+        "confidence": 0.1713,
+        "attribution_coverage": 3.67,
+        "total_feature_logit": 50.9,
+        "actual_logit": 13.9,
+        "error_logit": 4.2
+      },
+      {
+        "token": "'s",
+        "confidence": 0.5353,
+        "attribution_coverage": 2.7143,
+        "total_feature_logit": 52.7,
+        "actual_logit": 19.4,
+        "error_logit": 1.6
+      },
+      {
+        "token": " a",
+        "confidence": 0.1476,
+        "attribution_coverage": 2.1571,
+        "total_feature_logit": 33.3,
+        "actual_logit": 15.4,
+        "error_logit": 0.5
+      }
+    ]
+  },
+  {
+    "prompt": "The big red ball rolled down the",
+    "tokens": [
+      {
+        "token": " hill",
+        "confidence": 0.0636,
+        "attribution_coverage": 5.4468,
+        "total_feature_logit": 76.3,
+        "actual_logit": 14.0,
+        "error_logit": 11.1
+      },
+      {
+        "token": ",",
+        "confidence": 0.1613,
+        "attribution_coverage": 2.0591,
+        "total_feature_logit": 32.3,
+        "actual_logit": 15.7,
+        "error_logit": 8.6
+      },
+      {
+        "token": " and",
+        "confidence": 0.3273,
+        "attribution_coverage": 1.4675,
+        "total_feature_logit": 23.1,
+        "actual_logit": 15.7,
+        "error_logit": 5.9
+      },
+      {
+        "token": " the",
+        "confidence": 0.174,
+        "attribution_coverage": 1.7959,
+        "total_feature_logit": 26.4,
+        "actual_logit": 14.7,
+        "error_logit": 4.4
+      },
+      {
+        "token": " big",
+        "confidence": 0.0211,
+        "attribution_coverage": 2.5789,
+        "total_feature_logit": 30.1,
+        "actual_logit": 11.7,
+        "error_logit": 6.5
+      },
+      {
+        "token": " red",
+        "confidence": 0.391,
+        "attribution_coverage": 2.9624,
+        "total_feature_logit": 47.7,
+        "actual_logit": 16.1,
+        "error_logit": 23.4
+      },
+      {
+        "token": " ball",
+        "confidence": 0.6553,
+        "attribution_coverage": 3.5583,
+        "total_feature_logit": 57.5,
+        "actual_logit": 16.2,
+        "error_logit": 36.0
+      },
+      {
+        "token": " rolled",
+        "confidence": 0.1499,
+        "attribution_coverage": 2.8185,
+        "total_feature_logit": 43.5,
+        "actual_logit": 15.4,
+        "error_logit": 24.5
+      },
+      {
+        "token": " down",
+        "confidence": 0.7982,
+        "attribution_coverage": 4.4299,
+        "total_feature_logit": 89.0,
+        "actual_logit": 20.1,
+        "error_logit": 8.8
+      },
+      {
+        "token": " the",
+        "confidence": 0.9556,
+        "attribution_coverage": 3.3581,
+        "total_feature_logit": 62.3,
+        "actual_logit": 18.6,
+        "error_logit": -12.1
+      },
+      {
+        "token": " hill",
+        "confidence": 0.8995,
+        "attribution_coverage": 4.4881,
+        "total_feature_logit": 83.7,
+        "actual_logit": 18.6,
+        "error_logit": 22.4
+      },
+      {
+        "token": ",",
+        "confidence": 0.4948,
+        "attribution_coverage": 3.4798,
+        "total_feature_logit": 59.8,
+        "actual_logit": 17.2,
+        "error_logit": -3.9
+      },
+      {
+        "token": " and",
+        "confidence": 0.7871,
+        "attribution_coverage": 2.6223,
+        "total_feature_logit": 43.8,
+        "actual_logit": 16.7,
+        "error_logit": -1.1
+      }
+    ]
+  },
+  {
+    "prompt": "Do re mi fa sol la",
+    "tokens": [
+      {
+        "token": " v",
+        "confidence": 0.0299,
+        "attribution_coverage": 2.4093,
+        "total_feature_logit": 26.6,
+        "actual_logit": 11.0,
+        "error_logit": 5.7
+      },
+      {
+        "token": "ida",
+        "confidence": 0.1955,
+        "attribution_coverage": 4.7444,
+        "total_feature_logit": 76.7,
+        "actual_logit": 16.2,
+        "error_logit": 12.5
+      },
+      {
+        "token": " de",
+        "confidence": 0.068,
+        "attribution_coverage": 4.2162,
+        "total_feature_logit": 53.2,
+        "actual_logit": 12.6,
+        "error_logit": -3.7
+      },
+      {
+        "token": " la",
+        "confidence": 0.0874,
+        "attribution_coverage": 6.6665,
+        "total_feature_logit": 80.3,
+        "actual_logit": 12.0,
+        "error_logit": 4.1
+      },
+      {
+        "token": " v",
+        "confidence": 0.0895,
+        "attribution_coverage": 2.3886,
+        "total_feature_logit": 29.9,
+        "actual_logit": 12.5,
+        "error_logit": 9.1
+      },
+      {
+        "token": "ida",
+        "confidence": 0.945,
+        "attribution_coverage": 4.0903,
+        "total_feature_logit": 86.3,
+        "actual_logit": 21.1,
+        "error_logit": 39.0
+      },
+      {
+        "token": " de",
+        "confidence": 0.1429,
+        "attribution_coverage": 3.0938,
+        "total_feature_logit": 41.5,
+        "actual_logit": 13.4,
+        "error_logit": 19.2
+      },
+      {
+        "token": " la",
+        "confidence": 0.2858,
+        "attribution_coverage": 6.0787,
+        "total_feature_logit": 83.7,
+        "actual_logit": 13.8,
+        "error_logit": 23.6
+      },
+      {
+        "token": " v",
+        "confidence": 0.5149,
+        "attribution_coverage": 2.932,
+        "total_feature_logit": 44.4,
+        "actual_logit": 15.2,
+        "error_logit": 15.9
+      },
+      {
+        "token": "ida",
+        "confidence": 0.9536,
+        "attribution_coverage": 5.1289,
+        "total_feature_logit": 103.8,
+        "actual_logit": 20.2,
+        "error_logit": 41.4
+      },
+      {
+        "token": " de",
+        "confidence": 0.1955,
+        "attribution_coverage": 2.8976,
+        "total_feature_logit": 40.4,
+        "actual_logit": 13.9,
+        "error_logit": 22.8
+      },
+      {
+        "token": " la",
+        "confidence": 0.5969,
+        "attribution_coverage": 5.3369,
+        "total_feature_logit": 81.6,
+        "actual_logit": 15.3,
+        "error_logit": 30.0
+      },
+      {
+        "token": " v",
+        "confidence": 0.7286,
+        "attribution_coverage": 2.6548,
+        "total_feature_logit": 42.9,
+        "actual_logit": 16.2,
+        "error_logit": 21.3
+      }
+    ]
+  }
+]

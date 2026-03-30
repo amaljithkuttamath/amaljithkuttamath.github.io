@@ -1,0 +1,133 @@
+{
+  "step": 3,
+  "title": "Superposition adds noise",
+  "prompt": "The big red ball rolled down the",
+  "input_tokens": [
+    "The",
+    " big",
+    " red",
+    " ball",
+    " rolled",
+    " down",
+    " the"
+  ],
+  "generated_tokens": [
+    {
+      "token": " hill",
+      "features": [
+        {
+          "id": 11090,
+          "label": "unlabeled feature",
+          "activation": 40.9,
+          "logit_attr": 35.9
+        },
+        {
+          "id": 8620,
+          "label": "unlabeled feature",
+          "activation": 9.9,
+          "logit_attr": 6.0
+        },
+        {
+          "id": 16867,
+          "label": "unlabeled feature",
+          "activation": 8.9,
+          "logit_attr": 5.5
+        },
+        {
+          "id": 495,
+          "label": "phrases related to law enforcement and legal actions",
+          "activation": 7.2,
+          "logit_attr": 2.1
+        },
+        {
+          "id": 21282,
+          "label": "unlabeled feature",
+          "activation": 5.9,
+          "logit_attr": 1.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": " hill",
+          "prob": 0.064,
+          "chosen": true
+        },
+        {
+          "token": " street",
+          "prob": 0.043
+        },
+        {
+          "token": " side",
+          "prob": 0.041
+        },
+        {
+          "token": " hall",
+          "prob": 0.038
+        },
+        {
+          "token": " middle",
+          "prob": 0.036
+        }
+      ]
+    },
+    {
+      "token": ",",
+      "features": [
+        {
+          "id": 17662,
+          "label": "unlabeled feature",
+          "activation": 23.2,
+          "logit_attr": 4.1
+        },
+        {
+          "id": 20779,
+          "label": "unlabeled feature",
+          "activation": 12.3,
+          "logit_attr": 1.7
+        },
+        {
+          "id": 3276,
+          "label": "references to physical locations within a setting, particularly describing different areas within a space like walls, floors, ceilings, and outside locations",
+          "activation": 11.8,
+          "logit_attr": 4.2
+        },
+        {
+          "id": 16905,
+          "label": "mentions of locations in nature, particularly woodlands and mountains",
+          "activation": 9.3,
+          "logit_attr": 1.4
+        },
+        {
+          "id": 20818,
+          "label": "unlabeled feature",
+          "activation": 9.1,
+          "logit_attr": 3.3
+        }
+      ],
+      "predictions": [
+        {
+          "token": ",",
+          "prob": 0.161,
+          "chosen": true
+        },
+        {
+          "token": " and",
+          "prob": 0.161
+        },
+        {
+          "token": ".",
+          "prob": 0.149
+        },
+        {
+          "token": " in",
+          "prob": 0.05
+        },
+        {
+          "token": " toward",
+          "prob": 0.042
+        }
+      ]
+    }
+  ],
+  "callout": "The top feature ('movement along a pathway') makes perfect sense for 'hill.' But 'markets or dominance' also fires. These features share neurons with the movement feature. This is superposition: every interpretation comes with noise."
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "step": 1,
+    "title": "The right concept, the wrong answer",
+    "file": "water_boils_at_a_temperature_of.json"
+  },
+  {
+    "step": 2,
+    "title": "Features don't work alone",
+    "file": "this_is_definitely_not_a.json"
+  },
+  {
+    "step": 3,
+    "title": "Superposition adds noise",
+    "file": "the_big_red_ball_rolled_down_the.json"
+  },
+  {
+    "step": 4,
+    "title": "Feature loops explain repetition",
+    "file": "do_re_mi_fa_sol_la.json"
+  }
+]
