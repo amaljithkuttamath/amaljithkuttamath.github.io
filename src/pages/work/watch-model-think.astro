@@ -73,8 +73,9 @@ const formattedDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
       </div>
       <div class="stepper-callout" id="stepper-callout"></div>
       <div class="stepper-footer">
+        <button class="stepper-prev" id="stepper-prev" style="visibility:hidden">← Back</button>
         <span class="stepper-hint" id="stepper-hint"></span>
-        <button class="stepper-next" id="stepper-next">Next</button>
+        <button class="stepper-next" id="stepper-next">Next →</button>
       </div>
     </div>
 
@@ -174,6 +175,7 @@ for val, idx in zip(top_features.values, top_features.indices):
   var calloutEl = document.getElementById('stepper-callout');
   var hint = document.getElementById('stepper-hint');
   var nextBtn = document.getElementById('stepper-next');
+  var prevBtn = document.getElementById('stepper-prev');
 
   for (var i = 0; i < steps.length; i++) {
     var dot = document.createElement('span');
@@ -214,12 +216,31 @@ for val, idx in zip(top_features.values, top_features.indices):
     sep.className = 'token-sep';
     sep.textContent = '\u2192';
     tokenRow.appendChild(sep);
+    // Compute max logit_attr across all generated tokens for intensity scaling
+    var maxLogitAttr = 1;
+    for (var j = 0; j < data.generated_tokens.length; j++) {
+      var feats = data.generated_tokens[j].features;
+      if (feats && feats.length > 0) {
+        var topAttr = Math.abs(feats[0].logit_attr);
+        if (topAttr > maxLogitAttr) maxLogitAttr = topAttr;
+      }
+    }
+
     for (var j = 0; j < data.generated_tokens.length; j++) {
       var tokenText = data.generated_tokens[j].token.trim();
       if (!tokenText) continue;
       var span = document.createElement('span');
       span.className = 'token token-generated';
       span.textContent = tokenText;
+
+      // Color intensity based on top feature's logit attribution
+      var feats = data.generated_tokens[j].features;
+      if (feats && feats.length > 0) {
+        var intensity = Math.abs(feats[0].logit_attr) / maxLogitAttr;
+        var bgAlpha = 0.04 + intensity * 0.18;
+        span.style.background = 'rgba(184, 122, 80, ' + bgAlpha.toFixed(3) + ')';
+        span.style.borderColor = 'rgba(184, 122, 80, ' + (0.1 + intensity * 0.3).toFixed(3) + ')';
+      }
       span.setAttribute('data-idx', j);
       span.setAttribute('tabindex', '0');
       span.setAttribute('role', 'button');
@@ -232,7 +253,8 @@ for val, idx in zip(top_features.values, top_features.indices):
     if (data.callout) { calloutEl.innerHTML = '<strong>Notice:</strong> ' + esc(data.callout); calloutEl.style.display = 'block'; }
     else { calloutEl.style.display = 'none'; }
     hint.textContent = 'Click a generated token to see what features drove it.';
-    nextBtn.textContent = currentStep === steps.length - 1 ? 'Done' : 'Next';
+    prevBtn.style.visibility = currentStep === 0 ? 'hidden' : 'visible';
+    nextBtn.textContent = currentStep === steps.length - 1 ? 'Done' : 'Next \u2192';
     featureDetail.innerHTML = ''; featureDetail.style.display = 'none';
     if (genSpanMap.length > 0) selectToken(genSpanMap[0].idx);
   }
@@ -268,7 +290,16 @@ for val, idx in zip(top_features.values, top_features.indices):
 
   nextBtn.addEventListener('click', function() {
     if (currentStep < steps.length - 1) { currentStep++; renderStep(); }
-    else { var el = document.querySelector('.stepper-widget').nextElementSibling; if (el) el.scrollIntoView({ behavior: 'smooth' }); }
+    else {
+      // Scroll to next section after the widget
+      var widget = document.querySelector('.stepper-widget');
+      var next = widget.nextElementSibling;
+      while (next && next.tagName === 'SCRIPT') next = next.nextElementSibling;
+      if (next) next.scrollIntoView({ behavior: 'smooth' });
+    }
+  });
+  prevBtn.addEventListener('click', function() {
+    if (currentStep > 0) { currentStep--; renderStep(); }
   });
 
   renderStep();
@@ -488,7 +519,7 @@ for val, idx in zip(top_features.values, top_features.indices):
   :global(.token) { font-family: var(--font-mono); font-size: var(--text-small); padding: 0.2rem 0.4rem; border-radius: 4px; line-height: 1.4; }
   :global(.token-input) { color: var(--fg-muted); }
   :global(.token-sep) { color: var(--fg-faint); font-size: var(--text-small); margin: 0 0.25rem; }
-  :global(.token-generated) { color: var(--fg); background: rgba(255,255,255,0.06); cursor: pointer; border: 1px solid transparent; transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
+  :global(.token-generated) { color: var(--fg); cursor: pointer; border: 1px solid rgba(184,122,80,0.1); transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
   :global(.token-generated:hover) { border-color: var(--accent-color); background: rgba(255,255,255,0.08); }
   :global(.token-generated.selected) { border-color: var(--accent-color); background: rgba(184,122,80,0.12); }
 
@@ -511,8 +542,8 @@ for val, idx in zip(top_features.values, top_features.indices):
 
   .stepper-footer { display: flex; justify-content: space-between; align-items: center; padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--fg-faint); }
   .stepper-hint { font-size: var(--text-small); color: var(--fg-muted); }
-  .stepper-next { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg); background: var(--bg-elevated); border: 1px solid var(--fg-faint); border-radius: 6px; padding: 0.4rem 1.25rem; cursor: pointer; transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
-  .stepper-next:hover { border-color: var(--accent-color); background: var(--bg-hover); }
+  .stepper-next, .stepper-prev { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg); background: var(--bg-elevated); border: 1px solid var(--fg-faint); border-radius: 6px; padding: 0.4rem 1.25rem; cursor: pointer; transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
+  .stepper-next:hover, .stepper-prev:hover { border-color: var(--accent-color); background: var(--bg-hover); }
 
   .chart-container { margin: var(--space-lg) 0; background: var(--bg-elevated); border: 1px solid var(--fg-faint); border-radius: 8px; padding: var(--space-md); overflow: hidden; }
   .chart-container figcaption { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); margin-top: var(--space-sm); line-height: 1.5; }

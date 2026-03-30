@@ -127,7 +127,529 @@
           "prob": 0.042
         }
       ]
+    },
+    {
+      "token": " and",
+      "features": [
+        {
+          "id": 19756,
+          "label": "unlabeled feature",
+          "activation": 20.1,
+          "logit_attr": 8.4
+        },
+        {
+          "id": 11131,
+          "label": "actions involving interacting with others in a conversation",
+          "activation": 6.9,
+          "logit_attr": -0.1
+        },
+        {
+          "id": 16947,
+          "label": "examples of movement directions and actions",
+          "activation": 5.4,
+          "logit_attr": -0.0
+        },
+        {
+          "id": 13450,
+          "label": "unlabeled feature",
+          "activation": 5.2,
+          "logit_attr": 1.9
+        },
+        {
+          "id": 23688,
+          "label": "unlabeled feature",
+          "activation": 4.7,
+          "logit_attr": 0.4
+        }
+      ],
+      "predictions": [
+        {
+          "token": " and",
+          "prob": 0.327,
+          "chosen": true
+        },
+        {
+          "token": " the",
+          "prob": 0.031
+        },
+        {
+          "token": " but",
+          "prob": 0.025
+        },
+        {
+          "token": " a",
+          "prob": 0.018
+        },
+        {
+          "token": " as",
+          "prob": 0.014
+        }
+      ]
+    },
+    {
+      "token": " the",
+      "features": [
+        {
+          "id": 21016,
+          "label": "unlabeled feature",
+          "activation": 21.5,
+          "logit_attr": 5.6
+        },
+        {
+          "id": 18642,
+          "label": "actions involving movement and interaction between characters in a narrative",
+          "activation": 14.7,
+          "logit_attr": 4.5
+        },
+        {
+          "id": 13408,
+          "label": "unlabeled feature",
+          "activation": 8.2,
+          "logit_attr": 4.2
+        },
+        {
+          "id": 11131,
+          "label": "actions involving interacting with others in a conversation",
+          "activation": 7.6,
+          "logit_attr": 0.5
+        },
+        {
+          "id": 12422,
+          "label": "unlabeled feature",
+          "activation": 7.3,
+          "logit_attr": 2.7
+        }
+      ],
+      "predictions": [
+        {
+          "token": " the",
+          "prob": 0.174,
+          "chosen": true
+        },
+        {
+          "token": " it",
+          "prob": 0.054
+        },
+        {
+          "token": " I",
+          "prob": 0.047
+        },
+        {
+          "token": " a",
+          "prob": 0.045
+        },
+        {
+          "token": " then",
+          "prob": 0.02
+        }
+      ]
+    },
+    {
+      "token": " big",
+      "features": [
+        {
+          "id": 12618,
+          "label": "instances where a character is described in a negative or adverse situation",
+          "activation": 15.1,
+          "logit_attr": 7.6
+        },
+        {
+          "id": 16623,
+          "label": "unlabeled feature",
+          "activation": 8.1,
+          "logit_attr": 3.0
+        },
+        {
+          "id": 1596,
+          "label": "unlabeled feature",
+          "activation": 5.9,
+          "logit_attr": 3.2
+        },
+        {
+          "id": 2945,
+          "label": "unlabeled feature",
+          "activation": 5.1,
+          "logit_attr": 0.7
+        },
+        {
+          "id": 11030,
+          "label": "references to physical locations or directions in relation to objects or people",
+          "activation": 4.4,
+          "logit_attr": 1.5
+        }
+      ],
+      "predictions": [
+        {
+          "token": " big",
+          "prob": 0.021,
+          "chosen": true
+        },
+        {
+          "token": " man",
+          "prob": 0.015
+        },
+        {
+          "token": " red",
+          "prob": 0.013
+        },
+        {
+          "token": " two",
+          "prob": 0.012
+        },
+        {
+          "token": " crowd",
+          "prob": 0.011
+        }
+      ]
+    },
+    {
+      "token": " red",
+      "features": [
+        {
+          "id": 24521,
+          "label": "unlabeled feature",
+          "activation": 27.5,
+          "logit_attr": 12.5
+        },
+        {
+          "id": 13293,
+          "label": "unlabeled feature",
+          "activation": 9.3,
+          "logit_attr": 5.8
+        },
+        {
+          "id": 6679,
+          "label": "unlabeled feature",
+          "activation": 8.2,
+          "logit_attr": 3.3
+        },
+        {
+          "id": 6891,
+          "label": "unlabeled feature",
+          "activation": 6.5,
+          "logit_attr": 2.7
+        },
+        {
+          "id": 19736,
+          "label": "unlabeled feature",
+          "activation": 6.3,
+          "logit_attr": 1.2
+        }
+      ],
+      "predictions": [
+        {
+          "token": " red",
+          "prob": 0.391,
+          "chosen": true
+        },
+        {
+          "token": " blue",
+          "prob": 0.117
+        },
+        {
+          "token": " green",
+          "prob": 0.104
+        },
+        {
+          "token": " white",
+          "prob": 0.047
+        },
+        {
+          "token": " yellow",
+          "prob": 0.032
+        }
+      ]
+    },
+    {
+      "token": " ball",
+      "features": [
+        {
+          "id": 4182,
+          "label": "unlabeled feature",
+          "activation": 26.6,
+          "logit_attr": 7.4
+        },
+        {
+          "id": 20082,
+          "label": "unlabeled feature",
+          "activation": 12.7,
+          "logit_attr": 7.9
+        },
+        {
+          "id": 16837,
+          "label": "unlabeled feature",
+          "activation": 10.5,
+          "logit_attr": 2.7
+        },
+        {
+          "id": 21107,
+          "label": "unlabeled feature",
+          "activation": 7.5,
+          "logit_attr": 4.8
+        },
+        {
+          "id": 23648,
+          "label": "unlabeled feature",
+          "activation": 7.3,
+          "logit_attr": 6.5
+        }
+      ],
+      "predictions": [
+        {
+          "token": " ball",
+          "prob": 0.655,
+          "chosen": true
+        },
+        {
+          "token": " balls",
+          "prob": 0.016
+        },
+        {
+          "token": " one",
+          "prob": 0.007
+        },
+        {
+          "token": " man",
+          "prob": 0.006
+        },
+        {
+          "token": " puck",
+          "prob": 0.004
+        }
+      ]
+    },
+    {
+      "token": " rolled",
+      "features": [
+        {
+          "id": 21046,
+          "label": "unlabeled feature",
+          "activation": 24.0,
+          "logit_attr": 3.8
+        },
+        {
+          "id": 438,
+          "label": "unlabeled feature",
+          "activation": 7.5,
+          "logit_attr": 2.7
+        },
+        {
+          "id": 20656,
+          "label": "unlabeled feature",
+          "activation": 7.2,
+          "logit_attr": 6.5
+        },
+        {
+          "id": 1381,
+          "label": "phrases related to technology and programming",
+          "activation": 7.2,
+          "logit_attr": 0.4
+        },
+        {
+          "id": 14519,
+          "label": "phrases related to decision-making and actions",
+          "activation": 6.0,
+          "logit_attr": -0.7
+        }
+      ],
+      "predictions": [
+        {
+          "token": " rolled",
+          "prob": 0.15,
+          "chosen": true
+        },
+        {
+          "token": " was",
+          "prob": 0.06
+        },
+        {
+          "token": " hit",
+          "prob": 0.032
+        },
+        {
+          "token": " came",
+          "prob": 0.026
+        },
+        {
+          "token": " flew",
+          "prob": 0.024
+        }
+      ]
+    },
+    {
+      "token": " down",
+      "features": [
+        {
+          "id": 21651,
+          "label": "unlabeled feature",
+          "activation": 28.4,
+          "logit_attr": 7.4
+        },
+        {
+          "id": 18253,
+          "label": "unlabeled feature",
+          "activation": 16.1,
+          "logit_attr": 15.0
+        },
+        {
+          "id": 1936,
+          "label": "unlabeled feature",
+          "activation": 13.5,
+          "logit_attr": 11.1
+        },
+        {
+          "id": 7192,
+          "label": "unlabeled feature",
+          "activation": 10.8,
+          "logit_attr": 7.1
+        },
+        {
+          "id": 15826,
+          "label": "unlabeled feature",
+          "activation": 10.0,
+          "logit_attr": 0.9
+        }
+      ],
+      "predictions": [
+        {
+          "token": " down",
+          "prob": 0.798,
+          "chosen": true
+        },
+        {
+          "token": " up",
+          "prob": 0.047
+        },
+        {
+          "token": " back",
+          "prob": 0.021
+        },
+        {
+          "token": " into",
+          "prob": 0.012
+        },
+        {
+          "token": " over",
+          "prob": 0.01
+        }
+      ]
+    },
+    {
+      "token": " the",
+      "features": [
+        {
+          "id": 22793,
+          "label": "unlabeled feature",
+          "activation": 27.6,
+          "logit_attr": 9.2
+        },
+        {
+          "id": 19112,
+          "label": "phrases related to physical actions or confrontations involving objects or people",
+          "activation": 22.3,
+          "logit_attr": 21.1
+        },
+        {
+          "id": 19753,
+          "label": "unlabeled feature",
+          "activation": 10.2,
+          "logit_attr": 1.2
+        },
+        {
+          "id": 22991,
+          "label": "phrases related to official statements or announcements",
+          "activation": 8.2,
+          "logit_attr": -0.5
+        },
+        {
+          "id": 231,
+          "label": "information related to specific events and occurrences",
+          "activation": 8.0,
+          "logit_attr": -0.3
+        }
+      ],
+      "predictions": [
+        {
+          "token": " the",
+          "prob": 0.956,
+          "chosen": true
+        },
+        {
+          "token": " to",
+          "prob": 0.005
+        },
+        {
+          "token": " a",
+          "prob": 0.004
+        },
+        {
+          "token": " it",
+          "prob": 0.003
+        },
+        {
+          "token": ".",
+          "prob": 0.002
+        }
+      ]
+    },
+    {
+      "token": " hill",
+      "features": [
+        {
+          "id": 11090,
+          "label": "unlabeled feature",
+          "activation": 24.9,
+          "logit_attr": 21.8
+        },
+        {
+          "id": 12224,
+          "label": "software-related terms",
+          "activation": 8.7,
+          "logit_attr": 2.0
+        },
+        {
+          "id": 8498,
+          "label": "unlabeled feature",
+          "activation": 7.4,
+          "logit_attr": 3.2
+        },
+        {
+          "id": 11030,
+          "label": "references to physical locations or directions in relation to objects or people",
+          "activation": 6.2,
+          "logit_attr": 3.7
+        },
+        {
+          "id": 16867,
+          "label": "unlabeled feature",
+          "activation": 6.2,
+          "logit_attr": 3.9
+        }
+      ],
+      "predictions": [
+        {
+          "token": " hill",
+          "prob": 0.899,
+          "chosen": true
+        },
+        {
+          "token": " hills",
+          "prob": 0.008
+        },
+        {
+          "token": " road",
+          "prob": 0.007
+        },
+        {
+          "token": " hall",
+          "prob": 0.005
+        },
+        {
+          "token": " other",
+          "prob": 0.003
+        }
+      ]
     }
   ],
-  "callout": "The top feature ('movement along a pathway') makes perfect sense for 'hill.' But 'markets or dominance' also fires. These features share neurons with the movement feature. This is superposition: every interpretation comes with noise."
+  "callout": "The top feature ('movement along a pathway') makes perfect sense for 'hill.' But 'markets or dominance' also fires. These features share neurons with the movement feature. This is superposition: every interpretation comes with noise. And notice the output: the model repeats the entire input phrase. Click the second 'hill' and compare its features to the first."
 }
