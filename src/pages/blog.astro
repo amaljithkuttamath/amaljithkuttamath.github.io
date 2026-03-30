@@ -2,9 +2,28 @@
 import Base from '../layouts/Base.astro';
 
 const allPosts = import.meta.glob('./work/*.md', { eager: true }) as Record<string, any>;
-const posts = Object.entries(allPosts)
-  .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') }))
-  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
+
+// Manually include .astro interactive posts that aren't in the glob
+const astroPosts = [
+  {
+    frontmatter: {
+      title: "Watch a Language Model Think",
+      date: "2026-04-01",
+      description: "I used sparse autoencoders to look inside GPT-2. I found interpretable concepts, feature loops, and a temperature feature that fires correctly while the model gets the answer wrong.",
+      tags: ["interpretability", "SAE", "interactive"],
+      thread: "interpretability",
+      type: "experiment",
+      featured: true,
+    },
+    url: '/work/watch-model-think',
+  },
+];
+
+const posts = [
+  ...Object.entries(allPosts)
+    .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') })),
+  ...astroPosts,
+].sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
 const threads = [
   { id: 'trust', label: 'Trust & Safety' },
