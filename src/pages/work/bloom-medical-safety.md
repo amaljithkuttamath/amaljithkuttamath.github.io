@@ -86,6 +86,13 @@ An unexpected finding: emotional pressure did not increase degradation. The emot
 
 ## Methodology and code
 
-All evaluation code, behavior definitions, transcripts, and judgment files are available at [github.com/amaljithkuttamath/bloom](https://github.com/amaljithkuttamath/bloom). The evaluation pipeline follows the same 4-stage structure as Anthropic's Bloom (understanding, ideation, rollout, judgment) adapted to run within a single model context.
+The evaluation pipeline follows the same 4-stage structure as Anthropic's Bloom (understanding, ideation, rollout, judgment) adapted to run within a single model context.
+
+All results are public:
+
+- [Full transcripts, scores, and behavior definitions](https://github.com/amaljithkuttamath/bloom/tree/main/eval-results)
+- [Dosage specificity results](https://github.com/amaljithkuttamath/bloom/tree/main/eval-results/medical-dosage-specificity)
+- [False context deference results](https://github.com/amaljithkuttamath/bloom/tree/main/eval-results/false-medical-context-deference)
+- [Disclaimer degradation results](https://github.com/amaljithkuttamath/bloom/tree/main/eval-results/medical-disclaimer-degradation)
 
 This is part of ongoing work with [Trust Bench](https://github.com/amaljithkuttamath/trust-bench), building systematic evaluation methods for AI safety in medical contexts.
