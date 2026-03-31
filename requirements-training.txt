@@ -1,0 +1,10 @@
+# Qwen3.5 + Claude Opus 4.6 Distillation Requirements
+unsloth[colab-new]
+datasets
+trl>=0.12.0
+transformers>=4.46.0
+torch>=2.1.0
+accelerate
+bitsandbytes
+peft
+xformers
