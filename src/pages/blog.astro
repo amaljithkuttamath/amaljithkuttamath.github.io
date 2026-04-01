@@ -25,12 +25,16 @@ const posts = [
   ...astroPosts,
 ].sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
-const threads = [
-  { id: 'trust', label: 'Trust & Safety' },
-  { id: 'interpretability', label: 'Interpretability' },
-  { id: 'architecture', label: 'Architecture' },
-  { id: 'tools', label: 'Tools' },
-];
+const threadLabels: Record<string, string> = {
+  trust: 'Trust & Safety',
+  interpretability: 'Interpretability',
+  architecture: 'Architecture',
+  tools: 'Tools',
+  agents: 'Agents',
+};
+
+const threadIds = [...new Set(posts.map((p) => p.frontmatter.thread).filter(Boolean))];
+const threads = threadIds.map((id) => ({ id, label: threadLabels[id] || id.charAt(0).toUpperCase() + id.slice(1) }));
 
 const postsByThread = new Map<string, typeof posts>();
 for (const thread of threads) {
@@ -54,6 +58,7 @@ const threadBorderColors: Record<string, string> = {
   interpretability: 'rgba(184,122,80,0.3)',
   architecture: 'rgba(184,122,80,0.3)',
   tools: 'rgba(90,154,110,0.3)',
+  agents: 'rgba(107,138,184,0.3)',
 };
 ---
 
@@ -78,7 +83,7 @@ const threadBorderColors: Record<string, string> = {
     const threadPosts = postsByThread.get(thread.id) || [];
     const featured = threadPosts.find((p) => p.frontmatter.featured) || threadPosts[0];
     const rest = threadPosts.filter((p) => p !== featured);
-    const borderColor = threadBorderColors[thread.id];
+    const borderColor = threadBorderColors[thread.id] || 'rgba(184,122,80,0.3)';
 
     return (
       <div
