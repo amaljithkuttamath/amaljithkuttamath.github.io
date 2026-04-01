@@ -25,7 +25,7 @@ const posts = [
 ].sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
 
 // Pick featured posts: one from each thread, prioritize featured flag
-const threads = ['trust', 'interpretability', 'architecture'];
+const threads = ['trust', 'interpretability', 'architecture', 'agents'];
 const featured = threads
   .map((t) => {
     const threadPosts = posts.filter((p) => p.frontmatter.thread === t);
