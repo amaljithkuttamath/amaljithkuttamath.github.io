@@ -5,3 +5,5 @@ dist/
 CLAUDE.md
 docs/plans/
 .superpowers/
+.gstack/
+.claude/
