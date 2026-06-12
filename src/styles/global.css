@@ -37,6 +37,17 @@
   --space-2xl: 4rem;
   --space-3xl: 4.5rem;
 
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-full: 100px;
+
+  /* Derived accent surfaces */
+  --accent-subtle: color-mix(in srgb, var(--accent-color) 16%, transparent);
+
+  /* Card/experiment title size (between subsection and section) */
+  --text-title: 1.125rem;
+
   /* Transitions */
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   --duration: 0.15s;
