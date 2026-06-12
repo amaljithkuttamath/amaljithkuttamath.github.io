@@ -11,7 +11,7 @@ import Base from '../../layouts/Base.astro';
 
     <div class="lc-loader" id="loader">
       <div class="lc-loader-row">
-        <select class="lc-select" id="model-select">
+        <select class="lc-select" id="model-select" aria-label="Model to load">
           <option value="HuggingFaceTB/SmolLM2-135M-Instruct" data-size="~120 MB">SmolLM2-135M (fast download, dimmer)</option>
           <option value="HuggingFaceTB/SmolLM2-360M-Instruct" data-size="~280 MB" selected>SmolLM2-360M (better answers)</option>
         </select>
@@ -27,7 +27,7 @@ import Base from '../../layouts/Base.astro';
     <div class="lc-thread" id="thread" style="display:none"></div>
 
     <form class="lc-inputrow" id="input-row" style="display:none">
-      <input type="text" class="lc-textinput" id="user-input" placeholder="Say something to the model&hellip;" autocomplete="off" />
+      <input type="text" class="lc-textinput" id="user-input" placeholder="Say something to the model&hellip;" aria-label="Message to the model" autocomplete="off" />
       <button type="submit" class="lc-btn" id="send-btn">Send</button>
     </form>
 
@@ -56,7 +56,7 @@ import Base from '../../layouts/Base.astro';
     font-family: var(--font-sans); font-size: var(--text-small);
   }
   :global(.lc-btn) {
-    background: var(--accent-color); color: #fff; border: none;
+    background: var(--accent-color); color: var(--bg); border: none;
     padding: 7px 18px; border-radius: var(--radius-sm); cursor: pointer;
     font-family: var(--font-sans); font-size: var(--text-small);
     transition: opacity var(--duration) var(--ease);
@@ -113,7 +113,7 @@ import Base from '../../layouts/Base.astro';
     padding: 8px 12px; font-family: var(--font-sans); font-size: var(--text-small);
     transition: border-color var(--duration) var(--ease);
   }
-  .lc-textinput:focus { outline: none; border-color: var(--accent-color); }
+  .lc-textinput:focus { border-color: var(--accent-color); }
 
   .lc-stats {
     font-family: var(--font-mono); font-size: var(--text-label);

@@ -225,6 +225,8 @@ nav .nav-links {
 }
 
 nav .nav-links a {
+  padding: 0.75rem 0.375rem;
+  margin: -0.75rem -0.375rem;
   font-family: var(--font-mono);
   font-size: var(--text-label);
   color: var(--fg-muted);
@@ -382,6 +384,8 @@ footer .footer-links {
 }
 
 footer a {
+  padding: 0.75rem 0.375rem;
+  margin: -0.75rem -0.375rem;
   font-family: var(--font-mono);
   font-size: var(--text-label);
   color: var(--fg-muted);
@@ -867,4 +871,14 @@ footer a:hover {
 @media print {
   nav, footer, .skip-link, .status { display: none; }
   .hero { padding: 2rem 0; }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
 }
