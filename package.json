@@ -10,6 +10,9 @@
   "dependencies": {
     "@astrojs/rss": "^4.0.17",
     "@astrojs/sitemap": "^3.7.0",
+    "@fontsource-variable/newsreader": "^5.2.10",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "astro": "^5.18.0"
   }
 }

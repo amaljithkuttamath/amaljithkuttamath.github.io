@@ -27,7 +27,7 @@ const formattedUpdated = frontmatter.updated && frontmatter.updated !== frontmat
   : null;
 ---
 
-<Base title={`${frontmatter.title} | Amaljith Kuttamath`} description={frontmatter.description}>
+<Base title={`${frontmatter.title} | Amaljith Kuttamath`} description={frontmatter.description} article={{ published: frontmatter.date, modified: frontmatter.updated }}>
   <article class="prose post-article animate-in">
     <header class="post-header">
       <div class="post-meta">
