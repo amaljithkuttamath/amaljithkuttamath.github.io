@@ -48,15 +48,15 @@ const formatDate = (date: string) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 const typeColors: Record<string, { label: string; color: string; border: string }> = {
-  experiment: { label: 'Experiment', color: 'var(--accent-color)', border: 'rgba(184,122,80,0.2)' },
+  experiment: { label: 'Experiment', color: 'var(--accent-color)', border: 'color-mix(in srgb, var(--accent-color) 20%, transparent)' },
   'deep-dive': { label: 'Deep Dive', color: '#6b8ab8', border: 'rgba(107,138,184,0.2)' },
   tool: { label: 'Tool', color: '#5a9a6e', border: 'rgba(90,154,110,0.2)' },
 };
 
 const threadBorderColors: Record<string, string> = {
-  trust: 'rgba(184,122,80,0.3)',
-  interpretability: 'rgba(184,122,80,0.3)',
-  architecture: 'rgba(184,122,80,0.3)',
+  trust: 'color-mix(in srgb, var(--accent-color) 30%, transparent)',
+  interpretability: 'color-mix(in srgb, var(--accent-color) 30%, transparent)',
+  architecture: 'color-mix(in srgb, var(--accent-color) 30%, transparent)',
   tools: 'rgba(90,154,110,0.3)',
   agents: 'rgba(107,138,184,0.3)',
 };
@@ -83,7 +83,7 @@ const threadBorderColors: Record<string, string> = {
     const threadPosts = postsByThread.get(thread.id) || [];
     const featured = threadPosts.find((p) => p.frontmatter.featured) || threadPosts[0];
     const rest = threadPosts.filter((p) => p !== featured);
-    const borderColor = threadBorderColors[thread.id] || 'rgba(184,122,80,0.3)';
+    const borderColor = threadBorderColors[thread.id] || 'color-mix(in srgb, var(--accent-color) 30%, transparent)';
 
     return (
       <div

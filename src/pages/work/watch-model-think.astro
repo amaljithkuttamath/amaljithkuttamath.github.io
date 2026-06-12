@@ -238,8 +238,8 @@ for val, idx in zip(top_features.values, top_features.indices):
       if (feats && feats.length > 0) {
         var intensity = Math.abs(feats[0].logit_attr) / maxLogitAttr;
         var bgAlpha = 0.04 + intensity * 0.18;
-        span.style.background = 'rgba(184, 122, 80, ' + bgAlpha.toFixed(3) + ')';
-        span.style.borderColor = 'rgba(184, 122, 80, ' + (0.1 + intensity * 0.3).toFixed(3) + ')';
+        span.style.background = 'color-mix(in srgb, var(--accent-color) ' + Math.round(bgAlpha * 100) + '%, transparent)';
+        span.style.borderColor = 'color-mix(in srgb, var(--accent-color) ' + Math.round((0.1 + intensity * 0.3) * 100) + '%, transparent)';
       }
       span.setAttribute('data-idx', j);
       span.setAttribute('tabindex', '0');
@@ -372,7 +372,7 @@ for val, idx in zip(top_features.values, top_features.indices):
     maxAct = Math.ceil(maxAct / 10) * 10;
     var nTokens = loopData.tokens.length;
     var xStep = plotW / (nTokens - 1);
-    var colors = ['#b87a50', '#7eb87a', '#7a8fb8', '#b87a9f'];
+    var colors = [getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#5fb88a', '#c2a04f', '#7a8fb8', '#b87a9f'];
 
     for (var v = 0; v <= maxAct; v += 10) {
       var y = pad.top + plotH - (v / maxAct) * plotH;
@@ -452,7 +452,7 @@ for val, idx in zip(top_features.values, top_features.indices):
     var yLabel = svgEl('text', { x: 10, y: pad.top + plotH / 2, 'text-anchor': 'middle', fill: '#7a7570', 'font-family': "'JetBrains Mono',monospace", 'font-size': '9px', transform: 'rotate(-90,10,' + (pad.top + plotH / 2) + ')' });
     yLabel.textContent = 'feature attribution'; svg.appendChild(yLabel);
 
-    var promptColors = ['#b87a50', '#7eb87a', '#7a8fb8', '#b87a9f'];
+    var promptColors = [getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#5fb88a', '#c2a04f', '#7a8fb8', '#b87a9f'];
     for (var pi = 0; pi < calData.length; pi++) {
       var p = calData[pi];
       var color = promptColors[pi % promptColors.length];
@@ -481,14 +481,14 @@ for val, idx in zip(top_features.values, top_features.indices):
   }
 
   // Draw persistence chart
-  drawBarChart('persistence-chart', persistData.tokens, persistData.activations, persistData.label, '#b87a50');
+  drawBarChart('persistence-chart', persistData.tokens, persistData.activations, persistData.label, getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#5fb88a');
   drawLoopChart();
   drawCalibrationChart();
 
   window.addEventListener('resize', function() {
     clearTimeout(window._chartResize);
     window._chartResize = setTimeout(function() {
-      drawBarChart('persistence-chart', persistData.tokens, persistData.activations, persistData.label, '#b87a50');
+      drawBarChart('persistence-chart', persistData.tokens, persistData.activations, persistData.label, getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim() || '#5fb88a');
       drawLoopChart();
       drawCalibrationChart();
     }, 200);
@@ -519,9 +519,9 @@ for val, idx in zip(top_features.values, top_features.indices):
   :global(.token) { font-family: var(--font-mono); font-size: var(--text-small); padding: 0.2rem 0.4rem; border-radius: 4px; line-height: 1.4; }
   :global(.token-input) { color: var(--fg-muted); }
   :global(.token-sep) { color: var(--fg-faint); font-size: var(--text-small); margin: 0 0.25rem; }
-  :global(.token-generated) { color: var(--fg); cursor: pointer; border: 1px solid rgba(184,122,80,0.1); transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
+  :global(.token-generated) { color: var(--fg); cursor: pointer; border: 1px solid color-mix(in srgb, var(--accent-color) 10%, transparent); transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease); }
   :global(.token-generated:hover) { border-color: var(--accent-color); background: rgba(255,255,255,0.08); }
-  :global(.token-generated.selected) { border-color: var(--accent-color); background: rgba(184,122,80,0.12); }
+  :global(.token-generated.selected) { border-color: var(--accent-color); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
 
   :global(.feature-detail) { display: none; background: var(--bg); border: 1px solid var(--fg-faint); border-radius: 6px; padding: var(--space-md); margin-top: var(--space-sm); animation: fdFadeIn 0.15s var(--ease) both; }
   @keyframes fdFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -537,7 +537,7 @@ for val, idx in zip(top_features.values, top_features.indices):
   :global(.fd-pill) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); padding: 0.15rem 0.5rem; border: 1px solid var(--fg-faint); border-radius: 100px; white-space: nowrap; }
   :global(.fd-chosen) { color: var(--accent-color); border-color: var(--accent-color); }
 
-  .stepper-callout { display: none; padding: var(--space-sm) var(--space-lg); margin: 0 var(--space-lg) var(--space-md); background: rgba(184,122,80,0.06); border-left: 2px solid var(--accent-color); border-radius: 0 6px 6px 0; font-size: var(--text-small); line-height: 1.6; color: var(--fg); }
+  .stepper-callout { display: none; padding: var(--space-sm) var(--space-lg); margin: 0 var(--space-lg) var(--space-md); background: color-mix(in srgb, var(--accent-color) 6%, transparent); border-left: 2px solid var(--accent-color); border-radius: 0 6px 6px 0; font-size: var(--text-small); line-height: 1.6; color: var(--fg); }
   :global(.stepper-callout strong) { color: var(--accent-color); font-weight: 500; }
 
   .stepper-footer { display: flex; justify-content: space-between; align-items: center; padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--fg-faint); }

@@ -93,8 +93,8 @@ import Base from '../../layouts/Base.astro';
   }
   :global(.lc-msg.user) {
     align-self: flex-end;
-    background: var(--accent-subtle, rgba(184, 122, 80, 0.15)); color: var(--fg);
-    border: 1px solid rgba(184, 122, 80, 0.3);
+    background: var(--accent-subtle); color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
   }
   :global(.lc-msg.assistant) {
     align-self: flex-start;
