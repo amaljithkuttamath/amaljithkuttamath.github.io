@@ -14,7 +14,10 @@
   --font-serif: 'Newsreader Variable', Georgia, serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
 
-  --accent-color: #5fb88a;
+  --accent-color: #e6e9e7;
+
+  /* Signal: the one LED hue, used only for live/status elements */
+  --signal: #d9a13b;
 
   /* Type scale */
   --text-hero: 3rem;
@@ -70,7 +73,8 @@
     --link: #171b19;
     --selection-bg: #171b19;
     --selection-fg: #f6f8f7;
-    --accent-color: #2a7a55;
+    --accent-color: #171b19;
+    --signal: #9a6c14;
     --success: #2e7a4f;
     --danger: #a8463f;
     --info: #44639c;
