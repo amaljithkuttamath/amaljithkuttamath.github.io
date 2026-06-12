@@ -49,8 +49,8 @@ const formatDate = (date: string) =>
 
 const typeColors: Record<string, { label: string; color: string; border: string }> = {
   experiment: { label: 'Experiment', color: 'var(--accent-color)', border: 'color-mix(in srgb, var(--accent-color) 20%, transparent)' },
-  'deep-dive': { label: 'Deep Dive', color: '#6b8ab8', border: 'rgba(107,138,184,0.2)' },
-  tool: { label: 'Tool', color: '#5a9a6e', border: 'rgba(90,154,110,0.2)' },
+  'deep-dive': { label: 'Deep Dive', color: 'var(--info)', border: 'color-mix(in srgb, var(--info) 20%, transparent)' },
+  tool: { label: 'Tool', color: 'var(--success)', border: 'color-mix(in srgb, var(--success) 20%, transparent)' },
 };
 
 const threadBorderColors: Record<string, string> = {
@@ -313,7 +313,7 @@ const threadBorderColors: Record<string, string> = {
     display: inline-flex;
     align-items: center;
     padding: 0.3rem 0.6rem;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
     border-radius: 6px;
   }
@@ -330,7 +330,7 @@ const threadBorderColors: Record<string, string> = {
   }
 
   .install-primary code {
-    color: #5a9a6e;
+    color: var(--success);
   }
 
   /* Compact items */
@@ -339,7 +339,7 @@ const threadBorderColors: Record<string, string> = {
     justify-content: space-between;
     align-items: center;
     padding: 0.6rem 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--fg-faint);
     text-decoration: none;
     color: var(--fg);
     transition: color var(--duration) var(--ease);

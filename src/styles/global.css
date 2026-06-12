@@ -45,6 +45,11 @@
   /* Derived accent surfaces */
   --accent-subtle: color-mix(in srgb, var(--accent-color) 16%, transparent);
 
+  /* Semantic colors */
+  --success: #5fa97c;
+  --danger: #c0605a;
+  --info: #6b8ab8;
+
   /* Card/experiment title size (between subsection and section) */
   --text-title: 1.125rem;
 
@@ -66,6 +71,9 @@
     --selection-bg: #171b19;
     --selection-fg: #f6f8f7;
     --accent-color: #2a7a55;
+    --success: #2e7a4f;
+    --danger: #a8463f;
+    --info: #44639c;
   }
 }
 
@@ -175,10 +183,10 @@ a {
 /* ── Glass / matte surface ────────────────────── */
 
 .glass {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-elevated);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--fg-faint);
 }
 
 /* ── Navigation ────────────────────────────────── */
@@ -446,7 +454,7 @@ footer a:hover {
 }
 
 .prose pre {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-elevated);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   padding: 1.25rem;
@@ -455,7 +463,7 @@ footer a:hover {
   margin: 1.5rem 0;
   font-size: var(--text-small);
   line-height: 1.6;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--fg-faint);
 }
 
 .prose pre code {
@@ -502,7 +510,7 @@ footer a:hover {
   max-width: 100%;
   border-radius: 8px;
   margin: 1.5rem 0;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--fg-faint);
 }
 
 .prose figure {
@@ -528,7 +536,7 @@ footer a:hover {
   margin: 1.5rem 0;
   font-size: var(--text-small);
   line-height: 1.5;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-elevated);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -555,7 +563,7 @@ footer a:hover {
 }
 
 .prose tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-elevated);
 }
 
 .prose tbody tr:last-child td {

@@ -74,7 +74,7 @@ import Base from '../../layouts/Base.astro';
       </div>
 
       <div class="card" id="card-loss">
-        <div class="card-step" style="background:#6a3">5</div>
+        <div class="card-step" style="background:var(--success)">5</div>
         <div class="card-title">How Wrong Was It? <span class="card-hint"><code>loss.backward()</code> computes gradients for all weights</span></div>
         <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
           <div style="flex:1;min-width:250px"><svg id="loss-svg"></svg></div>
@@ -83,7 +83,7 @@ import Base from '../../layouts/Base.astro';
       </div>
 
       <div class="card" id="card-update">
-        <div class="card-step" style="background:#6a3">6</div>
+        <div class="card-step" style="background:var(--success)">6</div>
         <div class="card-title">Learning from the Mistake <span class="card-hint"><code>param -= lr * grad / (sqrt(v) + eps)</code> across <span id="param-count-inline"></span> weights</span></div>
         <div id="update-content" class="stats-grid"></div>
       </div>
@@ -248,7 +248,7 @@ import Base from '../../layouts/Base.astro';
     white-space: nowrap;
   }
   .flow-connector-back .flow-arrow {
-    color: #6a3;
+    color: var(--success);
   }
   .card-hint code {
     font-family: var(--font-mono);
@@ -272,7 +272,7 @@ import Base from '../../layouts/Base.astro';
     padding: 3px 10px; border-radius: var(--radius-full);
     white-space: nowrap;
   }
-  .phase-tag-back { background: #6a3; }
+  .phase-tag-back { background: var(--success); }
   .phase-tag-result { background: var(--fg-muted); }
   .phase-desc { font-size: var(--text-label); color: var(--fg-muted); }
   .phase-arrow { color: var(--fg-muted); font-size: 1rem; }
@@ -297,8 +297,8 @@ import Base from '../../layouts/Base.astro';
   }
   :global(.ch-active) { background: var(--accent-color); color: var(--bg); }
   :global(.ch-target) { background: var(--accent-color); color: var(--bg); opacity: 0.6; }
-  :global(.right) { color: #6a6; font-weight: 600; }
-  :global(.wrong) { color: #b55; font-weight: 600; }
+  :global(.right) { color: var(--success); font-weight: 600; }
+  :global(.wrong) { color: var(--danger); font-weight: 600; }
   :global(.arrow) { color: var(--fg-muted); margin: 0 6px; }
 
   /* Loss chart */
@@ -353,7 +353,7 @@ import Base from '../../layouts/Base.astro';
     transition: opacity 0.2s;
   }
   :global(.pg-btn:hover) { opacity: 0.85; }
-  :global(.pg-btn.stop) { background: #b33; }
+  :global(.pg-btn.stop) { background: var(--danger); }
   :global(.pg-label) { font-size: var(--text-label); color: var(--fg-muted); display: flex; align-items: center; gap: 4px; }
   :global(.pg-select) {
     background: var(--bg-elevated); color: var(--fg); border: 1px solid var(--fg-faint);
@@ -576,7 +576,7 @@ function updateLoss(){
   if(lossHist.length>0){
     var cur=lossHist[lossHist.length-1].loss;
     var prev=lossHist.length>1?lossHist[lossHist.length-2].loss:cur;
-    var dir=cur<prev?'<span style="color:#6a6">&darr; improving</span>':'<span style="color:#b55">&uarr; worse</span>';
+    var dir=cur<prev?'<span style="color:var(--success)">&darr; improving</span>':'<span style="color:var(--danger)">&uarr; worse</span>';
     le.innerHTML='Loss: <strong>'+cur.toFixed(4)+'</strong> '+dir+'<br>'+
       '<span style="font-size:0.7rem">Lower loss = better predictions.<br>'+
       'The model backpropagates this error<br>through all '+params.length+' weights.</span>';
@@ -743,7 +743,7 @@ function updateOutput(){
   bars.enter().append('rect').attr('class','bar').merge(bars)
     .attr('x',function(d){return outXS(d.ch)}).attr('width',outXS.bandwidth())
     .attr('y',function(d){return outYS(d.p)}).attr('height',function(d){return Math.max(0,(170-6-32)-outYS(d.p))})
-    .attr('fill',function(d){return d.i===targetIdx?'#6a6':'var(--accent-color)'}).attr('opacity',function(d){return d.i===targetIdx?1:.5});
+    .attr('fill',function(d){return d.i===targetIdx?'var(--success)':'var(--accent-color)'}).attr('opacity',function(d){return d.i===targetIdx?1:.5});
   bars.exit().remove();
   // Verdict
   var vEl=document.getElementById('output-verdict');

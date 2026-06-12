@@ -88,8 +88,8 @@ import Base from '../../layouts/Base.astro';
     font-family: var(--font-mono); font-size: var(--text-label);
     color: var(--fg-muted);
   }
-  :global(.tok-status.err) { color: #b55; }
-  :global(.tok-lossy) { color: #b55; }
+  :global(.tok-status.err) { color: var(--danger); }
+  :global(.tok-lossy) { color: var(--danger); }
 
   .ta-note {
     margin-top: var(--space-md); padding: 10px 14px;
