@@ -61,25 +61,29 @@
   --duration: 0.15s;
 }
 
-/* Light mode */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f8f7;
-    --bg-elevated: rgba(0, 0, 0, 0.03);
-    --bg-hover: rgba(0, 0, 0, 0.05);
-    --fg: #171b19;
-    --fg-muted: #6b736e;
-    --fg-faint: rgba(0, 0, 0, 0.06);
-    --link: #171b19;
-    --selection-bg: #171b19;
-    --selection-fg: #f6f8f7;
-    --accent-color: #171b19;
-    --signal: #9a6c14;
-    --success: #2e7a4f;
-    --danger: #a8463f;
-    --info: #44639c;
-  }
+/* Light theme: opt-in via the nav toggle. Dark is the default for everyone. */
+:root[data-theme='light'] {
+  --bg: #f6f8f7;
+  --bg-elevated: rgba(0, 0, 0, 0.03);
+  --bg-hover: rgba(0, 0, 0, 0.05);
+  --fg: #171b19;
+  --fg-muted: #6b736e;
+  --fg-faint: rgba(0, 0, 0, 0.06);
+  --link: #171b19;
+  --selection-bg: #171b19;
+  --selection-fg: #f6f8f7;
+  --accent-color: #171b19;
+  --signal: #9a6c14;
+  --success: #2e7a4f;
+  --danger: #a8463f;
+  --info: #44639c;
+  color-scheme: light;
 }
+
+:root[data-theme='light'] .tag {
+  background: var(--bg-hover);
+}
+
 
 * {
   margin: 0;
@@ -93,6 +97,7 @@
 }
 
 html {
+  color-scheme: dark;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -258,6 +263,22 @@ nav .nav-links a.active::after {
   background: var(--fg-muted);
 }
 
+nav .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0.75rem 0.375rem;
+  margin: -0.75rem -0.375rem;
+  transition: color var(--duration) var(--ease);
+}
+
+nav .theme-toggle:hover {
+  color: var(--accent-color);
+}
+
 /* ── Post list ─────────────────────────────────── */
 
 .post-list {
@@ -316,11 +337,6 @@ nav .nav-links a.active::after {
   border-radius: 100px;
 }
 
-@media (prefers-color-scheme: light) {
-  .tag {
-    background: var(--bg-hover);
-  }
-}
 
 .tags {
   display: flex;

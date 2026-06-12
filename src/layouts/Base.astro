@@ -61,8 +61,15 @@ if (matchedNav) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content={description} />
   <meta name="author" content="Amaljith Kuttamath" />
-  <meta name="theme-color" content="#0b0d0c" media="(prefers-color-scheme: dark)" />
-  <meta name="theme-color" content="#f6f8f7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b0d0c" />
+  <script is:inline>
+    // Theme: dark by default for everyone; light is opt-in and remembered.
+    // Runs before paint to avoid a flash of the wrong theme.
+    if (localStorage.getItem('theme') === 'light') {
+      document.documentElement.dataset.theme = 'light';
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f6f8f7');
+    }
+  </script>
   <link rel="canonical" href={canonicalURL} />
 
   <!-- Open Graph -->
@@ -135,6 +142,11 @@ if (matchedNav) {
         <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') }]}>blog</a>
         <a href="/playground" class:list={[{ active: currentPath.startsWith('/playground') }]}>playground</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
+        <button id="theme-toggle" class="theme-toggle" aria-label="Switch between dark and light theme">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-5.4-5.4c0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z" />
+          </svg>
+        </button>
       </div>
     </nav>
 
@@ -151,6 +163,20 @@ if (matchedNav) {
       </div>
     </footer>
   </div>
+
+  <script is:inline>
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      var light = document.documentElement.dataset.theme === 'light';
+      if (light) {
+        delete document.documentElement.dataset.theme;
+        localStorage.setItem('theme', 'dark');
+      } else {
+        document.documentElement.dataset.theme = 'light';
+        localStorage.setItem('theme', 'light');
+      }
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', light ? '#0b0d0c' : '#f6f8f7');
+    });
+  </script>
 </body>
 </html>
 
