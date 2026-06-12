@@ -48,11 +48,6 @@ const formatDate = (date: string) =>
     <h1 class="hero-headline">I study how language models fail and build tools to catch it.</h1>
     <p class="hero-sub">Seven years building AI systems. Now focused on mechanistic interpretability — finding where models break before they do it in production.</p>
     <p class="hero-cred">MS, George Mason University &middot; ex-ISRO &middot; <a href="https://doi.org/10.1097/QMH.0000000000000525">published in Quality Management in Health Care</a></p>
-    <div class="hero-instrument" id="hero-instrument" title="A real character-bigram language model, training live in this tab.">
-      <canvas id="inst-spark" width="120" height="22" aria-hidden="true"></canvas>
-      <span class="inst-read" id="inst-read">live &middot; warming up&hellip;</span>
-      <span class="inst-names" id="inst-names" aria-hidden="true"></span>
-    </div>
   </section>
 
   <section class="now animate-in animate-in-delay-1">
@@ -92,116 +87,6 @@ const formatDate = (date: string) =>
     <span class="playground-cta">Train a transformer, race tokenizers, chat with a local model &rarr;</span>
   </a>
 </Base>
-
-<script is:inline>
-// Hero instrument: a character-bigram language model training live in this tab.
-// Real gradient descent on real data, ~3KB of JS, no downloads.
-(function () {
-  var NAMES = 'emma,olivia,ava,isabella,sophia,charlotte,mia,amelia,harper,evelyn,abigail,emily,elizabeth,mila,ella,avery,sofia,camila,aria,scarlett,victoria,madison,luna,grace,chloe,penelope,layla,riley,zoey,nora,lily,eleanor,hannah,lillian,addison,aubrey,ellie,stella,natalie,zoe,leah,hazel,violet,aurora,savannah,audrey,brooklyn,bella,claire,skylar,lucy,paisley,everly,anna,caroline,nova,genesis,emilia,kennedy,samantha,maya,willow,kinsley,naomi,aaliyah,elena,sarah,ariana,allison,gabriella,alice,madelyn,cora,ruby,eva,serenity,autumn,adeline,hailey,gianna,valentina,isla,eliana,quinn,ivy,sadie,piper,lydia,alexa,josephine,emery,julia,delilah,arianna,vivian,kaylee,sophie,brielle,madeline'.split(',');
-  var readEl = document.getElementById('inst-read');
-  var namesEl = document.getElementById('inst-names');
-  var canvas = document.getElementById('inst-spark');
-  if (!readEl || !canvas) return;
-  var ctx = canvas.getContext('2d');
-  var V = 27; // a-z + boundary
-  var W = new Float32Array(V * V); // logits
-  var idx = function (c) { return c === '.' ? 0 : c.charCodeAt(0) - 96; };
-
-  // training pairs
-  var pairs = [];
-  for (var n = 0; n < NAMES.length; n++) {
-    var w = '.' + NAMES[n] + '.';
-    for (var i = 0; i < w.length - 1; i++) pairs.push([idx(w[i]), idx(w[i + 1])]);
-  }
-
-  var probs = new Float32Array(V);
-  function rowProbs(a) {
-    var mx = -1e9, j;
-    for (j = 0; j < V; j++) if (W[a * V + j] > mx) mx = W[a * V + j];
-    var sum = 0;
-    for (j = 0; j < V; j++) { probs[j] = Math.exp(W[a * V + j] - mx); sum += probs[j]; }
-    for (j = 0; j < V; j++) probs[j] /= sum;
-    return probs;
-  }
-
-  function trainStep(lr) {
-    var loss = 0, B = 64;
-    for (var b = 0; b < B; b++) {
-      var pr = pairs[(Math.random() * pairs.length) | 0];
-      var a = pr[0], t = pr[1], p = rowProbs(a);
-      loss += -Math.log(p[t] + 1e-9);
-      for (var j = 0; j < V; j++) W[a * V + j] -= lr * (p[j] - (j === t ? 1 : 0));
-    }
-    return loss / B;
-  }
-
-  function sampleName() {
-    var out = '', a = 0;
-    for (var i = 0; i < 12; i++) {
-      var p = rowProbs(a), r = Math.random(), cum = 0, next = 0;
-      for (var j = 0; j < V; j++) { cum += p[j]; if (r < cum) { next = j; break; } }
-      if (next === 0) break;
-      out += String.fromCharCode(96 + next);
-      a = next;
-    }
-    return out.length > 1 ? out : sampleName();
-  }
-
-  var hist = [];
-  function drawSpark() {
-    var w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    if (hist.length < 2) return;
-    var mx = hist[0], mn = hist[hist.length - 1];
-    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--signal').trim() || '#d9a13b';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (var i = 0; i < hist.length; i++) {
-      var x = (i / (hist.length - 1)) * (w - 2) + 1;
-      var y = 2 + ((hist[i] - mn) / (mx - mn + 1e-9)) * (h - 5);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-
-  var step = 0, MAX = 400;
-  var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  function updateNames() {
-    namesEl.textContent = '“' + sampleName() + ', ' + sampleName() + ', ' + sampleName() + '”';
-  }
-
-  if (reduced) {
-    // No animation: train silently, render the end state once.
-    var loss;
-    for (step = 0; step < MAX; step++) { loss = trainStep(0.5); if (step % 10 === 0) hist.push(loss); }
-    drawSpark();
-    readEl.textContent = 'live · bigram model trained in this tab · loss ' + loss.toFixed(2);
-    updateNames();
-    return;
-  }
-
-  function tick() {
-    if (step < MAX) {
-      var loss;
-      for (var k = 0; k < 4 && step < MAX; k++) { loss = trainStep(0.5); step++; }
-      if (step % 8 === 0 || step >= MAX) {
-        hist.push(loss);
-        drawSpark();
-        readEl.textContent = 'live · training a bigram model in this tab · step ' + step + ' · loss ' + loss.toFixed(2);
-        if (step % 40 === 0) updateNames();
-      }
-      requestAnimationFrame(tick);
-    } else {
-      readEl.textContent = 'live · bigram model trained in this tab · loss ' + hist[hist.length - 1].toFixed(2) + ' · sampling:';
-      updateNames();
-      setInterval(updateNames, 2400);
-    }
-  }
-  requestAnimationFrame(tick);
-})();
-</script>
-
 <style>
   /* ── Hero ── */
   .hero {
@@ -224,36 +109,6 @@ const formatDate = (date: string) =>
     line-height: 1.6;
     max-width: 500px;
     margin: 0;
-  }
-
-  /* Live instrument: a real model training in this tab */
-  .hero-instrument {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: var(--space-lg);
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    flex-wrap: wrap;
-  }
-  .hero-instrument canvas {
-    flex-shrink: 0;
-    opacity: 0.9;
-  }
-  .inst-read::before {
-    content: '';
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--signal);
-    margin-right: 0.5rem;
-    vertical-align: 1px;
-  }
-  .inst-names {
-    color: var(--fg);
-    letter-spacing: 0.02em;
   }
 
   /* ── Section labels ── */
