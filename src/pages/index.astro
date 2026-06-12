@@ -46,7 +46,8 @@ const formatDate = (date: string) =>
 <Base title="Amaljith Kuttamath">
   <section class="hero animate-in">
     <h1 class="hero-headline">I study how language models fail and build tools to catch it.</h1>
-    <p class="hero-sub">AI Engineer, 7 years. I design agents for production and research LLM trust at the architectural level.</p>
+    <p class="hero-sub">Seven years building AI systems. Now focused on mechanistic interpretability — finding where models break before they do it in production.</p>
+    <p class="hero-cred">MS, George Mason University &middot; ex-ISRO &middot; <a href="https://doi.org/10.1097/QMH.0000000000000525">published in Quality Management in Health Care</a></p>
     <div class="hero-instrument" id="hero-instrument" title="A real character-bigram language model, training live in this tab.">
       <canvas id="inst-spark" width="120" height="22" aria-hidden="true"></canvas>
       <span class="inst-read" id="inst-read">live &middot; warming up&hellip;</span>
@@ -75,22 +76,12 @@ const formatDate = (date: string) =>
         <a href={post.url} class="home-post">
           <div class="home-post-main">
             <span class="home-post-title">{post.frontmatter.title}</span>
+            {post.frontmatter.metric && (
+              <span class="home-post-metric">{post.frontmatter.metric}</span>
+            )}
             <span class="home-post-desc">{post.frontmatter.description}</span>
           </div>
           <time class="mono">{formatDate(post.frontmatter.date)}</time>
-        </a>
-      ))}
-    </div>
-  </section>
-
-  <section class="animate-in animate-in-delay-2">
-    <div class="section-label">Tools</div>
-    <div class="tools-grid">
-      {tools.map((tool) => (
-        <a href={tool.url} class="tool-card">
-          <span class="tool-name">{tool.url.split('/').pop()}</span>
-          <span class="tool-desc">{tool.frontmatter.description.split('.')[0]}</span>
-          <code class="tool-install">{Object.values(tool.frontmatter.install)[0] as string}</code>
         </a>
       ))}
     </div>
@@ -469,6 +460,35 @@ const formatDate = (date: string) =>
     font-family: var(--font-mono);
     font-size: var(--text-label);
     color: var(--accent-color);
+  }
+
+  /* ── Hero credibility anchor ── */
+  .hero-cred {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    margin: 0.5rem 0 0;
+    letter-spacing: 0.01em;
+  }
+
+  .hero-cred a {
+    color: var(--fg-muted);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--fg-muted) 40%, transparent);
+    text-underline-offset: 2px;
+  }
+
+  .hero-cred a:hover {
+    color: var(--fg);
+  }
+
+  /* ── Post metric badge ── */
+  .home-post-metric {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--signal);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
   }
 
   /* ── Responsive ── */
