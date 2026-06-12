@@ -131,8 +131,8 @@ if (matchedNav) {
     <nav>
       <a href="/" class="logo" aria-label="Home">Amaljith Kuttamath</a>
       <div class="nav-links">
-        <a href="/work" class:list={[{ active: (currentPath === '/work' || currentPath === '/work/') || currentPath.startsWith('/trust-bench') }]}>work</a>
-        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') || (currentPath.startsWith('/work/') && currentPath !== '/work/') }]}>blog</a>
+        <a href="/work" class:list={[{ active: (currentPath === '/work' || currentPath === '/work/') || currentPath.startsWith('/work/') || currentPath.startsWith('/trust-bench') }]}>work</a>
+        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') }]}>blog</a>
         <a href="/playground" class:list={[{ active: currentPath.startsWith('/playground') }]}>playground</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
       </div>
