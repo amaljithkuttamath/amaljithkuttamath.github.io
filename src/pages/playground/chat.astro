@@ -26,6 +26,10 @@ import Base from '../../layouts/Base.astro';
 
     <div class="lc-thread" id="thread" style="display:none"></div>
 
+    <div class="lc-starters" id="starters" style="display:none">
+      <span class="lc-nav-label">Try asking:</span>
+    </div>
+
     <form class="lc-inputrow" id="input-row" style="display:none">
       <input type="text" class="lc-textinput" id="user-input" placeholder="Ask it something, then mouse over its reply&hellip;" aria-label="Message to the model" autocomplete="off" />
       <button type="submit" class="lc-btn" id="send-btn">Send</button>
@@ -142,7 +146,7 @@ import Base from '../../layouts/Base.astro';
     margin-top: 9px; padding-top: 8px;
     border-top: 1px solid var(--fg-faint);
   }
-  .lc-quick {
+  .lc-quick, .lc-starters {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     margin-bottom: var(--space-md);
   }
@@ -151,11 +155,11 @@ import Base from '../../layouts/Base.astro';
     text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted);
   }
   :global(.lc-chip) {
-    text-decoration: none;
+    text-decoration: none; background: transparent; cursor: pointer;
     font-family: var(--font-mono); font-size: var(--text-label);
     color: var(--accent-color);
     border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
-    border-radius: var(--radius-full); padding: 2px 11px;
+    border-radius: var(--radius-full); padding: 3px 11px;
     transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
   }
   :global(.lc-chip:hover) {
@@ -226,7 +230,7 @@ import Base from '../../layouts/Base.astro';
 </style>
 
 <script is:inline type="module">
-import { AutoTokenizer, AutoModelForCausalLM, TextStreamer, LogitsProcessor, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+import { AutoTokenizer, AutoModelForCausalLM, TextStreamer, LogitsProcessor, RepetitionPenaltyLogitsProcessor, TemperatureLogitsWarper, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
 env.allowLocalModels = false;
 
@@ -243,6 +247,7 @@ const sendBtn = document.getElementById('send-btn');
 const statsEl = document.getElementById('stats');
 const legendEl = document.getElementById('legend');
 const quickEl = document.getElementById('quick');
+const startersEl = document.getElementById('starters');
 const tooltip = document.getElementById('tooltip');
 
 // Probe actual GPU capability, not just API presence: some browsers expose
@@ -282,25 +287,44 @@ const PAGES = [
 // Pages worth surfacing up front, regardless of what the model says.
 const QUICK_LINKS = ['/about', '/work', '/playground/microgpt', '/playground/tokens'];
 
+// Kept deliberately short: small models follow concise, structured prompts far
+// better than long ones. Detail and tone are taught by the few-shot turns below.
 const SYSTEM_PROMPT = [
-  "You are a friendly guide to Amaljith Kuttamath's portfolio site, running as a tiny local model inside the visitor's browser. Be brief (a sentence or two), warm, and honest. When a question relates to a page, name it and give its path so the visitor can open it.",
+  "You are the concierge for Amaljith Kuttamath's portfolio site. Answer confidently in one or two sentences. When a page fits the question, name it and include its path.",
   '',
-  'About Amaljith: an AI engineer who studies how language models fail and builds tools to measure it. Background in retrieval systems and knowledge graphs for healthcare. He started at ISRO, co-founded RadianArc (digital twins for predictive maintenance), and earned an MS in Data Analytics from George Mason University (thesis on RAG for healthcare). His focus now is mechanistic interpretability, LLM evaluation, and model trust and safety. Contact: kuttamath.amaljith@gmail.com. GitHub: amaljithkuttamath.',
+  'Amaljith is an AI engineer who studies how language models fail and builds tools to measure it — focused on mechanistic interpretability, evaluation, and model trust. Email: kuttamath.amaljith@gmail.com.',
   '',
-  'Pages on this site:',
-  '- /about — bio, background, resume, contact',
-  '- /work — all his writing and projects',
-  '- /playground — interactive in-browser ML demos',
-  '- /playground/microgpt — train a tiny transformer live in the browser',
-  '- /playground/tokens — compare real production tokenizers side by side',
-  '- /work/watch-model-think — sparse autoencoders looking inside GPT-2',
-  "- /work/sae-explorer — one neuron for 'and' across six languages",
-  '- /work/calibration-probe — when an LLM says 90%, should you believe it?',
-  '- /work/why-trust-bench — the case for probing what LLMs do internally',
+  'Pages:',
+  '/about — bio, background, resume, contact',
+  '/work — all writing and projects',
+  '/playground — interactive in-browser ML demos',
+  '/work/watch-model-think — looking inside GPT-2 with sparse autoencoders',
+  '/work/calibration-probe — can you trust an LLM when it says 90%?',
+  '/playground/tokens — compare real production tokenizers',
 ].join('\n');
+
+// Two-shot priming. Research on sub-1B models shows 1–2 examples are the sweet
+// spot for locking in format (concise + a real path) and tone (helpful, not
+// hedging). These turns are context only; they are never drawn as chat bubbles.
+const FEW_SHOT = [
+  { role: 'user', content: 'who built this site?' },
+  { role: 'assistant', content: 'Amaljith Kuttamath — an AI engineer focused on how language models fail and how to measure it. His background, resume, and contact details are on the About page: /about' },
+  { role: 'user', content: 'where can I see his interpretability work?' },
+  { role: 'assistant', content: 'Start with "Watch a Model Think" (/work/watch-model-think), where he uses sparse autoencoders to look inside GPT-2. The full list is at /work.' },
+];
 
 const messages = [
   { role: 'system', content: SYSTEM_PROMPT },
+  ...FEW_SHOT,
+];
+
+// Starter prompts the guide handles well (they line up with its context and the
+// few-shot examples), to give visitors an obvious way in.
+const STARTERS = [
+  'Who built this site?',
+  'Show me the interpretability work',
+  'What can I do on this playground?',
+  'How do I get in touch?',
 ];
 
 // Map a probability in [0,1] to a confidence tint. Low probability (a guess)
@@ -440,8 +464,17 @@ loadBtn.addEventListener('click', async () => {
     quickEl.appendChild(a);
   }
 
+  // Starter prompts — an obvious way in, and ones the guide answers well.
+  startersEl.style.display = 'flex';
+  for (const q of STARTERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'lc-chip'; b.textContent = q;
+    b.addEventListener('click', () => { userInput.value = q; inputRow.requestSubmit(); });
+    startersEl.appendChild(b);
+  }
+
   const intro = addBubble('assistant');
-  intro.textContent = 'Hi! I’m a tiny model running on your ' + (hasWebGPU ? 'GPU' : 'CPU') + ', here to help you find your way around Amaljith’s site. Ask me what he works on or where to find something — then hover the words in my reply to see how sure I was, and what I almost said instead.';
+  intro.textContent = 'Hi — I’m running locally on your ' + (hasWebGPU ? 'GPU' : 'CPU') + ' to help you find your way around Amaljith’s site. Ask what he works on or where to find something, and I’ll point you to the page. Hover any word in my reply to see how sure I was.';
   userInput.focus();
 });
 
@@ -453,6 +486,7 @@ inputRow.addEventListener('submit', async (e) => {
   generating = true;
   sendBtn.disabled = true;
   userInput.value = '';
+  startersEl.style.display = 'none';   // the conversation has started
   const u = addBubble('user'); u.textContent = text;
   messages.push({ role: 'user', content: text });
 
@@ -461,7 +495,7 @@ inputRow.addEventListener('submit', async (e) => {
 
   const inputs = tokenizer.apply_chat_template(messages, { add_generation_prompt: true, return_dict: true });
   const promptLen = inputs.input_ids.dims.at(-1);
-  const probe = new DistributionProbe(48);
+  const probe = new DistributionProbe(64);
 
   let reply = '';
   let tokenCount = 0;
@@ -480,22 +514,30 @@ inputRow.addEventListener('submit', async (e) => {
   });
 
   try {
-    // temperature 1.0 => no temperature warper => the probe sees raw logits.
-    // top_k keeps a 360M model coherent without distorting the captured numbers.
+    // The probe runs FIRST, so it photographs the model's raw logits — honest
+    // confidence numbers. Repetition penalty and temperature run AFTER it, so
+    // they shape sampling (coherent answers) without touching what we display.
+    // SmolLM2's own card recommends temperature ~0.2; we sample low and keep the
+    // X-ray truthful. generation_config.temperature stays 1.0 so the library
+    // adds no warper of its own ahead of the probe.
     const out = await model.generate({
       ...inputs,
-      max_new_tokens: 200,
+      max_new_tokens: 220,
       do_sample: true,
       temperature: 1.0,
-      top_k: 40,
+      top_k: 48,
       streamer,
-      logits_processor: [probe],
+      logits_processor: [
+        probe,
+        new RepetitionPenaltyLogitsProcessor(1.15),
+        new TemperatureLogitsWarper(0.3),
+      ],
     });
 
     const seq = out.tolist()[0].map(Number);
     const genIds = seq.slice(promptLen);
     renderXray(el, genIds, probe.steps);
-    renderNav(el, reply);
+    renderNav(el, reply, text);
     messages.push({ role: 'assistant', content: reply });
   } catch (err) {
     el.textContent = 'generation failed: ' + (err && err.message || err);
@@ -534,10 +576,11 @@ function renderXray(el, genIds, steps) {
   }
 }
 
-// If a reply points at real pages, surface them as clickable chips under the
-// message — reliable navigation even when the small model phrases things loosely.
-function renderNav(el, reply) {
-  const hay = reply.toLowerCase();
+// Surface real pages as clickable chips under a reply. We scan BOTH the model's
+// answer and the visitor's question, so the right links appear even when the
+// small model forgets to name a page — intent alone is enough.
+function renderNav(el, reply, query) {
+  const hay = (reply + ' ' + (query || '')).toLowerCase();
   const hits = PAGES.filter((pg) => pg.match.some((m) => hay.includes(m)));
   if (!hits.length) return;
   const row = document.createElement('div');
