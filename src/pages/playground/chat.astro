@@ -2,11 +2,11 @@
 import Base from '../../layouts/Base.astro';
 ---
 
-<Base title="Local Chat | Amaljith Kuttamath" description="Chat with a language model running entirely in your browser. No server, no API, nothing you type leaves this page. SmolLM2 on WebGPU via Transformers.js.">
+<Base title="Probability X-ray | Amaljith Kuttamath" description="Chat with a language model running entirely in your browser, and watch the raw probability distribution behind every word it picks. Each token is colored by how confident the model was; hover to see what it almost said instead. SmolLM2 on WebGPU via Transformers.js.">
   <div class="lc">
     <div class="lc-head">
-      <h1>Chat with a Local Model</h1>
-      <p>This is a real language model running entirely in your browser. No server, no API key, no data leaving this page. The weights download once from the Hugging Face CDN, get cached by your browser, and run on your GPU via WebGPU. It is a small model, so it is confidently wrong about plenty of things, which is half the lesson.</p>
+      <h1>Probability X-ray</h1>
+      <p>A real language model running entirely in your browser — no server, no API key, nothing you type leaves this page. But a chat box hides the interesting part. This one doesn't: every word it generates is <strong>colored by how sure it was</strong>, and you can hover any word to see the alternatives it nearly said instead, with the exact probabilities. You are looking straight at the distribution a model samples from, on text you wrote, computed live on your own GPU.</p>
     </div>
 
     <div class="lc-loader" id="loader">
@@ -27,16 +27,24 @@ import Base from '../../layouts/Base.astro';
     <div class="lc-thread" id="thread" style="display:none"></div>
 
     <form class="lc-inputrow" id="input-row" style="display:none">
-      <input type="text" class="lc-textinput" id="user-input" placeholder="Say something to the model&hellip;" aria-label="Message to the model" autocomplete="off" />
+      <input type="text" class="lc-textinput" id="user-input" placeholder="Ask it something, then mouse over its reply&hellip;" aria-label="Message to the model" autocomplete="off" />
       <button type="submit" class="lc-btn" id="send-btn">Send</button>
     </form>
+
+    <div class="lc-legend" id="legend" style="display:none">
+      <span class="lc-legend-label">model confidence per word</span>
+      <span class="lc-legend-bar"></span>
+      <span class="lc-legend-ends"><em>a wild guess</em><em>dead certain</em></span>
+    </div>
 
     <div class="lc-stats" id="stats"></div>
 
     <div class="lc-note">
-      <strong>What you're looking at:</strong> a 4-bit quantized SmolLM2 running through <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener noreferrer">Transformers.js</a> and ONNX Runtime Web, accelerated by WebGPU when your browser supports it (falls back to WASM, slower). Frontier models are roughly a thousand times bigger, which is why this one feels like chatting with a well-read goldfish. The architecture is the same. The difference is scale.
+      <strong>How to read it:</strong> at every step the model produces a probability for all ~49,000 possible next tokens. It samples one, and that becomes the word. Here, each generated token is tinted by the probability the model assigned to the word it chose — calm green when it was confident, hot red when it was basically guessing. Hover a word to open the distribution it sampled from: the chosen token plus the runners-up it was weighing. Numbers are the model's <em>raw</em> probabilities (temperature&nbsp;1), so they are honest, not cosmetic. This is the same lens behind <a href="/work/calibration-probe">calibration probing</a> and <a href="/work/watch-model-think">watching a model think</a> — here it runs on a 4-bit <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener noreferrer">Transformers.js</a> model on your hardware. Frontier models are ~1000× bigger; the architecture is identical, the difference is scale.
     </div>
   </div>
+
+  <div class="lc-tip" id="tooltip" aria-hidden="true"></div>
 </Base>
 
 <style>
@@ -44,6 +52,7 @@ import Base from '../../layouts/Base.astro';
   .lc-head { margin-bottom: var(--space-lg); }
   .lc-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
   .lc-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .lc-head strong { color: var(--fg); }
 
   .lc-loader {
     background: var(--bg-elevated); border: 1px solid var(--fg-faint);
@@ -88,7 +97,7 @@ import Base from '../../layouts/Base.astro';
   }
   :global(.lc-msg) {
     max-width: 85%; padding: 8px 14px; border-radius: var(--radius-md);
-    font-size: var(--text-small); line-height: 1.6; white-space: pre-wrap;
+    font-size: var(--text-small); line-height: 1.85; white-space: pre-wrap;
     word-break: break-word;
   }
   :global(.lc-msg.user) {
@@ -106,6 +115,14 @@ import Base from '../../layouts/Base.astro';
   }
   @keyframes lc-blink { 50% { opacity: 0; } }
 
+  /* Each generated token, tinted by the model's confidence. */
+  :global(.lc-tok) {
+    border-radius: 3px; cursor: help;
+    box-shadow: inset 0 -2px 0 0 transparent;
+    transition: box-shadow var(--duration) var(--ease);
+  }
+  :global(.lc-tok:hover) { box-shadow: inset 0 -2px 0 0 var(--accent-color); }
+
   .lc-inputrow { display: flex; gap: 10px; margin-bottom: 8px; }
   .lc-textinput {
     flex: 1; background: var(--bg-elevated); color: var(--fg);
@@ -114,6 +131,20 @@ import Base from '../../layouts/Base.astro';
     transition: border-color var(--duration) var(--ease);
   }
   .lc-textinput:focus { border-color: var(--accent-color); }
+
+  .lc-legend {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: var(--space-sm);
+    font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg-muted);
+  }
+  .lc-legend-label { text-transform: uppercase; letter-spacing: 0.05em; }
+  .lc-legend-bar {
+    flex: 1; min-width: 120px; max-width: 240px; height: 8px; border-radius: var(--radius-full);
+    background: linear-gradient(90deg,
+      hsl(2 75% 52%), hsl(45 80% 50%), hsl(95 60% 42%), hsl(130 55% 40%));
+  }
+  .lc-legend-ends { display: flex; justify-content: space-between; min-width: 150px; flex: 1; }
+  .lc-legend-ends em { font-style: italic; }
 
   .lc-stats {
     font-family: var(--font-mono); font-size: var(--text-label);
@@ -127,10 +158,44 @@ import Base from '../../layouts/Base.astro';
     color: var(--fg-muted); line-height: 1.7;
   }
   .lc-note strong { color: var(--fg); }
+  .lc-note em { font-style: italic; }
+
+  /* Floating distribution tooltip */
+  .lc-tip {
+    position: fixed; z-index: 50; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s ease;
+    background: var(--bg); border: 1px solid var(--fg-muted);
+    border-radius: var(--radius-md); padding: 9px 11px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+    width: 232px; max-width: 80vw;
+  }
+  .lc-tip.show { opacity: 1; }
+  .lc-tip-head {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted); margin-bottom: 7px;
+    border-bottom: 1px solid var(--fg-faint); padding-bottom: 6px;
+  }
+  :global(.lc-tip-row) {
+    display: grid; grid-template-columns: 78px 1fr 38px; align-items: center;
+    gap: 7px; margin: 3px 0;
+    font-family: var(--font-mono); font-size: var(--text-label);
+  }
+  :global(.lc-tip-tok) {
+    color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-align: right; direction: rtl;
+  }
+  :global(.lc-tip-row.chosen .lc-tip-tok) { color: var(--accent-color); font-weight: 600; }
+  :global(.lc-tip-track) {
+    height: 9px; background: var(--bg-elevated);
+    border-radius: var(--radius-full); overflow: hidden;
+  }
+  :global(.lc-tip-fill) { height: 100%; border-radius: var(--radius-full); }
+  :global(.lc-tip-pct) { color: var(--fg-muted); text-align: right; }
+  :global(.lc-tip-ws) { color: var(--fg-faint); }
 </style>
 
 <script is:inline type="module">
-import { pipeline, TextStreamer, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+import { AutoTokenizer, AutoModelForCausalLM, TextStreamer, LogitsProcessor, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
 env.allowLocalModels = false;
 
@@ -145,6 +210,8 @@ const inputRow = document.getElementById('input-row');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const statsEl = document.getElementById('stats');
+const legendEl = document.getElementById('legend');
+const tooltip = document.getElementById('tooltip');
 
 // Probe actual GPU capability, not just API presence: some browsers expose
 // navigator.gpu with no adapter behind it, and some adapters lack fp16.
@@ -159,25 +226,87 @@ modelSelect.addEventListener('change', () => {
   loadBtn.textContent = 'Load model (' + opt.dataset.size + ')';
 });
 
-let generator = null;
+let tokenizer = null;
+let model = null;
 let generating = false;
 const messages = [
   { role: 'system', content: 'You are a small helpful language model running locally in the browser on a portfolio site. Keep answers short and friendly.' },
 ];
 
-function addMsg(role, text) {
+// Map a probability in [0,1] to a confidence tint. Low probability (a guess)
+// runs hot and saturated so it draws the eye; high probability cools to a calm
+// green. Uncertain tokens are the interesting ones, so they shout louder.
+function confColor(p) {
+  const hue = 2 + Math.max(0, Math.min(1, p)) * 128;   // red -> green
+  const sat = 78 - 28 * p;                              // guesses more saturated
+  const alpha = 0.30 - 0.16 * p;                        // guesses more opaque
+  return 'hsla(' + hue.toFixed(0) + ', ' + sat.toFixed(0) + '%, 48%, ' + alpha.toFixed(3) + ')';
+}
+function fillColor(p) {
+  const hue = 2 + Math.max(0, Math.min(1, p)) * 128;
+  return 'hsl(' + hue.toFixed(0) + ', 70%, 46%)';
+}
+// Make whitespace/newlines legible inside the tooltip token labels.
+function showWhitespace(s) {
+  return s.replace(/\n/g, '↵').replace(/ /g, '·');
+}
+
+function addBubble(role) {
   const el = document.createElement('div');
   el.className = 'lc-msg ' + role;
-  el.textContent = text;
   thread.appendChild(el);
   el.scrollIntoView({ behavior: 'smooth', block: 'end' });
   return el;
+}
+
+// A logits processor that does not touch the logits — it just photographs the
+// raw next-token distribution at every step. Because custom processors run
+// after the (here absent) temperature warper, these are the model's true
+// probabilities, not sampling-warped ones.
+class DistributionProbe extends LogitsProcessor {
+  constructor(k) { super(); this.k = k; this.steps = []; }
+  _call(input_ids, logits) {
+    const dims = logits.dims;
+    const vocab = dims[dims.length - 1];
+    const data = logits.data; // batch size 1 -> first `vocab` entries
+    // One pass: running softmax denominator + an insertion-sorted top-k.
+    let mx = -Infinity;
+    for (let i = 0; i < vocab; i++) { const v = data[i]; if (v > mx) mx = v; }
+    const idx = new Int32Array(this.k).fill(-1);
+    const val = new Float32Array(this.k).fill(-Infinity);
+    let sum = 0;
+    for (let i = 0; i < vocab; i++) {
+      const v = data[i];
+      sum += Math.exp(v - mx);
+      if (v > val[this.k - 1]) {
+        let j = this.k - 1;
+        while (j > 0 && val[j - 1] < v) { val[j] = val[j - 1]; idx[j] = idx[j - 1]; j--; }
+        val[j] = v; idx[j] = i;
+      }
+    }
+    const cands = [];
+    for (let j = 0; j < this.k; j++) {
+      if (idx[j] < 0) break;
+      cands.push({ id: idx[j], p: Math.exp(val[j] - mx) / sum });
+    }
+    this.steps.push(cands);
+    return logits;
+  }
 }
 
 loadBtn.addEventListener('click', async () => {
   loadBtn.disabled = true;
   modelSelect.disabled = true;
   progress.style.display = 'block';
+  const modelId = modelSelect.value;
+
+  try {
+    progressText.textContent = 'loading tokenizer…';
+    tokenizer = await AutoTokenizer.from_pretrained(modelId);
+  } catch (err) {
+    progressText.textContent = 'tokenizer failed: ' + (err && err.message || err);
+    loadBtn.disabled = false; modelSelect.disabled = false; return;
+  }
 
   // Try configs in order of preference; q4f16 only on GPUs that support fp16 shaders.
   const attempts = [];
@@ -190,7 +319,7 @@ loadBtn.addEventListener('click', async () => {
   for (const cfg of attempts) {
     const fileProgress = {};
     try {
-      generator = await pipeline('text-generation', modelSelect.value, {
+      model = await AutoModelForCausalLM.from_pretrained(modelId, {
         dtype: cfg.dtype,
         device: cfg.device,
         progress_callback: (p) => {
@@ -211,13 +340,13 @@ loadBtn.addEventListener('click', async () => {
       break;
     } catch (err) {
       errors.push(cfg.device + '/' + cfg.dtype + ': ' + (err && err.message || err));
-      generator = null;
+      model = null;
       progressBar.style.width = '0%';
       progressText.textContent = cfg.device + ' ' + cfg.dtype + ' failed, trying next config…';
     }
   }
 
-  if (!generator) {
+  if (!model) {
     progressText.textContent = 'all configs failed — ' + errors.join(' | ');
     loadBtn.disabled = false;
     modelSelect.disabled = false;
@@ -229,34 +358,40 @@ loadBtn.addEventListener('click', async () => {
   document.getElementById('loader').style.display = 'none';
   thread.style.display = 'flex';
   inputRow.style.display = 'flex';
-  addMsg('assistant', 'Hi! I’m a tiny model running on your ' + (hasWebGPU ? 'GPU' : 'CPU') + '. Ask me something. Keep your expectations proportional to my parameter count.');
+  legendEl.style.display = 'flex';
+  const intro = addBubble('assistant');
+  intro.textContent = 'Hi! I’m a tiny model running on your ' + (hasWebGPU ? 'GPU' : 'CPU') + '. Ask me anything, then hover the words in my reply to see how sure I was — and what I almost said instead.';
   userInput.focus();
 });
 
 inputRow.addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = userInput.value.trim();
-  if (!text || generating || !generator) return;
+  if (!text || generating || !model) return;
 
   generating = true;
   sendBtn.disabled = true;
   userInput.value = '';
-  addMsg('user', text);
+  const u = addBubble('user'); u.textContent = text;
   messages.push({ role: 'user', content: text });
 
-  const el = addMsg('assistant', '');
+  const el = addBubble('assistant');
   el.classList.add('thinking');
+
+  const inputs = tokenizer.apply_chat_template(messages, { add_generation_prompt: true, return_dict: true });
+  const promptLen = inputs.input_ids.dims.at(-1);
+  const probe = new DistributionProbe(48);
 
   let reply = '';
   let tokenCount = 0;
   const t0 = performance.now();
-  const streamer = new TextStreamer(generator.tokenizer, {
+  const streamer = new TextStreamer(tokenizer, {
     skip_prompt: true,
     skip_special_tokens: true,
     callback_function: (chunk) => {
       reply += chunk;
       tokenCount++;
-      el.textContent = reply;
+      el.textContent = reply;          // plain live preview; recolored when done
       el.scrollIntoView({ block: 'end' });
       const dt = (performance.now() - t0) / 1000;
       if (dt > 0.3) statsEl.textContent = (tokenCount / dt).toFixed(1) + ' tokens/sec on ' + deviceBadge.textContent;
@@ -264,7 +399,21 @@ inputRow.addEventListener('submit', async (e) => {
   });
 
   try {
-    await generator(messages, { max_new_tokens: 256, do_sample: true, temperature: 0.7, top_p: 0.9, streamer });
+    // temperature 1.0 => no temperature warper => the probe sees raw logits.
+    // top_k keeps a 360M model coherent without distorting the captured numbers.
+    const out = await model.generate({
+      ...inputs,
+      max_new_tokens: 200,
+      do_sample: true,
+      temperature: 1.0,
+      top_k: 40,
+      streamer,
+      logits_processor: [probe],
+    });
+
+    const seq = out.tolist()[0].map(Number);
+    const genIds = seq.slice(promptLen);
+    renderXray(el, genIds, probe.steps);
     messages.push({ role: 'assistant', content: reply });
   } catch (err) {
     el.textContent = 'generation failed: ' + (err && err.message || err);
@@ -274,5 +423,79 @@ inputRow.addEventListener('submit', async (e) => {
   generating = false;
   sendBtn.disabled = false;
   userInput.focus();
+});
+
+// Replace the plain streamed text with one tinted span per generated token,
+// each carrying the distribution it was sampled from for the hover tooltip.
+function renderXray(el, genIds, steps) {
+  el.textContent = '';
+  const n = Math.min(genIds.length, steps.length);
+  for (let i = 0; i < n; i++) {
+    const id = genIds[i];
+    const piece = tokenizer.decode([id], { skip_special_tokens: false });
+    const visible = tokenizer.decode([id], { skip_special_tokens: true });
+    if (visible === '') continue; // EOS / special tokens carry no text
+
+    const dist = steps[i] || [];
+    const hit = dist.find((c) => c.id === id);
+    const p = hit ? hit.p : (dist.length ? dist[dist.length - 1].p : 0);
+
+    const span = document.createElement('span');
+    span.className = 'lc-tok';
+    span.textContent = piece;
+    span.style.background = confColor(p);
+    // Stash the top alternatives (decoded lazily on hover to keep render cheap).
+    span.dataset.p = p.toFixed(4);
+    span.dataset.chosen = String(id);
+    span.dataset.dist = JSON.stringify(dist.slice(0, 6).map((c) => [c.id, c.p]));
+    el.appendChild(span);
+  }
+}
+
+// One shared tooltip, populated on hover from the span's stashed distribution.
+function showTip(span) {
+  const dist = JSON.parse(span.dataset.dist || '[]');
+  const chosen = Number(span.dataset.chosen);
+  const p = Number(span.dataset.p);
+
+  let rows = '';
+  for (const [id, prob] of dist) {
+    const label = showWhitespace(tokenizer.decode([id], { skip_special_tokens: false })) || '∅';
+    const isChosen = id === chosen;
+    rows += '<div class="lc-tip-row' + (isChosen ? ' chosen' : '') + '">'
+      + '<span class="lc-tip-tok">' + escapeHtml(label) + '</span>'
+      + '<span class="lc-tip-track"><span class="lc-tip-fill" style="width:' + (prob * 100).toFixed(1) + '%;background:' + fillColor(prob) + '"></span></span>'
+      + '<span class="lc-tip-pct">' + (prob * 100).toFixed(1) + '</span>'
+      + '</div>';
+  }
+  tooltip.innerHTML = '<div class="lc-tip-head">chose &ldquo;' + escapeHtml(showWhitespace(tokenizer.decode([chosen], { skip_special_tokens: false }))) + '&rdquo; · '
+    + (p * 100).toFixed(1) + '% · what it weighed:</div>' + rows;
+
+  const r = span.getBoundingClientRect();
+  tooltip.classList.add('show');
+  tooltip.setAttribute('aria-hidden', 'false');
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  let left = r.left + r.width / 2 - tw / 2;
+  left = Math.max(8, Math.min(window.innerWidth - tw - 8, left));
+  let top = r.top - th - 8;
+  if (top < 8) top = r.bottom + 8; // flip below if no room above
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
+}
+function hideTip() {
+  tooltip.classList.remove('show');
+  tooltip.setAttribute('aria-hidden', 'true');
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// Delegate hover handling so it works for every token span without per-span listeners.
+thread.addEventListener('mouseover', (e) => {
+  const span = e.target.closest('.lc-tok');
+  if (span) showTip(span);
+});
+thread.addEventListener('mouseout', (e) => {
+  if (e.target.closest('.lc-tok')) hideTip();
 });
 </script>
