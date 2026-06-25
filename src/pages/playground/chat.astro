@@ -31,6 +31,10 @@ import Base from '../../layouts/Base.astro';
       <button type="submit" class="lc-btn" id="send-btn">Send</button>
     </form>
 
+    <div class="lc-quick" id="quick" style="display:none">
+      <span class="lc-nav-label">Jump to:</span>
+    </div>
+
     <div class="lc-legend" id="legend" style="display:none">
       <span class="lc-legend-label">model confidence per word</span>
       <span class="lc-legend-bar"></span>
@@ -132,6 +136,33 @@ import Base from '../../layouts/Base.astro';
   }
   .lc-textinput:focus { border-color: var(--accent-color); }
 
+  /* Navigation chips: under a reply (.lc-nav) and the persistent row (.lc-quick) */
+  :global(.lc-nav) {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px solid var(--fg-faint);
+  }
+  .lc-quick {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-bottom: var(--space-md);
+  }
+  :global(.lc-nav-label) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted);
+  }
+  :global(.lc-chip) {
+    text-decoration: none;
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--accent-color);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+    border-radius: var(--radius-full); padding: 2px 11px;
+    transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  :global(.lc-chip:hover) {
+    background: var(--accent-subtle);
+    border-color: var(--accent-color);
+  }
+
   .lc-legend {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     margin-bottom: var(--space-sm);
@@ -211,6 +242,7 @@ const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const statsEl = document.getElementById('stats');
 const legendEl = document.getElementById('legend');
+const quickEl = document.getElementById('quick');
 const tooltip = document.getElementById('tooltip');
 
 // Probe actual GPU capability, not just API presence: some browsers expose
@@ -229,8 +261,46 @@ modelSelect.addEventListener('change', () => {
 let tokenizer = null;
 let model = null;
 let generating = false;
+
+// Every page the guide is allowed to point visitors to. `match` strings let us
+// detect a recommendation even when the tiny model phrases it loosely (by title
+// keyword) rather than emitting the exact path.
+const PAGES = [
+  { path: '/about',                    label: 'About Amaljith',        match: ['/about', 'about page', 'bio', 'background', 'resume', 'contact'] },
+  { path: '/work',                     label: 'All work',              match: ['/work', 'all his work', 'his writing', 'projects', 'blog'] },
+  { path: '/playground',               label: 'Playground',            match: ['/playground', 'playground', 'experiments', 'demos'] },
+  { path: '/playground/microgpt',      label: 'microGPT Trainer',      match: ['/playground/microgpt', 'microgpt', 'train a transformer', 'train a tiny'] },
+  { path: '/playground/tokens',        label: 'Tokenizer Arena',       match: ['/playground/tokens', 'tokenizer arena', 'tokenizers'] },
+  { path: '/work/watch-model-think',   label: 'Watch a Model Think',   match: ['/work/watch-model-think', 'watch a model think', 'watch a language model', 'sparse autoencoder'] },
+  { path: '/work/sae-explorer',        label: 'SAE Explorer',          match: ['/work/sae-explorer', 'sae explorer', 'single neuron', 'six languages'] },
+  { path: '/work/calibration-probe',   label: 'Calibration Probe',     match: ['/work/calibration-probe', 'calibration', 'says 90%'] },
+  { path: '/work/why-trust-bench',     label: 'Why Trust Bench',       match: ['/work/why-trust-bench', 'trust bench', 'probing llm internals'] },
+  { path: '/work/tokenizer-arena',     label: 'Tokenizer write-up',    match: ['/work/tokenizer-arena', 'comparing tokenizers'] },
+  { path: '/work/hybrid-attention-150m', label: 'Hybrid Attention',    match: ['/work/hybrid-attention', 'hybrid attention'] },
+];
+
+// Pages worth surfacing up front, regardless of what the model says.
+const QUICK_LINKS = ['/about', '/work', '/playground/microgpt', '/playground/tokens'];
+
+const SYSTEM_PROMPT = [
+  "You are a friendly guide to Amaljith Kuttamath's portfolio site, running as a tiny local model inside the visitor's browser. Be brief (a sentence or two), warm, and honest. When a question relates to a page, name it and give its path so the visitor can open it.",
+  '',
+  'About Amaljith: an AI engineer who studies how language models fail and builds tools to measure it. Background in retrieval systems and knowledge graphs for healthcare. He started at ISRO, co-founded RadianArc (digital twins for predictive maintenance), and earned an MS in Data Analytics from George Mason University (thesis on RAG for healthcare). His focus now is mechanistic interpretability, LLM evaluation, and model trust and safety. Contact: kuttamath.amaljith@gmail.com. GitHub: amaljithkuttamath.',
+  '',
+  'Pages on this site:',
+  '- /about — bio, background, resume, contact',
+  '- /work — all his writing and projects',
+  '- /playground — interactive in-browser ML demos',
+  '- /playground/microgpt — train a tiny transformer live in the browser',
+  '- /playground/tokens — compare real production tokenizers side by side',
+  '- /work/watch-model-think — sparse autoencoders looking inside GPT-2',
+  "- /work/sae-explorer — one neuron for 'and' across six languages",
+  '- /work/calibration-probe — when an LLM says 90%, should you believe it?',
+  '- /work/why-trust-bench — the case for probing what LLMs do internally',
+].join('\n');
+
 const messages = [
-  { role: 'system', content: 'You are a small helpful language model running locally in the browser on a portfolio site. Keep answers short and friendly.' },
+  { role: 'system', content: SYSTEM_PROMPT },
 ];
 
 // Map a probability in [0,1] to a confidence tint. Low probability (a guess)
@@ -359,8 +429,19 @@ loadBtn.addEventListener('click', async () => {
   thread.style.display = 'flex';
   inputRow.style.display = 'flex';
   legendEl.style.display = 'flex';
+
+  // Persistent quick links so navigation always works, model or not.
+  quickEl.style.display = 'flex';
+  for (const path of QUICK_LINKS) {
+    const pg = PAGES.find((p) => p.path === path);
+    if (!pg) continue;
+    const a = document.createElement('a');
+    a.className = 'lc-chip'; a.href = pg.path; a.textContent = pg.label;
+    quickEl.appendChild(a);
+  }
+
   const intro = addBubble('assistant');
-  intro.textContent = 'Hi! I’m a tiny model running on your ' + (hasWebGPU ? 'GPU' : 'CPU') + '. Ask me anything, then hover the words in my reply to see how sure I was — and what I almost said instead.';
+  intro.textContent = 'Hi! I’m a tiny model running on your ' + (hasWebGPU ? 'GPU' : 'CPU') + ', here to help you find your way around Amaljith’s site. Ask me what he works on or where to find something — then hover the words in my reply to see how sure I was, and what I almost said instead.';
   userInput.focus();
 });
 
@@ -414,6 +495,7 @@ inputRow.addEventListener('submit', async (e) => {
     const seq = out.tolist()[0].map(Number);
     const genIds = seq.slice(promptLen);
     renderXray(el, genIds, probe.steps);
+    renderNav(el, reply);
     messages.push({ role: 'assistant', content: reply });
   } catch (err) {
     el.textContent = 'generation failed: ' + (err && err.message || err);
@@ -450,6 +532,25 @@ function renderXray(el, genIds, steps) {
     span.dataset.dist = JSON.stringify(dist.slice(0, 6).map((c) => [c.id, c.p]));
     el.appendChild(span);
   }
+}
+
+// If a reply points at real pages, surface them as clickable chips under the
+// message — reliable navigation even when the small model phrases things loosely.
+function renderNav(el, reply) {
+  const hay = reply.toLowerCase();
+  const hits = PAGES.filter((pg) => pg.match.some((m) => hay.includes(m)));
+  if (!hits.length) return;
+  const row = document.createElement('div');
+  row.className = 'lc-nav';
+  row.appendChild(Object.assign(document.createElement('span'), { className: 'lc-nav-label', textContent: 'Open:' }));
+  for (const pg of hits.slice(0, 4)) {
+    const a = document.createElement('a');
+    a.className = 'lc-chip';
+    a.href = pg.path;
+    a.textContent = pg.label;
+    row.appendChild(a);
+  }
+  el.appendChild(row);
 }
 
 // One shared tooltip, populated on hover from the span's stashed distribution.
