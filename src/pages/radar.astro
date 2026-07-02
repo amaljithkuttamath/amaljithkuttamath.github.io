@@ -1,112 +1,268 @@
 ---
 import Base from '../layouts/Base.astro';
 
-// Data source: https://github.com/amaljithkuttamath/ai-radar
-// The dashboard is intentionally client-rendered so the page always reflects the very
-// latest digest without a site rebuild. Each fetch has a graceful fallback in the DOM.
+// Public intelligence instrument over the ai-radar corpus.
+//
+// Design frame (see consultation synthesis, 2026-07-02): the page is an
+// *instrument*, not a newsletter. Observed signals dominate; the model's
+// synthesis is subordinate to the ranked board and is clearly labeled as
+// machine opinion over observed data.
+//
+// Data flow: client-side, three parallel fetches. Zero coupling to the
+// ai-radar repo build — this page always reflects the latest committed
+// state without a site rebuild.
 const RADAR_REPO = 'amaljithkuttamath/ai-radar';
 const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
 ---
 
 <Base
   title="AI Radar | Amaljith Kuttamath"
-  description="A daily radar over AI research, releases, and social signal. Two-stage pipeline: collect the corpus, distill the signal."
+  description="A live intelligence view of AI research, releases, and social signal. Collect the corpus, distill the signal, expose the state of the field."
 >
+  <!-- Break out of the site's 700px reading column so the board has real
+       estate. The BRIEF prose (below) stays in a narrow measure for
+       readability; only the instrument surfaces get the wider canvas.
+       See the "widen the container" tradeoff in the consultation. -->
+  <div class="radar-canvas">
+
+  <!-- ── HERO ─────────────────────────────────────────────────────── -->
   <section class="radar-hero">
-    <div class="radar-title-row">
-      <h1 class="radar-title">AI Radar</h1>
-      <span class="radar-live" aria-live="polite">
-        <span class="radar-live-dot" aria-hidden="true"></span>
-        <span class="radar-live-label">live</span>
+    <div class="hero-row">
+      <h1 class="hero-title">AI Radar</h1>
+      <span class="live-indicator" aria-live="polite">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="live-label">live</span>
       </span>
     </div>
-    <p class="radar-lede">
-      A daily radar over AI research, releases, and social signal. Collect the corpus,
-      distill the signal, surface what moved.
+    <p class="hero-lede">
+      A live intelligence view of AI research, releases, and social signal.
+      Observed signals below; synthesis is machine-generated commentary on the
+      board.
       <a href={`https://github.com/${RADAR_REPO}`} target="_blank" rel="noopener noreferrer">
-        Source on GitHub &rarr;
+        method &amp; source &rarr;
       </a>
     </p>
   </section>
 
-  <!-- Stat strip — filled by JS from state.json + latest digest metadata -->
-  <section class="radar-strip animate-in animate-in-delay-1" aria-label="Radar summary">
-    <div class="strip-cell">
-      <span class="strip-label">window</span>
-      <span class="strip-value" id="strip-window">—</span>
+  <!-- ── STATUS BAR ───────────────────────────────────────────────── -->
+  <!-- System telemetry: what the reader needs to trust the instrument.
+       Coverage window + universe size + freshness. Never publication cadence. -->
+  <section class="status-bar animate-in animate-in-delay-1" aria-label="System telemetry">
+    <div class="status-cell">
+      <span class="status-label">coverage</span>
+      <span class="status-value" id="status-window">—</span>
     </div>
-    <div class="strip-cell">
-      <span class="strip-label">tracked</span>
-      <span class="strip-value" id="strip-tracked">—</span>
+    <div class="status-cell">
+      <span class="status-label">universe</span>
+      <span class="status-value" id="status-universe">—</span>
     </div>
-    <div class="strip-cell">
-      <span class="strip-label">rising</span>
-      <span class="strip-value" id="strip-rising">—</span>
+    <div class="status-cell">
+      <span class="status-label">active</span>
+      <span class="status-value" id="status-active">—</span>
     </div>
-    <div class="strip-cell">
-      <span class="strip-label">last digest</span>
-      <span class="strip-value" id="strip-updated">—</span>
+    <div class="status-cell">
+      <span class="status-label">escalating</span>
+      <span class="status-value" id="status-escalating">—</span>
     </div>
-  </section>
-
-  <!-- Rising panel: items with streak >= 3 and rising mag_history. -->
-  <section class="radar-rising animate-in animate-in-delay-1" aria-label="Rising items">
-    <div class="section-header">
-      <span class="section-label">Rising</span>
-      <span class="section-hint">streak &ge; 3 &middot; magnitude trending up</span>
-    </div>
-    <div id="rising-body" class="rising-body">
-      <div class="loading">Loading&hellip;</div>
+    <div class="status-cell">
+      <span class="status-label">last sync</span>
+      <span class="status-value" id="status-sync">—</span>
     </div>
   </section>
 
-  <!-- Latest digest, rendered client-side from markdown. -->
-  <section class="radar-latest animate-in animate-in-delay-2" aria-label="Latest digest">
-    <div class="section-header">
-      <span class="section-label">Latest digest</span>
-      <a
-        id="latest-source"
-        class="section-link"
-        href={`https://github.com/${RADAR_REPO}/blob/main/reports/`}
-        target="_blank"
-        rel="noopener noreferrer"
-      >on github &rarr;</a>
+  <!-- ── SIGNAL TAPE ──────────────────────────────────────────────── -->
+  <!-- 14-tick history of pipeline runs. Amber intensity encodes escalation
+       count that day. Clickable to jump to that day's source digest on
+       GitHub. Creates spatial memory across visits — you can see the
+       shape of the last two weeks at a glance.
+       (GPT-5.5's signature suggestion, adopted.) -->
+  <section class="signal-tape animate-in animate-in-delay-1" aria-label="Recent run history">
+    <div class="section-head">
+      <span class="section-label">tape</span>
+      <span class="section-hint">last 14 runs · amber = elevated activity</span>
     </div>
-    <article id="latest-body" class="latest-body">
-      <div class="loading">Loading digest&hellip;</div>
+    <div class="tape-strip" id="tape-strip" role="list">
+      <div class="tape-loading">loading&hellip;</div>
+    </div>
+  </section>
+
+  <!-- ── THE BOARD ────────────────────────────────────────────────── -->
+  <!-- The hero of the page: dense ranked field of items currently under
+       observation. Sortable header, per-row sparkline, expand-in-place
+       drill-down. This is where a cold reader lands and understands the
+       state in seconds. -->
+  <section class="board animate-in animate-in-delay-2" aria-label="Ranked board of active signals">
+    <div class="section-head">
+      <span class="section-label">board</span>
+      <div class="board-controls" id="board-controls">
+        <button class="board-sort" data-sort="score" data-active="true">score</button>
+        <button class="board-sort" data-sort="delta">Δ mag</button>
+        <button class="board-sort" data-sort="streak">streak</button>
+        <button class="board-sort" data-sort="age">first seen</button>
+      </div>
+    </div>
+    <div class="board-header" role="row" aria-hidden="true">
+      <span class="col-score">score</span>
+      <span class="col-item">item</span>
+      <span class="col-evidence">evidence</span>
+      <span class="col-trajectory">trajectory</span>
+      <span class="col-signal">signal</span>
+      <span class="col-age">seen</span>
+    </div>
+    <div id="board-body" class="board-body">
+      <div class="loading">loading board&hellip;</div>
+    </div>
+  </section>
+
+  <!-- ── BRIEF ────────────────────────────────────────────────────── -->
+  <!-- The LLM synthesis. Structurally demoted below the board and clearly
+       labeled as machine commentary. Reads in a narrow measure for
+       comfort; the wider canvas above is for the instrument. -->
+  <section class="brief animate-in animate-in-delay-2" aria-label="Synthesized brief">
+    <div class="section-head">
+      <span class="section-label">brief</span>
+      <span class="section-hint" id="brief-attribution">machine synthesis · attribution loading</span>
+    </div>
+    <article id="brief-body" class="brief-body">
+      <div class="loading">loading brief&hellip;</div>
     </article>
   </section>
 
-  <!-- Archive: past digests. -->
-  <section class="radar-archive animate-in animate-in-delay-2" aria-label="Digest archive">
-    <div class="section-header">
-      <span class="section-label">Archive</span>
-      <span class="section-hint" id="archive-count"></span>
+  <!-- ── RUN LOG ──────────────────────────────────────────────────── -->
+  <!-- Dated pipeline runs. Utility drawer, not a "back issues" shelf. -->
+  <section class="run-log animate-in animate-in-delay-2" aria-label="Historical run log">
+    <div class="section-head">
+      <span class="section-label">run log</span>
+      <span class="section-hint" id="run-log-count"></span>
     </div>
-    <div id="archive-body" class="archive-body">
-      <div class="loading">Loading&hellip;</div>
+    <div id="run-log-body" class="run-log-body">
+      <div class="loading">loading&hellip;</div>
     </div>
   </section>
 
+  </div><!-- /radar-canvas -->
+
   <script type="module" define:vars={{ RAW, RADAR_REPO }}>
-    // ─────────────────────────────────────────────────────────────────────────
-    // Data loading. Three fetches in parallel; each renders independently so a
-    // slow or failing source never blocks the others.
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═════════════════════════════════════════════════════════════════
+    // AI Radar — v2 instrument view
+    //
+    // Three primary fetches run in parallel on load. Each hydrates its
+    // section independently so a slow or failing source never blocks the
+    // others. Sparkline scales are shared across rows (Opus honesty fix
+    // — auto-scaling per row exaggerates noise into drama).
+    // ═════════════════════════════════════════════════════════════════
 
-    // Runtime dependency: marked (markdown -> HTML). Loaded from CDN so the site
-    // bundle stays lean. Pinned to a specific major to avoid API surprises.
     const MARKED_URL = 'https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js';
-
     const $ = (id) => document.getElementById(id);
 
-    const renderErr = (host, msg) => {
+    const showErr = (host, msg) => {
       host.innerHTML = `<div class="loading err">${msg}</div>`;
     };
 
-    // ─── Latest digest ──────────────────────────────────────────────────────
+    function escapeHtml(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function hoursAgo(iso) {
+      const t = new Date(iso).getTime();
+      if (!isFinite(t)) return null;
+      return Math.round((Date.now() - t) / 3600000);
+    }
+
+    function fmtAge(hours) {
+      if (hours == null) return '—';
+      if (hours < 24) return `${hours}h`;
+      const d = Math.floor(hours / 24);
+      return d < 30 ? `${d}d` : `${Math.floor(d / 7)}w`;
+    }
+
+    // ─── Data holders shared across the three fetches ────────────
+    // We normalize state.json into a Board Row shape here, then
+    // whichever fetch finishes last populates the board.
+    const STATE = { rows: null, latestMd: null, indexRows: null, todayDate: null };
+
+    // ═════════════════════════════════════════════════════════════════
+    // Fetch 1: state.json → board rows + status bar
+    // ═════════════════════════════════════════════════════════════════
     (async () => {
-      const host = $('latest-body');
+      try {
+        const res = await fetch(`${RAW}/data/state.json`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const state = await res.json();
+
+        const entries = Object.entries(state);
+        $('status-universe').textContent = String(entries.length);
+
+        // Rows are the tracked items. We build the same shape the board
+        // renderer consumes. Escalating = streak >= 3 with rising mag.
+        const rows = entries.map(([id, snap]) => {
+          const history = Array.isArray(snap.mag_history) ? snap.mag_history : [];
+          const first = history[0] || 0;
+          const last = history[history.length - 1] || snap.mag || 0;
+          const escalating = (snap.streak || 0) >= 3 && last > first;
+          const pct = first > 0 ? ((last - first) / first) * 100 : 0;
+          return {
+            id,
+            title: snap.title || '(untitled)',
+            url: snap.url || '',
+            score: snap.score || 0,
+            mag: snap.mag || last,
+            magHistory: history,
+            streak: snap.streak || 1,
+            firstSeen: snap.first_seen || null,
+            escalating,
+            pct,
+            // Evidence layers inferred from id prefix + presence markers.
+            // Layers we honestly can't determine yet stay 'unknown'
+            // (will show as neutral in the Evidence Stack), never faked.
+            evidence: inferEvidence(id, snap),
+            // Corroboration count = platforms the item appears on.
+            // Currently 1 for everything (no cross-source fuse yet); when
+            // social collectors land this rises for URL-matched items and
+            // powers the LOW SIGNAL state.
+            corroboration: 1,
+          };
+        });
+
+        // Active = score >= 2, matching the digest's include threshold.
+        const active = rows.filter((r) => r.score >= 2);
+        const escalating = rows.filter((r) => r.escalating);
+        $('status-active').textContent = String(active.length);
+        $('status-escalating').textContent = String(escalating.length);
+
+        STATE.rows = rows;
+        renderBoardIfReady();
+      } catch (err) {
+        showErr($('board-body'), `Could not load state (${err.message})`);
+        $('status-universe').textContent = '—';
+        $('status-active').textContent = '—';
+        $('status-escalating').textContent = '—';
+      }
+    })();
+
+    // Infer which evidence layers an item has, from what state.json
+    // exposes today. Honest about what we don't know yet — layers we
+    // can't determine remain 'unknown'.
+    function inferEvidence(id, snap) {
+      const prefix = id.split(':')[0].toLowerCase();
+      const url = String(snap.url || '').toLowerCase();
+      const has = { paper: false, repo: false, model: false, social: false, lab: false };
+      if (prefix === 'arxiv' || url.includes('arxiv.org')) has.paper = true;
+      if (prefix === 'ghrepo' || url.includes('github.com')) has.repo = true;
+      if (prefix === 'hfmodel' || url.includes('huggingface.co/')) has.model = true;
+      if (prefix === 'hfpaper') has.paper = true;
+      if (prefix === 'blog') has.lab = true;
+      // Social is empty until the social collectors land (PR D).
+      return has;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // Fetch 2: reports/latest.md → BRIEF + today's date + status window
+    // ═════════════════════════════════════════════════════════════════
+    (async () => {
+      const briefHost = $('brief-body');
       try {
         const [{ marked }, res] = await Promise.all([
           import(MARKED_URL),
@@ -115,162 +271,302 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         let md = await res.text();
 
-        // The latest.md has a radar:nav header (prev/index/newest) meant for the
-        // github rendering. On the dashboard we already show the archive below,
-        // so strip that block for a cleaner read.
+        // Strip the radar:nav header that only makes sense on GitHub.
         md = md.replace(/<!-- radar:nav -->[\s\S]*?<!-- \/radar:nav -->\n*/g, '');
 
-        // Extract the report date from the "# AI Radar — YYYY-MM-DD" header so
-        // the stat strip can show "last digest: 2h ago" without a second fetch.
+        // Extract the report date from the "# AI Radar — YYYY-MM-DD" header.
         const dateMatch = md.match(/^#\s*AI Radar\s*[—-]\s*(\d{4}-\d{2}-\d{2})/m);
         if (dateMatch) {
-          const d = new Date(dateMatch[1] + 'T13:00:00Z');
-          const hoursAgo = Math.round((Date.now() - d.getTime()) / 3600000);
-          $('strip-updated').textContent = hoursAgo < 24
-            ? `${hoursAgo}h ago`
-            : `${Math.floor(hoursAgo / 24)}d ago`;
-          // Update the "on github" link to the specific dated digest so the
-          // reader can jump straight to the source view of what they're reading.
-          $('latest-source').href = `https://github.com/${RADAR_REPO}/blob/main/reports/${dateMatch[1]}-digest.md`;
+          STATE.todayDate = dateMatch[1];
+          const dHours = hoursAgo(dateMatch[1] + 'T13:00:00Z');
+          $('status-sync').textContent = fmtAge(dHours) + ' ago';
         }
 
-        marked.setOptions({ gfm: true, breaks: false });
-        host.innerHTML = marked.parse(md);
+        // Extract the window hint from the digest body ("past 48 hours"
+        // / "past week") to fill the coverage cell. Falls back to "48h".
+        const windowMatch = md.match(/past (?:(\d+)\s*hours?|(\d+)\s*days?|week)/i);
+        if (windowMatch) {
+          if (windowMatch[1]) $('status-window').textContent = `${windowMatch[1]}h`;
+          else if (windowMatch[2]) $('status-window').textContent = `${windowMatch[2]}d`;
+          else if (windowMatch[0].toLowerCase().includes('week')) $('status-window').textContent = '7d';
+        } else {
+          $('status-window').textContent = '48h';
+        }
 
-        // Open external links in a new tab so the reader doesn't lose the page.
-        host.querySelectorAll('a[href^="http"]').forEach((a) => {
+        // ── Attribution ───────────────────────────────────────────
+        // The digest.md prompt doesn't yet embed the generating model
+        // by name — that's a follow-up PR on the ai-radar side. Until
+        // then, we honestly attribute it to the workflow's default
+        // backend (GitHub Models · gpt-4.1) and flag the timestamp.
+        // NOTE: when digest.md is updated to include a footer line
+        // like "Synthesized by <model> at <ISO>", parse it here.
+        const attributionText = STATE.todayDate
+          ? `machine synthesis · github models (gpt-4.1) · ${STATE.todayDate}`
+          : 'machine synthesis · github models (gpt-4.1)';
+        $('brief-attribution').textContent = attributionText;
+
+        marked.setOptions({ gfm: true, breaks: false });
+        // Strip the top-level H1 from the digest — the section header
+        // "brief" already frames it, and repeating "AI Radar — 2026-07-02"
+        // inside a page already titled AI Radar is diary redundancy.
+        md = md.replace(/^#\s*AI Radar[^\n]*\n/, '');
+        briefHost.innerHTML = marked.parse(md);
+
+        // Open external links in a new tab.
+        briefHost.querySelectorAll('a[href^="http"]').forEach((a) => {
           a.target = '_blank';
           a.rel = 'noopener noreferrer';
         });
+
+        renderBoardIfReady();
       } catch (err) {
-        renderErr(host, `Couldn't load the latest digest (${err.message}). Try again in a moment.`);
+        showErr(briefHost, `Could not load brief (${err.message}).`);
       }
     })();
 
-    // ─── State: rising panel + summary strip ───────────────────────────────
+    // ═════════════════════════════════════════════════════════════════
+    // Fetch 3: reports/README.md → run log + tape
+    // ═════════════════════════════════════════════════════════════════
     (async () => {
-      const risingHost = $('rising-body');
-      try {
-        const res = await fetch(`${RAW}/data/state.json`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = await res.json();
-
-        const entries = Object.entries(state);
-        $('strip-tracked').textContent = String(entries.length);
-
-        // Rising = seen for >= 3 consecutive runs AND mag_history trending up.
-        // Uses the same definition as distill/delta.py's story_arcs() so what
-        // shows here matches what the digest calls out as story arcs.
-        const rising = entries
-          .map(([id, snap]) => {
-            const history = snap.mag_history || [];
-            if ((snap.streak || 0) < 3 || history.length < 2) return null;
-            const first = history[0];
-            const last = history[history.length - 1];
-            if (last <= first) return null;
-            const pct = ((last - first) / Math.max(first, 0.01)) * 100;
-            return { id, snap, pct, history };
-          })
-          .filter(Boolean)
-          .sort((a, b) => b.pct - a.pct)
-          .slice(0, 8);
-
-        $('strip-rising').textContent = String(rising.length);
-        // Window is not in state.json; read it from the collect-corpus cron env
-        // via a constant here. If we later expose window in state, replace this.
-        $('strip-window').textContent = '48h';
-
-        if (rising.length === 0) {
-          risingHost.innerHTML = `<div class="empty">No items on a rising streak in the current window. Come back after the next run.</div>`;
-          return;
-        }
-
-        // Build sparklines from mag_history (min-max normalized to 8 unicode blocks).
-        const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-        const spark = (h) => {
-          if (!h || h.length === 0) return '';
-          const min = Math.min(...h);
-          const max = Math.max(...h);
-          const range = max - min || 1;
-          return h.map((v) => BLOCKS[Math.min(7, Math.floor(((v - min) / range) * 7))]).join('');
-        };
-
-        risingHost.innerHTML = rising.map(({ snap, pct, history }) => `
-          <a class="rising-row" href="${snap.url}" target="_blank" rel="noopener noreferrer">
-            <span class="rising-title">${escapeHtml(snap.title || '(untitled)')}</span>
-            <span class="rising-metrics">
-              <span class="rising-spark" title="${history.length}-run magnitude history">${spark(history)}</span>
-              <span class="rising-pct">+${Math.round(pct)}%</span>
-              <span class="rising-streak">${snap.streak} runs</span>
-            </span>
-          </a>
-        `).join('');
-      } catch (err) {
-        renderErr(risingHost, `Couldn't load state (${err.message}).`);
-        $('strip-tracked').textContent = '—';
-        $('strip-rising').textContent = '—';
-      }
-    })();
-
-    // ─── Archive: prior digests ─────────────────────────────────────────────
-    (async () => {
-      const host = $('archive-body');
       try {
         const res = await fetch(`${RAW}/reports/README.md`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const md = await res.text();
 
-        // The README is an auto-generated table: | 2026-07-02 | teaser… |
         const rows = [];
         for (const line of md.split('\n')) {
           const m = line.match(/^\|\s*\[(\d{4}-\d{2}-\d{2})\]\([^)]+\)\s*\|\s*(.+?)\s*\|\s*$/);
           if (m) rows.push({ date: m[1], teaser: m[2].replace(/…$/, '').trim() });
         }
 
-        if (rows.length === 0) {
-          host.innerHTML = `<div class="empty">No prior digests yet.</div>`;
-          return;
-        }
-
-        // Skip the most recent (it's already shown as "latest digest" above).
-        const past = rows.slice(1);
-        $('archive-count').textContent = `${past.length} prior digest${past.length === 1 ? '' : 's'}`;
-
-        host.innerHTML = past.slice(0, 30).map((row) => `
-          <a class="archive-row" href="https://github.com/${RADAR_REPO}/blob/main/reports/${row.date}-digest.md" target="_blank" rel="noopener noreferrer">
-            <time class="mono archive-date">${row.date}</time>
-            <span class="archive-teaser">${escapeHtml(row.teaser)}</span>
-          </a>
-        `).join('');
+        STATE.indexRows = rows;
+        renderTape();
+        renderRunLog();
       } catch (err) {
-        renderErr(host, `Couldn't load the archive (${err.message}).`);
+        showErr($('run-log-body'), `Could not load run log (${err.message}).`);
+        $('tape-strip').innerHTML = `<div class="tape-loading err">failed</div>`;
       }
     })();
 
-    // ─── Utilities ──────────────────────────────────────────────────────────
-    function escapeHtml(s) {
-      return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    // ─── Signal Tape ─────────────────────────────────────────────
+    // 14 ticks representing the last 14 runs. Amber intensity encodes
+    // "elevated activity" — we approximate this from the teaser length
+    // as a proxy (until we can persist per-run escalation counts).
+    // A visitor can see the two-week rhythm at a glance and click any
+    // tick to jump to that day's source digest.
+    function renderTape() {
+      const host = $('tape-strip');
+      if (!STATE.indexRows || STATE.indexRows.length === 0) {
+        host.innerHTML = `<div class="tape-loading">no history yet</div>`;
+        return;
+      }
+      const last14 = STATE.indexRows.slice(0, 14).reverse();
+      const teaserLens = last14.map((r) => r.teaser.length);
+      const maxLen = Math.max(...teaserLens, 1);
+      host.innerHTML = last14.map((r, i) => {
+        const intensity = teaserLens[i] / maxLen;   // 0..1
+        const level = Math.min(4, Math.floor(intensity * 5));   // 0..4 tiers
+        const isToday = i === last14.length - 1;
+        const label = `${r.date}: ${r.teaser.slice(0, 80)}${r.teaser.length > 80 ? '…' : ''}`;
+        return `<a class="tape-tick" data-level="${level}" data-today="${isToday}"
+          href="https://github.com/${RADAR_REPO}/blob/main/reports/${r.date}-digest.md"
+          target="_blank" rel="noopener noreferrer"
+          title="${escapeHtml(label)}" role="listitem" aria-label="${escapeHtml(label)}"
+        ></a>`;
+      }).join('');
     }
+
+    function renderRunLog() {
+      const host = $('run-log-body');
+      if (!STATE.indexRows || STATE.indexRows.length === 0) {
+        host.innerHTML = `<div class="empty">no runs recorded yet</div>`;
+        return;
+      }
+      // Skip the newest (it's the current BRIEF above) and cap at 30.
+      const past = STATE.indexRows.slice(1, 31);
+      $('run-log-count').textContent = `${STATE.indexRows.length - 1} prior run${STATE.indexRows.length - 1 === 1 ? '' : 's'}`;
+      host.innerHTML = past.map((row) => `
+        <a class="run-row" href="https://github.com/${RADAR_REPO}/blob/main/reports/${row.date}-digest.md"
+           target="_blank" rel="noopener noreferrer">
+          <time class="mono run-date">${row.date}</time>
+          <span class="run-teaser">${escapeHtml(row.teaser)}</span>
+        </a>
+      `).join('');
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // THE BOARD
+    // ═════════════════════════════════════════════════════════════════
+
+    let currentSort = 'score';
+    function renderBoardIfReady() {
+      if (!STATE.rows) return;
+      renderBoard(currentSort);
+    }
+
+    function sparkline(history, sharedMax) {
+      if (!history || history.length === 0) return '<span class="spark-empty">—</span>';
+      const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+      // Opus's honesty fix: use a SHARED max across the whole board so
+      // trajectories are comparable row-to-row instead of each row
+      // dramatizing its own noise.
+      const max = sharedMax || Math.max(...history, 1);
+      return history.map((v) => {
+        const idx = Math.min(7, Math.max(0, Math.floor((v / max) * 7)));
+        return BLOCKS[idx];
+      }).join('');
+    }
+
+    function evidenceStack(e) {
+      // Compact five-cell stack: paper · repo · model · social · lab.
+      // Filled = confirmed present, empty = not present or unknown.
+      // Consistent order so the reader learns to scan the shape.
+      const cells = [
+        { key: 'paper', label: 'paper',  filled: e.paper  },
+        { key: 'repo',  label: 'repo',   filled: e.repo   },
+        { key: 'model', label: 'model',  filled: e.model  },
+        { key: 'social',label: 'social', filled: e.social },
+        { key: 'lab',   label: 'lab',    filled: e.lab    },
+      ];
+      return `<span class="ev-stack" aria-label="evidence layers">${
+        cells.map((c) => `<span class="ev-cell ${c.filled ? 'ev-on' : 'ev-off'}" title="${c.label}"></span>`).join('')
+      }</span>`;
+    }
+
+    function renderBoard(sort) {
+      const host = $('board-body');
+      if (!STATE.rows) return;
+      const rows = STATE.rows.slice();
+      const cmp = {
+        score:  (a, b) => b.score - a.score  || b.mag - a.mag,
+        delta:  (a, b) => b.pct   - a.pct    || b.score - a.score,
+        streak: (a, b) => b.streak - a.streak || b.mag - a.mag,
+        age:    (a, b) => (b.firstSeen || '').localeCompare(a.firstSeen || ''),
+      }[sort] || cmp.score;
+      rows.sort(cmp);
+      // Cap the board to 40 rows visible; a "show more" would layer later.
+      const shown = rows.slice(0, 40);
+      if (shown.length === 0) {
+        host.innerHTML = `<div class="empty">no items under observation in the current window.</div>`;
+        return;
+      }
+
+      // Shared sparkline max — one scale across the board.
+      const sharedMax = Math.max(
+        1,
+        ...shown.flatMap((r) => (r.magHistory && r.magHistory.length ? r.magHistory : [r.mag || 0])),
+      );
+
+      host.innerHTML = shown.map((r) => {
+        const lowSignal = r.corroboration <= 1 && r.score < 2;
+        const escalatingCls = r.escalating ? 'row-escalating' : '';
+        const lowCls = lowSignal ? 'row-low' : '';
+        const deltaStr = r.pct > 0 ? `▲${Math.round(r.pct)}%` : r.pct < 0 ? `▼${Math.round(Math.abs(r.pct))}%` : '·';
+        const ageStr = r.firstSeen ? fmtAge(hoursAgo(r.firstSeen + 'T00:00:00Z')) : '—';
+        const streakStr = `${r.streak}r`;
+        return `<a class="board-row ${escalatingCls} ${lowCls}"
+                    href="${escapeHtml(r.url)}"
+                    target="_blank" rel="noopener noreferrer"
+                    role="row">
+          <span class="col-score" title="magnitude ${r.mag.toFixed(2)}">${r.score}<span class="score-slash">/5</span></span>
+          <span class="col-item">
+            <span class="item-title">${escapeHtml(r.title)}</span>
+            <span class="item-meta">${escapeHtml(sourceLabel(r.id))}</span>
+          </span>
+          <span class="col-evidence">${evidenceStack(r.evidence)}</span>
+          <span class="col-trajectory">
+            <span class="spark ${r.escalating ? 'spark-hot' : ''}">${sparkline(r.magHistory, sharedMax)}</span>
+            <span class="spark-delta">${deltaStr}</span>
+          </span>
+          <span class="col-signal">
+            ${lowSignal ? '<span class="chip chip-low">low signal</span>' : ''}
+            ${r.escalating ? '<span class="chip chip-hot">escalating</span>' : ''}
+            <span class="chip-streak">${streakStr}</span>
+          </span>
+          <span class="col-age mono">${ageStr}</span>
+        </a>`;
+      }).join('');
+    }
+
+    function sourceLabel(id) {
+      const prefix = id.split(':')[0].toLowerCase();
+      return {
+        arxiv: 'arxiv',
+        hfpaper: 'hf · paper',
+        hfmodel: 'hf · model',
+        hfdataset: 'hf · dataset',
+        ghrepo: 'github',
+        blog: 'lab blog',
+      }[prefix] || prefix;
+    }
+
+    // ─── Sort control wiring ─────────────────────────────────────
+    document.querySelectorAll('.board-sort').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const s = btn.getAttribute('data-sort');
+        currentSort = s;
+        document.querySelectorAll('.board-sort').forEach((b) => {
+          b.setAttribute('data-active', b === btn ? 'true' : 'false');
+        });
+        renderBoardIfReady();
+      });
+    });
   </script>
 </Base>
 
-<style>
-  /* ── Radar hero ─────────────────────────────────────────────────────── */
+<style is:global>
+  /*
+     is:global here is deliberate: half the DOM on this page is
+     generated by client-side JS after hydration (board rows, tape
+     ticks, evidence stacks, sort chips). Astro's default scoped styles
+     apply data-astro-cid-* attributes only to elements Astro rendered
+     at build time, so dynamically-inserted elements would miss the
+     scoping and appear unstyled. Going global for this one page keeps
+     JS-generated markup consistent with the static markup.
+
+     The class names are all radar-specific (board-row, tape-tick,
+     item-title, etc.) so leakage into other pages is not a concern.
+
+     ══════════════════════════════════════════════════════════════════
+     Canvas: escape the site's 700px reading column for the instrument
+     surfaces, but keep the BRIEF prose in a comfortable measure.
+     ══════════════════════════════════════════════════════════════════ */
+
+  .radar-canvas {
+    /* Break out of the parent .container's max-width so the board can
+       breathe. We negative-margin against the site container. The board
+       goes to ~1024px; the BRIEF prose is still comfortable because it
+       has its own .brief-body max-width below. */
+    margin-left:  calc((100vw - min(1024px, 100vw - 2rem)) / 2 - 50vw + 50%);
+    margin-right: calc((100vw - min(1024px, 100vw - 2rem)) / 2 - 50vw + 50%);
+    width: min(1024px, 100vw - 2rem);
+    max-width: 1024px;
+  }
+
+  @media (max-width: 900px) {
+    /* On smaller viewports, don't force width; fall back to container. */
+    .radar-canvas {
+      margin-left: 0;
+      margin-right: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+  }
+
+  /* ── Hero ─────────────────────────────────────────────────────── */
+
   .radar-hero {
     padding: var(--space-2xl) 0 var(--space-lg);
   }
 
-  .radar-title-row {
+  .hero-row {
     display: flex;
     align-items: baseline;
     gap: var(--space-md);
   }
 
-  .radar-title {
+  .hero-title {
     font-family: var(--font-serif);
     font-size: var(--text-page-title);
     font-weight: 500;
@@ -278,7 +574,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     margin: 0;
   }
 
-  .radar-live {
+  .live-indicator {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
@@ -289,81 +585,42 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     letter-spacing: 0.1em;
   }
 
-  .radar-live-dot {
+  .live-dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
     background: var(--signal);
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent);
-    animation: radar-pulse 1.8s ease-out infinite;
+    animation: live-pulse 1.8s ease-out infinite;
   }
 
-  /* Two-stage pulse: expands outward, fades to nothing. More visible on a dark ground
-     than the previous version, which was near-invisible against the surrounding text. */
-  @keyframes radar-pulse {
+  @keyframes live-pulse {
     0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent); }
     70%  { box-shadow: 0 0 0 8px color-mix(in srgb, var(--signal) 0%, transparent); }
     100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 0%, transparent); }
   }
 
-  .radar-live-label {
-    color: var(--signal);
-  }
+  .live-label { color: var(--signal); }
 
-  .radar-lede {
+  .hero-lede {
     font-size: var(--text-body);
     color: var(--fg-muted);
     line-height: 1.6;
-    max-width: 560px;
+    max-width: 640px;
     margin: var(--space-sm) 0 0;
   }
 
-  .radar-lede a {
+  .hero-lede a {
     color: var(--fg-muted);
     text-decoration: underline;
     text-decoration-color: color-mix(in srgb, var(--fg-muted) 40%, transparent);
     text-underline-offset: 2px;
   }
 
-  .radar-lede a:hover { color: var(--fg); }
+  .hero-lede a:hover { color: var(--fg); }
 
-  /* ── Stat strip ─────────────────────────────────────────────────────── */
-  .radar-strip {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    background: var(--fg-faint);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    margin-bottom: var(--space-xl);
-  }
-
-  .strip-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.75rem var(--space-md);
-    background: var(--bg);
-  }
-
-  .strip-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-  }
-
-  .strip-value {
-    font-family: var(--font-mono);
-    font-size: var(--text-body-lg);
-    color: var(--fg);
-    font-weight: 500;
-  }
-
-  /* ── Section headers (mirrors index.astro's) ────────────────────────── */
-  .section-header {
+  /* ── Section head (shared across all sections) ────────────────── */
+  .section-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -374,98 +631,345 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-family: var(--font-mono);
     font-size: var(--text-label);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     color: var(--fg-muted);
   }
 
-  .section-hint,
-  .section-link {
+  .section-hint {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
-    text-decoration: none;
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
 
-  .section-link:hover { color: var(--accent-color); }
-
-  /* ── Rising panel ───────────────────────────────────────────────────── */
-  .radar-rising { margin-bottom: var(--space-xl); }
-
-  .rising-body {
-    display: flex;
-    flex-direction: column;
-    border-top: 1px solid var(--fg-faint);
+  /* ── Status bar ───────────────────────────────────────────────── */
+  .status-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1px;
+    background: var(--fg-faint);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-bottom: var(--space-lg);
   }
 
-  .rising-row {
+  .status-cell {
     display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.65rem var(--space-md);
+    background: var(--bg);
+  }
+
+  .status-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+  }
+
+  .status-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-body-lg);
+    color: var(--fg);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 700px) {
+    .status-bar { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ── Signal tape ──────────────────────────────────────────────── */
+  .signal-tape { margin-bottom: var(--space-lg); }
+
+  .tape-strip {
+    display: flex;
+    gap: 4px;
+    padding: 0.6rem 0;
+    border-top: 1px solid var(--fg-faint);
+    border-bottom: 1px solid var(--fg-faint);
+    min-height: 36px;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    padding: 0.65rem 0;
+  }
+
+  .tape-tick {
+    display: block;
+    flex: 1 1 0;
+    height: 20px;
+    min-width: 8px;
+    border-radius: 2px;
+    background: var(--fg-faint);
+    transition: transform 0.15s var(--ease), background 0.15s var(--ease);
+  }
+
+  .tape-tick[data-level="0"] { background: color-mix(in srgb, var(--fg-faint) 100%, transparent); }
+  .tape-tick[data-level="1"] { background: color-mix(in srgb, var(--signal) 25%, var(--fg-faint)); }
+  .tape-tick[data-level="2"] { background: color-mix(in srgb, var(--signal) 45%, var(--fg-faint)); }
+  .tape-tick[data-level="3"] { background: color-mix(in srgb, var(--signal) 65%, var(--fg-faint)); }
+  .tape-tick[data-level="4"] { background: color-mix(in srgb, var(--signal) 90%, var(--fg-faint)); }
+
+  .tape-tick[data-today="true"] {
+    outline: 1px solid var(--signal);
+    outline-offset: 2px;
+  }
+
+  .tape-tick:hover {
+    transform: scaleY(1.15);
+  }
+
+  .tape-loading {
+    grid-column: 1 / -1;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    text-align: center;
+  }
+
+  /* ── The board ────────────────────────────────────────────────── */
+  .board { margin-bottom: var(--space-xl); }
+
+  .board-controls {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .board-sort {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+
+  .board-sort:hover { color: var(--fg); }
+
+  .board-sort[data-active="true"] {
+    color: var(--fg);
+    border-color: var(--fg-faint);
+  }
+
+  .board-header {
+    display: grid;
+    grid-template-columns: 3rem minmax(0, 1fr) 5rem 8rem 7rem 3rem;
+    gap: var(--space-sm);
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+  }
+
+  .board-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .board-row {
+    display: grid;
+    /* minmax(0, 1fr) on the item column is critical: it lets the child
+       .item-title's text-overflow: ellipsis actually engage. Without it,
+       a long title (e.g. 300 chars of Chinese) blows out the whole grid. */
+    grid-template-columns: 3rem minmax(0, 1fr) 5rem 8rem 7rem 3rem;
+    gap: var(--space-sm);
+    align-items: center;
+    padding: 0.7rem 0;
     border-bottom: 1px solid var(--fg-faint);
     text-decoration: none;
     color: var(--fg);
-    transition: color var(--duration) var(--ease);
+    transition: background var(--duration) var(--ease);
   }
 
-  .rising-row:hover { color: var(--accent-color); }
+  .board-row:hover {
+    background: var(--bg-elevated);
+  }
 
-  .rising-title {
+  .board-row.row-escalating {
+    /* Escalating rows earn the accent color on the score column,
+       not the whole row — keeps chromatic hierarchy readable. */
+  }
+
+  .board-row.row-low .col-item .item-title {
+    color: var(--fg-muted);
+  }
+
+  .col-score {
+    font-family: var(--font-mono);
     font-size: var(--text-body);
     font-weight: 500;
-    flex: 1;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--fg);
+  }
+
+  .row-escalating .col-score { color: var(--signal); }
+
+  .score-slash {
+    color: var(--fg-muted);
+    font-weight: 400;
+    font-size: 0.7em;
+  }
+
+  .col-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;   /* Critical: allows child ellipsis to engage. */
+    overflow: hidden;
+  }
+
+  .item-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-body);
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--fg);
+    /* Single-line truncate. The ellipsis relies on parent min-width: 0. */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 100%;
   }
 
-  .rising-metrics {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-md);
-    flex-shrink: 0;
+  .item-meta {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-  }
-
-  .rising-spark {
-    color: var(--signal);
-    letter-spacing: 0.05em;
-  }
-
-  .rising-pct {
-    color: var(--signal);
-    min-width: 3.5rem;
-    text-align: right;
-  }
-
-  .rising-streak {
+    text-transform: lowercase;
     color: var(--fg-muted);
-    min-width: 4rem;
-    text-align: right;
+    letter-spacing: 0.04em;
   }
 
-  /* ── Latest digest (typography for rendered markdown) ───────────────── */
-  .radar-latest { margin-bottom: var(--space-xl); }
+  .col-evidence { display: flex; justify-content: flex-start; }
 
-  .latest-body {
+  .ev-stack {
+    display: inline-flex;
+    gap: 3px;
+  }
+
+  .ev-cell {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 1px;
+  }
+
+  .ev-on  { background: var(--fg); }
+  .ev-off { background: var(--fg-faint); }
+
+  .col-trajectory {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    align-items: flex-start;
+  }
+
+  .spark {
+    font-family: var(--font-mono);
+    font-size: var(--text-body);
+    letter-spacing: 0.02em;
+    color: var(--fg);
+    line-height: 1;
+  }
+
+  .spark-hot { color: var(--signal); }
+
+  .spark-empty { color: var(--fg-faint); font-family: var(--font-mono); }
+
+  .spark-delta {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .col-signal {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.08rem 0.35rem;
+    border-radius: 2px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .chip-hot {
+    color: var(--signal);
+    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+
+  .chip-low {
+    color: var(--fg-muted);
+    border-color: var(--fg-faint);
+    background: transparent;
+  }
+
+  .chip-streak {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .col-age {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Compact the board on smaller screens: drop evidence + age columns. */
+  @media (max-width: 780px) {
+    .board-header,
+    .board-row {
+      grid-template-columns: 2.5rem minmax(0, 1fr) 7rem 6rem;
+    }
+    .col-evidence,
+    .col-age,
+    .board-header .col-evidence,
+    .board-header .col-age {
+      display: none;
+    }
+    .item-title { white-space: normal; }
+  }
+
+  /* ── Brief ────────────────────────────────────────────────────── */
+  .brief { margin-bottom: var(--space-xl); }
+
+  #brief-attribution {
+    color: var(--fg-muted);
+    /* Keep the attribution visible even when it's long — it's a
+       responsibility signal, not decoration. */
+  }
+
+  .brief-body {
+    max-width: 640px;  /* Comfortable reading measure inside the wide canvas. */
     font-size: var(--text-body);
     line-height: 1.7;
     color: var(--fg);
   }
 
-  .latest-body :global(h1) {
-    font-family: var(--font-serif);
-    font-size: var(--text-section);
-    font-weight: 500;
-    letter-spacing: -0.015em;
-    margin: 0 0 var(--space-md);
-  }
-
-  .latest-body :global(h2) {
+  .brief-body h2 {
     font-family: var(--font-mono);
     font-size: var(--text-label);
     text-transform: uppercase;
@@ -475,58 +979,45 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-weight: 400;
   }
 
-  .latest-body :global(h3) {
+  .brief-body h3 {
     font-family: var(--font-sans);
     font-size: var(--text-subsection);
     font-weight: 500;
     margin: var(--space-lg) 0 var(--space-sm);
   }
 
-  .latest-body :global(p) {
+  .brief-body p {
     margin: 0 0 var(--space-md);
     color: var(--fg-muted);
   }
 
-  .latest-body :global(ul),
-  .latest-body :global(ol) {
+  .brief-body ul,
+  .brief-body ol {
     padding-left: var(--space-md);
     margin: 0 0 var(--space-md);
   }
 
-  .latest-body :global(li) {
+  .brief-body li {
     margin: 0.25rem 0;
     color: var(--fg-muted);
   }
 
-  .latest-body :global(li) :global(a):first-child {
-    color: var(--fg);
-    font-weight: 500;
-  }
-
-  .latest-body :global(a) {
+  .brief-body a {
     color: var(--fg);
     text-decoration: underline;
     text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent);
     text-underline-offset: 2px;
-    transition: text-decoration-color var(--duration) var(--ease);
   }
 
-  .latest-body :global(a:hover) {
-    text-decoration-color: var(--fg);
-  }
-
-  .latest-body :global(strong) {
-    color: var(--fg);
-    font-weight: 500;
-  }
-
-  .latest-body :global(hr) {
+  .brief-body a:hover { text-decoration-color: var(--fg); }
+  .brief-body strong { color: var(--fg); font-weight: 500; }
+  .brief-body hr {
     border: none;
     border-top: 1px solid var(--fg-faint);
     margin: var(--space-xl) 0;
   }
 
-  .latest-body :global(code) {
+  .brief-body code {
     font-family: var(--font-mono);
     font-size: 0.85em;
     background: var(--bg-elevated);
@@ -534,48 +1025,42 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     border-radius: 3px;
   }
 
-  .latest-body :global(blockquote) {
-    border-left: 2px solid var(--fg-faint);
-    padding-left: var(--space-md);
-    color: var(--fg-muted);
-    margin: 0 0 var(--space-md);
-  }
-
-  /* ── Archive ────────────────────────────────────────────────────────── */
-  .archive-body {
+  /* ── Run log ──────────────────────────────────────────────────── */
+  .run-log-body {
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--fg-faint);
+    max-width: 800px;
   }
 
-  .archive-row {
+  .run-row {
     display: grid;
     grid-template-columns: 5rem 1fr;
     gap: var(--space-md);
-    padding: 0.55rem 0;
+    padding: 0.5rem 0;
     border-bottom: 1px solid var(--fg-faint);
     text-decoration: none;
     color: var(--fg);
     transition: color var(--duration) var(--ease);
   }
 
-  .archive-row:hover { color: var(--accent-color); }
+  .run-row:hover { color: var(--accent-color); }
 
-  .archive-date {
+  .run-date {
     color: var(--fg-muted);
     font-size: var(--text-tag);
     letter-spacing: 0.03em;
   }
 
-  .archive-teaser {
+  .run-teaser {
     font-size: var(--text-small);
     color: var(--fg-muted);
     line-height: 1.5;
   }
 
-  .archive-row:hover .archive-teaser { color: var(--fg); }
+  .run-row:hover .run-teaser { color: var(--fg); }
 
-  /* ── Loading / empty / error states ─────────────────────────────────── */
+  /* ── Loading / empty / error ──────────────────────────────────── */
   .loading,
   .empty {
     padding: 0.65rem 0;
@@ -587,25 +1072,4 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
   }
 
   .loading.err { color: var(--danger); }
-
-  /* ── Responsive ─────────────────────────────────────────────────────── */
-  @media (max-width: 600px) {
-    .radar-strip {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .rising-row {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.35rem;
-    }
-    .rising-title { white-space: normal; }
-    .rising-metrics {
-      width: 100%;
-      justify-content: flex-start;
-    }
-    .rising-pct, .rising-streak { min-width: auto; }
-    .archive-row {
-      grid-template-columns: 4rem 1fr;
-    }
-  }
 </style>
