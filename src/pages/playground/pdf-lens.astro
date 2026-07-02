@@ -1,0 +1,639 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="PDF Lens | Amaljith Kuttamath" description="Drop any PDF. LiteParse WASM extracts its structure in your browser — no upload, no server. See token costs, page density, key signals, and chunk previews instantly.">
+  <div class="pl">
+    <div class="pl-head">
+      <h1>PDF Lens</h1>
+      <p>Drop any PDF. <a href="https://www.llamaindex.ai/blog/liteparse-v2-0-runs-everywhere" target="_blank" rel="noopener noreferrer">LiteParse WASM</a> parses it entirely in your browser — no upload, no server, nothing leaves the page. Then see exactly what an LLM sees: token costs, page density, key signals, and chunked text ready to copy.</p>
+      <div class="pl-badges">
+        <span class="badge">no upload</span>
+        <span class="badge">no api key</span>
+        <span class="badge">liteparse wasm v2</span>
+      </div>
+    </div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-inner">
+        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="drop-label">Drop a PDF here</p>
+        <p class="drop-sub">or <label class="drop-browse" for="file-input">browse files</label></p>
+        <input type="file" id="file-input" accept=".pdf" style="display:none">
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar" id="status-bar" style="display:none">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Initialising LiteParse WASM…</span>
+      <div class="status-progress" id="status-progress" style="display:none">
+        <div class="status-fill" id="status-fill"></div>
+      </div>
+    </div>
+
+    <!-- Results — hidden until parsed -->
+    <div id="results" style="display:none">
+
+      <!-- Summary strip -->
+      <div class="summary-strip" id="summary-strip"></div>
+
+      <!-- Main grid -->
+      <div class="pl-grid">
+
+        <!-- Token cost card -->
+        <div class="pl-card pl-card-wide">
+          <div class="pl-card-title">Token Cost by Model</div>
+          <div class="pl-card-sub">How much would this document cost to feed into each model? Calculated from real tokenizer ratios.</div>
+          <div class="cost-table" id="cost-table"></div>
+          <div class="cost-note">Estimates based on cl100k_base token ratios. Actual counts vary slightly by model.</div>
+        </div>
+
+        <!-- Page density heatmap -->
+        <div class="pl-card">
+          <div class="pl-card-title">Page Density</div>
+          <div class="pl-card-sub">Words per page. Click any bar to jump to that page's text.</div>
+          <div class="density-map" id="density-map"></div>
+        </div>
+
+        <!-- Key signals -->
+        <div class="pl-card">
+          <div class="pl-card-title">Key Signals</div>
+          <div class="pl-card-sub">Numbers, dates, percentages, and citations extracted without an LLM.</div>
+          <div class="signals-list" id="signals-list"></div>
+        </div>
+
+        <!-- Compression card -->
+        <div class="pl-card">
+          <div class="pl-card-title">Compression Opportunity</div>
+          <div class="pl-card-sub">Strip whitespace, repeated headers, and boilerplate. How much context do you save?</div>
+          <div class="compress-stats" id="compress-stats"></div>
+          <div class="compress-bar-wrap">
+            <div class="compress-bar-label">Original</div>
+            <div class="compress-track"><div class="compress-fill" id="compress-fill-orig" style="width:100%;background:var(--fg-faint)"></div></div>
+            <div class="compress-bar-label">Compressed</div>
+            <div class="compress-track"><div class="compress-fill" id="compress-fill-comp" style="width:0%;background:var(--accent-color)"></div></div>
+          </div>
+        </div>
+
+        <!-- Chunks card -->
+        <div class="pl-card pl-card-wide">
+          <div class="pl-card-title">Chunk Preview</div>
+          <div class="pl-card-sub">Split into ~512-token chunks — the unit most RAG pipelines ingest. Click any chunk to copy it.</div>
+          <div class="chunk-controls">
+            <label class="chunk-label">Chunk size (tokens):
+              <input type="range" id="chunk-size" min="128" max="1024" step="128" value="512">
+              <span id="chunk-size-val" class="mono">512</span>
+            </label>
+            <span id="chunk-count" class="chunk-count"></span>
+          </div>
+          <div class="chunk-list" id="chunk-list"></div>
+        </div>
+
+        <!-- Raw text card -->
+        <div class="pl-card pl-card-wide">
+          <div class="pl-card-title">Extracted Text</div>
+          <div class="pl-card-sub">Full document text as LiteParse sees it. This is what gets fed to an LLM.</div>
+          <div class="page-nav" id="page-nav"></div>
+          <pre class="raw-text" id="raw-text"></pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .pl { max-width: 1000px; margin: 0 auto; }
+  .pl-head { margin-bottom: var(--space-lg); }
+  .pl-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
+  .pl-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .pl-head a { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+
+  .pl-badges { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg-muted); border: 1px solid var(--fg-faint);
+    padding: 2px 8px; border-radius: var(--radius-full);
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-xl) var(--space-lg);
+    text-align: center;
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+    margin-bottom: var(--space-md);
+  }
+  .drop-zone.drag-over, .drop-zone:hover { border-color: var(--accent-color); background: var(--bg-elevated); }
+  .drop-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .drop-icon { width: 40px; height: 40px; color: var(--fg-muted); }
+  .drop-label { font-size: var(--text-small); font-weight: 600; color: var(--fg); margin: 0; }
+  .drop-sub { font-size: var(--text-small); color: var(--fg-muted); margin: 0; }
+  .drop-browse { color: var(--accent-color); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+  /* Status bar */
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    margin-bottom: var(--space-md); font-size: var(--text-small);
+    font-family: var(--font-mono);
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--fg-muted); flex-shrink: 0;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .status-dot.done { background: var(--success); animation: none; }
+  .status-dot.error { background: var(--danger); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+  .status-progress { flex: 1; height: 3px; background: var(--fg-faint); border-radius: 2px; overflow: hidden; }
+  .status-fill { height: 100%; background: var(--accent-color); border-radius: 2px; transition: width 0.3s ease; }
+
+  /* Summary strip */
+  .summary-strip {
+    display: flex; gap: 0; margin-bottom: var(--space-md);
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .summary-item {
+    flex: 1; padding: 14px 16px; border-right: 1px solid var(--fg-faint);
+  }
+  .summary-item:last-child { border-right: none; }
+  .summary-val { font-size: 1.5rem; font-weight: 700; color: var(--fg); font-family: var(--font-mono); line-height: 1; }
+  .summary-lbl { font-size: var(--text-label); color: var(--fg-muted); margin-top: 4px; }
+
+  /* Grid */
+  .pl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pl-card {
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 16px 18px;
+  }
+  .pl-card-wide { grid-column: 1 / -1; }
+  .pl-card-title { font-size: var(--text-small); font-weight: 600; margin-bottom: 3px; }
+  .pl-card-sub { font-size: var(--text-label); color: var(--fg-muted); margin-bottom: 14px; line-height: 1.5; }
+
+  /* Cost table */
+  .cost-table { display: grid; gap: 8px; margin-bottom: 10px; }
+  .cost-row {
+    display: grid; grid-template-columns: 1fr auto auto auto;
+    align-items: center; gap: 12px;
+    font-size: var(--text-small);
+  }
+  .cost-model { font-weight: 500; }
+  .cost-tokens { font-family: var(--font-mono); color: var(--fg-muted); font-size: var(--text-label); }
+  .cost-bar-wrap { flex: 1; height: 4px; background: var(--fg-faint); border-radius: 2px; overflow: hidden; min-width: 80px; }
+  .cost-bar { height: 100%; background: var(--accent-color); border-radius: 2px; transition: width 0.5s ease; }
+  .cost-price { font-family: var(--font-mono); font-size: var(--text-small); font-weight: 600; color: var(--fg); min-width: 56px; text-align: right; }
+  .cost-note { font-size: var(--text-tag); color: var(--fg-muted); font-family: var(--font-mono); }
+
+  /* Density map */
+  .density-map {
+    display: flex; align-items: flex-end; gap: 3px;
+    height: 80px; overflow-x: auto; padding-bottom: 4px;
+  }
+  .density-bar {
+    min-width: 10px; flex: 1; max-width: 32px;
+    background: var(--accent-color); border-radius: 2px 2px 0 0;
+    cursor: pointer; opacity: 0.6; transition: opacity 0.15s;
+    position: relative;
+  }
+  .density-bar:hover { opacity: 1; }
+  .density-bar .density-tip {
+    position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+    background: var(--fg); color: var(--bg); font-size: var(--text-tag);
+    font-family: var(--font-mono); padding: 2px 6px; border-radius: 3px;
+    white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.1s;
+  }
+  .density-bar:hover .density-tip { opacity: 1; }
+
+  /* Signals */
+  .signals-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+  .signal-item {
+    display: flex; gap: 10px; align-items: baseline;
+    font-size: var(--text-small);
+  }
+  .signal-type {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--bg); padding: 1px 6px; border-radius: 3px;
+    flex-shrink: 0; min-width: 60px; text-align: center;
+  }
+  .signal-val { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-small); }
+  .signal-ctx { color: var(--fg-muted); font-size: var(--text-label); }
+  .signal-type.number { background: var(--accent-color); }
+  .signal-type.date { background: var(--success); }
+  .signal-type.pct { background: #8b5cf6; }
+  .signal-type.cite { background: #f59e0b; color: #1a1a1a; }
+
+  /* Compression */
+  .compress-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .compress-stat { }
+  .compress-stat-val { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; }
+  .compress-stat-lbl { font-size: var(--text-label); color: var(--fg-muted); }
+  .compress-bar-wrap { margin-bottom: 6px; }
+  .compress-bar-label { font-size: var(--text-label); color: var(--fg-muted); margin-bottom: 3px; font-family: var(--font-mono); }
+  .compress-track { height: 6px; background: var(--bg); border: 1px solid var(--fg-faint); border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+  .compress-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+
+  /* Chunks */
+  .chunk-controls {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 12px;
+    font-size: var(--text-small); flex-wrap: wrap;
+  }
+  .chunk-label { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); }
+  .chunk-label input { accent-color: var(--accent-color); }
+  .mono { font-family: var(--font-mono); font-size: var(--text-small); color: var(--fg); }
+  .chunk-count { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg-muted); }
+  .chunk-list { display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; }
+  .chunk-item {
+    background: var(--bg); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    cursor: pointer; transition: border-color var(--duration) var(--ease);
+    position: relative;
+  }
+  .chunk-item:hover { border-color: var(--accent-color); }
+  .chunk-item.copied { border-color: var(--success); }
+  .chunk-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .chunk-num { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .chunk-meta { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); }
+  .chunk-copy-hint { font-size: var(--text-tag); color: var(--accent-color); opacity: 0; transition: opacity 0.15s; }
+  .chunk-item:hover .chunk-copy-hint { opacity: 1; }
+  .chunk-item.copied .chunk-copy-hint { opacity: 1; color: var(--success); }
+  .chunk-preview { font-size: var(--text-label); color: var(--fg-muted); line-height: 1.6; font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+
+  /* Raw text */
+  .page-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .page-btn {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    border: 1px solid var(--fg-faint); background: var(--bg);
+    color: var(--fg-muted); padding: 2px 8px; border-radius: 3px;
+    cursor: pointer; transition: all 0.1s;
+  }
+  .page-btn:hover, .page-btn.active { border-color: var(--accent-color); color: var(--accent-color); }
+  .raw-text {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+    max-height: 400px; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+    color: var(--fg-muted);
+  }
+
+  @media (max-width: 640px) {
+    .pl-grid { grid-template-columns: 1fr; }
+    .pl-card-wide { grid-column: 1; }
+    .summary-strip { flex-wrap: wrap; }
+    .summary-item { flex: 1 1 45%; border-right: none; border-bottom: 1px solid var(--fg-faint); }
+    .cost-row { grid-template-columns: 1fr auto; }
+    .cost-bar-wrap { display: none; }
+  }
+</style>
+
+<script type="module">
+// ─── LiteParse WASM bootstrap ─────────────────────────────────────────────────
+// We load the ESM build from jsDelivr at runtime to avoid bundler config.
+const WASM_ESM = 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm.js';
+const WASM_BIN = 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm_bg.wasm';
+
+// ─── Pricing (per 1M input tokens, USD) ──────────────────────────────────────
+const MODELS = [
+  { name: 'GPT-4o',           ppm: 2.50,  color: '#10a37f' },
+  { name: 'GPT-4o mini',      ppm: 0.15,  color: '#10a37f' },
+  { name: 'Claude Sonnet 4',  ppm: 3.00,  color: '#c17b3c' },
+  { name: 'Claude Haiku 3.5', ppm: 0.80,  color: '#c17b3c' },
+  { name: 'Gemini 1.5 Pro',   ppm: 1.25,  color: '#4285f4' },
+  { name: 'Gemini 1.5 Flash', ppm: 0.075, color: '#4285f4' },
+];
+
+// ─── Signal patterns ──────────────────────────────────────────────────────────
+const SIGNAL_PATTERNS = [
+  { type: 'date',   re: /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b|\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g },
+  { type: 'pct',    re: /\b\d+(?:\.\d+)?%/g },
+  { type: 'number', re: /\$[\d,]+(?:\.\d+)?[MBKmb]?|\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d+(?:\.\d+)?\s*(?:million|billion|trillion|thousand)\b/gi },
+  { type: 'cite',   re: /\[\d+\]|\(\w[^)]{1,40}\d{4}\)/g },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function estimateTokens(text) {
+  // cl100k_base: ~4 chars/token on average English text
+  return Math.ceil(text.length / 4);
+}
+
+function countWords(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function compress(text) {
+  return text
+    .replace(/[ \t]{2,}/g, ' ')          // collapse horizontal whitespace
+    .replace(/\n{3,}/g, '\n\n')           // max 2 blank lines
+    .replace(/^[\s\-–—_=*#]{0,3}\s*$/gm, '') // blank/rule-only lines
+    .trim();
+}
+
+function setStatus(msg, state) {
+  const bar = document.getElementById('status-bar');
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  bar.style.display = 'flex';
+  txt.textContent = msg;
+  dot.className = 'status-dot' + (state ? ' ' + state : '');
+}
+
+function setProgress(pct) {
+  const p = document.getElementById('status-progress');
+  const f = document.getElementById('status-fill');
+  p.style.display = 'block';
+  f.style.width = pct + '%';
+}
+
+// ─── Render helpers ───────────────────────────────────────────────────────────
+function renderSummary(pages, totalTokens, words) {
+  const el = document.getElementById('summary-strip');
+  el.innerHTML = [
+    { val: pages.length,              lbl: 'pages'           },
+    { val: words.toLocaleString(),    lbl: 'words'           },
+    { val: totalTokens.toLocaleString(), lbl: 'est. tokens'  },
+    { val: '$' + (totalTokens / 1e6 * 2.5).toFixed(4), lbl: 'GPT-4o cost' },
+  ].map(({ val, lbl }) => `
+    <div class="summary-item">
+      <div class="summary-val">${val}</div>
+      <div class="summary-lbl">${lbl}</div>
+    </div>
+  `).join('');
+}
+
+function renderCostTable(tokens) {
+  const maxCost = Math.max(...MODELS.map(m => tokens / 1e6 * m.ppm));
+  const el = document.getElementById('cost-table');
+  el.innerHTML = MODELS.map(m => {
+    const cost = tokens / 1e6 * m.ppm;
+    const pct = maxCost > 0 ? (cost / maxCost * 100) : 0;
+    const fmt = cost < 0.01 ? cost.toFixed(5) : cost.toFixed(4);
+    return `
+      <div class="cost-row">
+        <span class="cost-model" style="color:${m.color}">${m.name}</span>
+        <span class="cost-tokens">${tokens.toLocaleString()} tok</span>
+        <div class="cost-bar-wrap"><div class="cost-bar" style="width:${pct}%;background:${m.color}"></div></div>
+        <span class="cost-price">$${fmt}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderDensityMap(pages, pageTexts) {
+  const el = document.getElementById('density-map');
+  const counts = pageTexts.map(t => countWords(t));
+  const maxW = Math.max(...counts, 1);
+  el.innerHTML = counts.map((w, i) => {
+    const h = Math.max(6, Math.round(w / maxW * 76));
+    return `<div class="density-bar" style="height:${h}px" data-page="${i}" title="">
+      <span class="density-tip">p${i + 1}: ${w} words</span>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.density-bar').forEach(bar => {
+    bar.addEventListener('click', () => {
+      const pg = parseInt(bar.dataset.page);
+      showPage(pg, pageTexts);
+      document.getElementById('raw-text').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+
+function extractSignals(text) {
+  const seen = new Set();
+  const hits = [];
+  for (const { type, re } of SIGNAL_PATTERNS) {
+    let m;
+    const rx = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+    while ((m = rx.exec(text)) !== null) {
+      const key = type + ':' + m[0];
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // grab a little context
+      const start = Math.max(0, m.index - 20);
+      const end = Math.min(text.length, m.index + m[0].length + 20);
+      const ctx = text.slice(start, end).replace(/\n/g, ' ').trim();
+      hits.push({ type, val: m[0], ctx });
+      if (hits.length >= 50) break;
+    }
+    if (hits.length >= 50) break;
+  }
+  return hits;
+}
+
+function renderSignals(text) {
+  const el = document.getElementById('signals-list');
+  const signals = extractSignals(text);
+  if (!signals.length) {
+    el.innerHTML = '<span style="color:var(--fg-muted);font-size:var(--text-small)">No structured signals found.</span>';
+    return;
+  }
+  el.innerHTML = signals.map(s => `
+    <div class="signal-item">
+      <span class="signal-type ${s.type}">${s.type}</span>
+      <span class="signal-val">${s.val}</span>
+      <span class="signal-ctx">…${s.ctx.replace(s.val, '<strong>' + s.val + '</strong>')}…</span>
+    </div>`).join('');
+}
+
+function renderCompression(origText) {
+  const comp = compress(origText);
+  const origTok = estimateTokens(origText);
+  const compTok = estimateTokens(comp);
+  const saved = origTok - compTok;
+  const pct = origTok > 0 ? Math.round(saved / origTok * 100) : 0;
+  const compPct = 100 - pct;
+
+  document.getElementById('compress-stats').innerHTML = `
+    <div class="compress-stat">
+      <div class="compress-stat-val">${origTok.toLocaleString()}</div>
+      <div class="compress-stat-lbl">original tokens</div>
+    </div>
+    <div class="compress-stat">
+      <div class="compress-stat-val" style="color:var(--accent-color)">${compTok.toLocaleString()}</div>
+      <div class="compress-stat-lbl">after compression</div>
+    </div>
+    <div class="compress-stat">
+      <div class="compress-stat-val" style="color:var(--success)">−${saved.toLocaleString()}</div>
+      <div class="compress-stat-lbl">tokens saved</div>
+    </div>
+    <div class="compress-stat">
+      <div class="compress-stat-val" style="color:var(--success)">${pct}%</div>
+      <div class="compress-stat-lbl">reduction</div>
+    </div>`;
+
+  setTimeout(() => {
+    document.getElementById('compress-fill-comp').style.width = compPct + '%';
+  }, 100);
+}
+
+let _allChunks = [];
+function renderChunks(text, chunkTokens) {
+  const wordsPerToken = 0.75;
+  const approxWords = Math.round(chunkTokens * wordsPerToken);
+  const words = text.split(/\s+/).filter(Boolean);
+  const chunks = [];
+  for (let i = 0; i < words.length; i += approxWords) {
+    chunks.push(words.slice(i, i + approxWords).join(' '));
+  }
+  _allChunks = chunks;
+
+  const el = document.getElementById('chunk-list');
+  const count = document.getElementById('chunk-count');
+  count.textContent = `${chunks.length} chunks`;
+
+  el.innerHTML = chunks.map((c, i) => {
+    const tok = estimateTokens(c);
+    const preview = c.slice(0, 220) + (c.length > 220 ? '…' : '');
+    return `
+      <div class="chunk-item" data-idx="${i}">
+        <div class="chunk-header">
+          <span class="chunk-num">Chunk ${i + 1} of ${chunks.length}</span>
+          <span class="chunk-meta">~${tok} tokens · ${countWords(c)} words</span>
+          <span class="chunk-copy-hint">click to copy</span>
+        </div>
+        <div class="chunk-preview">${preview}</div>
+      </div>`;
+  }).join('');
+
+  el.querySelectorAll('.chunk-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const idx = parseInt(item.dataset.idx);
+      await navigator.clipboard.writeText(_allChunks[idx]).catch(() => {});
+      item.classList.add('copied');
+      item.querySelector('.chunk-copy-hint').textContent = '✓ copied';
+      setTimeout(() => {
+        item.classList.remove('copied');
+        item.querySelector('.chunk-copy-hint').textContent = 'click to copy';
+      }, 1800);
+    });
+  });
+}
+
+let _pageTexts = [];
+let _currentPage = 0;
+function showPage(idx, pageTexts) {
+  _currentPage = idx;
+  _pageTexts = pageTexts;
+  document.getElementById('raw-text').textContent = pageTexts[idx] || '';
+  document.querySelectorAll('.page-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === idx);
+  });
+}
+
+function renderPageNav(pageTexts) {
+  const el = document.getElementById('page-nav');
+  if (pageTexts.length <= 1) { el.innerHTML = ''; return; }
+  const show = pageTexts.length > 20 ? pageTexts.slice(0, 20) : pageTexts;
+  el.innerHTML = show.map((_, i) =>
+    `<button class="page-btn${i === 0 ? ' active' : ''}" data-pg="${i}">p${i + 1}</button>`
+  ).join('') + (pageTexts.length > 20 ? `<span style="color:var(--fg-muted);font-size:var(--text-label)">+${pageTexts.length - 20} more</span>` : '');
+  el.querySelectorAll('.page-btn').forEach(b => {
+    b.addEventListener('click', () => showPage(parseInt(b.dataset.pg), _pageTexts));
+  });
+}
+
+// ─── Main parse flow ──────────────────────────────────────────────────────────
+let wasmMod = null;
+
+async function loadWasm() {
+  if (wasmMod) return wasmMod;
+  setStatus('Loading LiteParse WASM (~1 MB)…');
+  setProgress(10);
+  const mod = await import(/* @vite-ignore */ WASM_ESM);
+  setProgress(50);
+  await mod.default({ module_or_path: WASM_BIN });
+  setProgress(100);
+  wasmMod = mod;
+  return mod;
+}
+
+async function processFile(file) {
+  document.getElementById('results').style.display = 'none';
+  setStatus('Loading LiteParse WASM…');
+  document.getElementById('status-bar').style.display = 'flex';
+
+  try {
+    const mod = await loadWasm();
+    setStatus(`Parsing "${file.name}"…`);
+    setProgress(60);
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const parser = new mod.LiteParse({ ocrEnabled: false, outputFormat: 'json' });
+    const result = await parser.parse(bytes);
+    parser.free();
+
+    setProgress(85);
+    setStatus('Extracting signals…');
+
+    // Build per-page text arrays
+    const pageTexts = (result.pages || []).map(pg => {
+      if (typeof pg === 'string') return pg;
+      if (Array.isArray(pg)) return pg.map(item => item.text || '').join(' ');
+      if (pg && pg.items) return pg.items.map(item => item.text || '').join(' ');
+      return '';
+    });
+
+    const fullText = result.text || pageTexts.join('\n\n');
+    const words = countWords(fullText);
+    const tokens = estimateTokens(fullText);
+
+    setProgress(100);
+    setStatus(`Done — ${pageTexts.length} pages, ~${tokens.toLocaleString()} tokens`, 'done');
+
+    // Render everything
+    renderSummary(pageTexts, tokens, words);
+    renderCostTable(tokens);
+    renderDensityMap(pageTexts, pageTexts);
+    renderSignals(fullText);
+    renderCompression(fullText);
+    renderPageNav(pageTexts);
+    showPage(0, pageTexts);
+
+    const chunkSize = parseInt(document.getElementById('chunk-size').value) || 512;
+    renderChunks(fullText, chunkSize);
+
+    document.getElementById('results').style.display = 'block';
+
+  } catch (err) {
+    console.error(err);
+    setStatus('Error: ' + (err.message || 'parse failed'), 'error');
+  }
+}
+
+// ─── Chunk size slider ────────────────────────────────────────────────────────
+document.getElementById('chunk-size').addEventListener('input', (e) => {
+  const val = parseInt(e.target.value);
+  document.getElementById('chunk-size-val').textContent = val;
+  if (_pageTexts.length) {
+    const full = _pageTexts.join('\n\n');
+    renderChunks(full, val);
+  }
+});
+
+// ─── Drop zone & file input ───────────────────────────────────────────────────
+const zone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') processFile(file);
+});
+zone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+});
+</script>
