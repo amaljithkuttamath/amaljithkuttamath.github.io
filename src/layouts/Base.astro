@@ -23,6 +23,7 @@ const navItems = [
   { href: '/work', label: 'Work' },
   { href: '/blog', label: 'Blog' },
   { href: '/playground', label: 'Playground' },
+  { href: '/radar', label: 'Radar' },
   { href: '/about', label: 'About' },
 ];
 
@@ -141,6 +142,7 @@ if (matchedNav) {
         <a href="/work" class:list={[{ active: (currentPath === '/work' || currentPath === '/work/') || currentPath.startsWith('/work/') || currentPath.startsWith('/trust-bench') }]}>work</a>
         <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') }]}>blog</a>
         <a href="/playground" class:list={[{ active: currentPath.startsWith('/playground') }]}>playground</a>
+        <a href="/radar" class:list={[{ active: currentPath.startsWith('/radar') }]}>radar</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
         <button id="theme-toggle" class="theme-toggle" aria-label="Switch between dark and light theme">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
