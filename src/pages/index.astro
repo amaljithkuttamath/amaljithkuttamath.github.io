@@ -1,360 +1,343 @@
 ---
 import Base from '../layouts/Base.astro';
 
-const allPosts = import.meta.glob('./work/*.md', { eager: true }) as Record<string, any>;
-
-const astroPosts = [
+// Apps: things people return to.
+const apps = [
   {
-    frontmatter: {
-      title: "Watch a Language Model Think",
-      date: "2026-04-01",
-      description: "I used sparse autoencoders to look inside GPT-2. I found interpretable concepts, feature loops, and a temperature feature that fires correctly while the model gets the answer wrong.",
-      tags: ["interpretability", "SAE", "interactive"],
-      thread: "interpretability",
-      type: "experiment",
-      featured: true,
-    },
-    url: '/work/watch-model-think',
+    href: '/apps/tokenizer',
+    title: 'Tokenizer Arena',
+    tagline: 'Watch five real tokenizers shred your text differently.',
+    tag: 'live',
+  },
+  {
+    href: '/apps/pdf-lens',
+    title: 'PDF Lens',
+    tagline: 'Drop a PDF, get clean text + token cost, all in your browser.',
+    tag: 'wasm',
+  },
+  {
+    href: '/apps/probability-xray',
+    title: 'Probability X-ray',
+    tagline: 'Chat with a local model, see the confidence behind every word.',
+    tag: 'webgpu',
+  },
+  {
+    href: '/apps/gguf-inspect',
+    title: 'GGUF Inspect',
+    tagline: 'Paste a GGUF URL. Get architecture, quantization, and memory fit.',
+    tag: 'llama.cpp',
   },
 ];
 
-const posts = [
-  ...Object.entries(allPosts)
-    .map(([path, mod]) => ({ ...mod, url: '/work/' + path.replace('./work/', '').replace('.md', '') })),
-  ...astroPosts,
-].sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
-
-// Pick featured posts: one from each thread, prioritize featured flag
-const threads = [...new Set(posts.map((p) => p.frontmatter.thread).filter(Boolean))];
-const featured = threads
-  .map((t) => {
-    const threadPosts = posts.filter((p) => p.frontmatter.thread === t);
-    return threadPosts.find((p) => p.frontmatter.featured) || threadPosts[0];
-  })
-  .filter(Boolean)
-  .sort((a, b) => new Date(b.frontmatter.date).getTime() - new Date(a.frontmatter.date).getTime());
-
-// Installable tools
-const tools = posts.filter(
-  (p) => p.frontmatter.type === 'tool' && p.frontmatter.install
-);
-
-const formatDate = (date: string) =>
-  new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// Lab: educational demos.
+const lab = [
+  {
+    href: '/lab/microgpt',
+    title: 'microGPT Trainer',
+    tagline: 'Train a tiny transformer live, watch every component learn.',
+  },
+  {
+    href: '/lab/watch-model-think',
+    title: 'Watch a Model Think',
+    tagline: 'Step through GPT-2 token by token: features, calibration, loops.',
+  },
+];
 ---
 
-<Base title="Amaljith Kuttamath">
-  <section class="hero animate-in">
-    <h1 class="hero-headline">I study how language models fail and build tools to catch it.</h1>
-    <p class="hero-sub">Seven years building AI systems. Now focused on mechanistic interpretability — finding where models break before they do it in production.</p>
-    <p class="hero-cred">MS, George Mason University &middot; ex-ISRO &middot; <a href="https://doi.org/10.1097/QMH.0000000000000525">published in Quality Management in Health Care</a></p>
+<Base
+  title="Amaljith Kuttamath"
+  description="AI Engineer. I ship small, sharp tools that make language models legible: tokenizers, PDF parsers, probability views, GGUF inspection."
+>
+  <section class="intro animate-in">
+    <h1 class="tagline">
+      I build small tools to make language models legible &mdash; what they see,
+      how sure they are, and where they break.
+    </h1>
+    <p class="cred">
+      Everything below runs in your browser. Nothing you paste leaves the page.
+    </p>
   </section>
 
-  <section class="now animate-in animate-in-delay-1">
-    <div class="section-label">Now</div>
-    <a href="/trust-bench" class="now-card">
-      <div class="now-head">
-        <span class="now-title">Trust Bench</span>
-        <span class="status-pill">in progress</span>
-      </div>
-      <p>Open-source profiler that looks inside LLMs to find failure modes benchmarks miss. Next: training sparse autoencoders on Qwen3.5's hybrid DeltaNet layers.</p>
-    </a>
-  </section>
-
-  <section class="animate-in animate-in-delay-1">
-    <div class="section-header">
-      <span class="section-label">Writing</span>
-      <a href="/blog" class="section-link">all &rarr;</a>
+  <section class="lane animate-in animate-in-delay-1" aria-labelledby="lane-apps">
+    <div class="lane-head">
+      <h2 id="lane-apps" class="lane-label">Apps</h2>
+      <span class="lane-hint">things you'll use again</span>
     </div>
-    <div class="home-posts">
-      {featured.map((post) => (
-        <a href={post.url} class="home-post">
-          <div class="home-post-main">
-            <span class="home-post-title">{post.frontmatter.title}</span>
-            {post.frontmatter.metric && (
-              <span class="home-post-metric">{post.frontmatter.metric}</span>
-            )}
-            <span class="home-post-desc">{post.frontmatter.description}</span>
+    <div class="apps-grid">
+      {apps.map((a) => (
+        <a href={a.href} class="app-card">
+          <div class="app-card-head">
+            <span class="app-title">{a.title}</span>
+            <span class="app-tag">{a.tag}</span>
           </div>
-          <time class="mono">{formatDate(post.frontmatter.date)}</time>
+          <p class="app-tagline">{a.tagline}</p>
         </a>
       ))}
     </div>
   </section>
 
-  <a href="/playground" class="playground-link animate-in animate-in-delay-2">
-    <span class="playground-label">Playground</span>
-    <span class="playground-cta">Train a transformer, race tokenizers, chat with a local model &rarr;</span>
-  </a>
+  <section class="lane animate-in animate-in-delay-2" aria-labelledby="lane-radar">
+    <div class="lane-head">
+      <h2 id="lane-radar" class="lane-label">Radar</h2>
+      <span class="lane-hint">a daily read of the AI field</span>
+    </div>
+    <a href="/radar" class="radar-strip">
+      <div class="radar-strip-main">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="radar-title">AI Radar</span>
+        <span class="radar-sub">
+          ~30 sources collected, scored, graded, one digest per day
+        </span>
+      </div>
+      <span class="radar-cta">Open board &rarr;</span>
+    </a>
+  </section>
+
+  <section class="lane animate-in animate-in-delay-2" aria-labelledby="lane-lab">
+    <div class="lane-head">
+      <h2 id="lane-lab" class="lane-label">Lab</h2>
+      <span class="lane-hint">experiments, one idea each</span>
+    </div>
+    <div class="lab-list">
+      {lab.map((l) => (
+        <a href={l.href} class="lab-item">
+          <span class="lab-title">{l.title}</span>
+          <span class="lab-tagline">{l.tagline}</span>
+        </a>
+      ))}
+    </div>
+  </section>
 </Base>
+
 <style>
-  /* ── Hero ── */
-  .hero {
+  .intro {
     padding: var(--space-2xl) 0 var(--space-xl);
   }
 
-  .hero-headline {
+  .tagline {
     font-family: var(--font-serif);
     font-size: var(--text-section);
     font-weight: 500;
     letter-spacing: -0.02em;
-    line-height: 1.4;
-    max-width: 520px;
-    margin: 0 0 0.5rem;
+    line-height: 1.35;
+    color: var(--fg);
+    max-width: 560px;
+    margin: 0 0 0.75rem;
   }
 
-  .hero-sub {
-    font-size: var(--text-body);
+  .cred {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
     color: var(--fg-muted);
-    line-height: 1.6;
-    max-width: 500px;
+    letter-spacing: 0.01em;
     margin: 0;
   }
 
-  /* ── Section labels ── */
-  .section-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    margin-bottom: 0.75rem;
-  }
-
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.75rem;
-  }
-
-  .section-link {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    text-decoration: none;
-    transition: color var(--duration) var(--ease);
-  }
-
-  .section-link:hover {
-    color: var(--accent-color);
-  }
-
-  /* ── Now card ── */
-  .now {
+  /* ── Lane ── */
+  .lane {
     margin-bottom: var(--space-xl);
   }
 
-  .now-card {
-    display: block;
-    padding: var(--space-md) var(--space-lg);
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: 8px;
-    text-decoration: none;
-    color: var(--fg);
-    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  .lane-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
   }
 
-  .now-card:hover {
+  .lane-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+
+  .lane-hint {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+  }
+
+  /* ── Apps grid ── */
+  .apps-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .app-card {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .app-card:hover {
     border-color: var(--accent-color);
     background: var(--bg-hover);
   }
 
-  .now-head {
+  .app-card-head {
     display: flex;
     align-items: baseline;
+    justify-content: space-between;
     gap: 0.5rem;
     margin-bottom: 0.35rem;
   }
 
-  .now-title {
-    font-size: var(--text-subsection);
-    font-weight: 500;
+  .app-title {
+    font-size: var(--text-body);
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
-  .status-pill {
+  .app-tag {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--signal);
-    padding: 0.1rem 0.4rem;
-    border: 1px solid color-mix(in srgb, var(--signal) 50%, transparent);
+    color: var(--fg-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
     border-radius: 100px;
+    padding: 0.05rem 0.5rem;
+    flex-shrink: 0;
   }
 
-  .now-card p {
+  .app-tagline {
     font-size: var(--text-small);
     color: var(--fg-muted);
-    line-height: 1.6;
+    line-height: 1.5;
     margin: 0;
   }
 
-  /* ── Writing section ── */
-  section + section {
-    margin-top: var(--space-xl);
+  /* ── Radar strip ── */
+  .radar-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
   }
 
-  .home-posts {
+  .radar-strip:hover {
+    border-color: var(--signal);
+    background: var(--bg-hover);
+  }
+
+  .radar-strip-main {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+    display: inline-block;
+    animation: pulse 3s ease-in-out infinite;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  .radar-title {
+    font-size: var(--text-body);
+    font-weight: 600;
+  }
+
+  .radar-sub {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+  }
+
+  .radar-cta {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+  }
+
+  /* ── Lab list ── */
+  .lab-list {
     display: flex;
     flex-direction: column;
   }
 
-  .home-post {
+  .lab-item {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: var(--space-md);
-    padding: 0.65rem 0;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.6rem 0;
     border-bottom: 1px solid var(--fg-faint);
     text-decoration: none;
     color: var(--fg);
     transition: color var(--duration) var(--ease);
   }
 
-  .home-post:first-child {
+  .lab-item:first-child {
     border-top: 1px solid var(--fg-faint);
   }
 
-  .home-post:hover {
+  .lab-item:hover {
     color: var(--accent-color);
   }
 
-  .home-post-main {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
-
-  .home-post-title {
+  .lab-title {
     font-size: var(--text-body);
     font-weight: 500;
-  }
-
-  .home-post-desc {
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-    line-height: 1.5;
-  }
-
-  .home-post time {
     flex-shrink: 0;
-    font-size: var(--text-tag);
-    margin-top: 0.125rem;
   }
 
-  /* ── Tools grid ── */
-  .tools-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
-    margin-bottom: var(--space-xl);
-  }
-
-  .tool-card {
-    display: flex;
-    flex-direction: column;
-    padding: 0.75rem var(--space-md);
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: 8px;
-    text-decoration: none;
-    color: var(--fg);
-    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
-  }
-
-  .tool-card:hover {
-    border-color: var(--accent-color);
-    background: var(--bg-hover);
-  }
-
-  .tool-name {
-    font-size: var(--text-body);
-    font-weight: 500;
-  }
-
-  .tool-desc {
+  .lab-tagline {
     font-size: var(--text-small);
     color: var(--fg-muted);
-    margin: 0.15rem 0 0.4rem;
-    line-height: 1.4;
-  }
-
-  .tool-install {
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    color: var(--success);
-  }
-
-  /* ── Playground link ── */
-  .playground-link {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.75rem var(--space-md);
-    border: 1px solid var(--fg-faint);
-    border-radius: 8px;
-    text-decoration: none;
-    color: var(--fg);
-    margin-top: var(--space-lg);
-    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
-  }
-
-  .playground-link:hover {
-    border-color: var(--accent-color);
-    background: var(--bg-elevated);
-  }
-
-  .playground-label {
-    font-weight: 500;
-    font-size: var(--text-body);
-  }
-
-  .playground-cta {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--accent-color);
-  }
-
-  /* ── Hero credibility anchor ── */
-  .hero-cred {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    margin: 0.5rem 0 0;
-    letter-spacing: 0.01em;
-  }
-
-  .hero-cred a {
-    color: var(--fg-muted);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--fg-muted) 40%, transparent);
-    text-underline-offset: 2px;
-  }
-
-  .hero-cred a:hover {
-    color: var(--fg);
-  }
-
-  /* ── Post metric badge ── */
-  .home-post-metric {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--signal);
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    text-align: right;
   }
 
   /* ── Responsive ── */
   @media (max-width: 600px) {
-    .tools-grid {
+    .apps-grid {
       grid-template-columns: 1fr;
     }
 
-    .playground-link {
+    .radar-strip {
       flex-direction: column;
-      gap: 0.25rem;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .lab-item {
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .lab-tagline {
+      text-align: left;
     }
   }
 </style>

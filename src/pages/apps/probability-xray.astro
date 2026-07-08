@@ -1,0 +1,645 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="Probability X-ray · Amaljith Kuttamath" description="Chat with a language model running entirely in your browser, and watch the raw probability distribution behind every word it picks. Each token is colored by how confident the model was; hover to see what it almost said instead. SmolLM2 on WebGPU via Transformers.js.">
+  <div class="lc">
+    <div class="lc-head">
+      <h1>Probability X-ray</h1>
+      <p>A real language model running entirely in your browser — no server, no API key, nothing you type leaves this page. But a chat box hides the interesting part. This one doesn't: every word it generates is <strong>colored by how sure it was</strong>, and you can hover any word to see the alternatives it nearly said instead, with the exact probabilities. You are looking straight at the distribution a model samples from, on text you wrote, computed live on your own GPU.</p>
+    </div>
+
+    <div class="lc-loader" id="loader">
+      <div class="lc-loader-row">
+        <select class="lc-select" id="model-select" aria-label="Model to load">
+          <option value="HuggingFaceTB/SmolLM2-135M-Instruct" data-size="~120 MB">SmolLM2-135M (fast download, dimmer)</option>
+          <option value="HuggingFaceTB/SmolLM2-360M-Instruct" data-size="~280 MB" selected>SmolLM2-360M (better answers)</option>
+        </select>
+        <button class="lc-btn" id="load-btn">Load model (~280 MB)</button>
+        <span class="lc-device" id="device-badge"></span>
+      </div>
+      <div class="lc-progress" id="progress" style="display:none">
+        <div class="lc-progress-bar" id="progress-bar"></div>
+        <span class="lc-progress-text" id="progress-text">starting&hellip;</span>
+      </div>
+    </div>
+
+    <div class="lc-thread" id="thread" style="display:none"></div>
+
+    <div class="lc-starters" id="starters" style="display:none">
+      <span class="lc-nav-label">Try asking:</span>
+    </div>
+
+    <form class="lc-inputrow" id="input-row" style="display:none">
+      <input type="text" class="lc-textinput" id="user-input" placeholder="Ask it something, then mouse over its reply&hellip;" aria-label="Message to the model" autocomplete="off" />
+      <button type="submit" class="lc-btn" id="send-btn">Send</button>
+    </form>
+
+    <div class="lc-quick" id="quick" style="display:none">
+      <span class="lc-nav-label">Jump to:</span>
+    </div>
+
+    <div class="lc-legend" id="legend" style="display:none">
+      <span class="lc-legend-label">model confidence per word</span>
+      <span class="lc-legend-bar"></span>
+      <span class="lc-legend-ends"><em>a wild guess</em><em>dead certain</em></span>
+    </div>
+
+    <div class="lc-stats" id="stats"></div>
+
+    <div class="lc-note">
+      <strong>How to read it:</strong> at every step the model produces a probability for all ~49,000 possible next tokens. It samples one, and that becomes the word. Here, each generated token is tinted by the probability the model assigned to the word it chose — calm green when it was confident, hot red when it was basically guessing. Hover a word to open the distribution it sampled from: the chosen token plus the runners-up it was weighing. Numbers are the model's <em>raw</em> probabilities (temperature&nbsp;1), so they are honest, not cosmetic. Related demo: <a href="/lab/watch-model-think">Watch a Model Think</a> steps through the same lens on GPT-2. Here it runs on a 4-bit <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener noreferrer">Transformers.js</a> model on your hardware. Frontier models are ~1000× bigger; the architecture is identical, the difference is scale.
+    </div>
+  </div>
+
+  <div class="lc-tip" id="tooltip" aria-hidden="true"></div>
+</Base>
+
+<style>
+  .lc { max-width: 760px; margin: 0 auto; }
+  .lc-head { margin-bottom: var(--space-lg); }
+  .lc-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
+  .lc-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .lc-head strong { color: var(--fg); }
+
+  .lc-loader {
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: var(--space-md);
+  }
+  .lc-loader-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .lc-select {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--fg-faint);
+    padding: 6px 10px; border-radius: var(--radius-sm);
+    font-family: var(--font-sans); font-size: var(--text-small);
+  }
+  :global(.lc-btn) {
+    background: var(--accent-color); color: var(--bg); border: none;
+    padding: 7px 18px; border-radius: var(--radius-sm); cursor: pointer;
+    font-family: var(--font-sans); font-size: var(--text-small);
+    transition: opacity var(--duration) var(--ease);
+  }
+  :global(.lc-btn:hover) { opacity: 0.85; }
+  :global(.lc-btn:disabled) { opacity: 0.4; cursor: default; }
+  .lc-device {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted);
+  }
+  .lc-progress {
+    margin-top: 12px; position: relative; height: 22px;
+    background: var(--bg); border: 1px solid var(--fg-faint); border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+  .lc-progress-bar {
+    position: absolute; inset: 0; width: 0%;
+    background: var(--accent-color); opacity: 0.35;
+    transition: width 0.2s ease;
+  }
+  .lc-progress-text {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg);
+  }
+
+  .lc-thread {
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: var(--space-md); min-height: 120px;
+  }
+  :global(.lc-msg) {
+    max-width: 85%; padding: 8px 14px; border-radius: var(--radius-md);
+    font-size: var(--text-small); line-height: 1.85; white-space: pre-wrap;
+    word-break: break-word;
+  }
+  :global(.lc-msg.user) {
+    align-self: flex-end;
+    background: var(--accent-subtle); color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+  }
+  :global(.lc-msg.assistant) {
+    align-self: flex-start;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint); color: var(--fg);
+  }
+  :global(.lc-msg.assistant.thinking::after) {
+    content: '\258B'; animation: lc-blink 1s steps(1) infinite;
+    color: var(--accent-color);
+  }
+  @keyframes lc-blink { 50% { opacity: 0; } }
+
+  /* Each generated token, tinted by the model's confidence. */
+  :global(.lc-tok) {
+    border-radius: 3px; cursor: help;
+    box-shadow: inset 0 -2px 0 0 transparent;
+    transition: box-shadow var(--duration) var(--ease);
+  }
+  :global(.lc-tok:hover) { box-shadow: inset 0 -2px 0 0 var(--accent-color); }
+
+  .lc-inputrow { display: flex; gap: 10px; margin-bottom: 8px; }
+  .lc-textinput {
+    flex: 1; background: var(--bg-elevated); color: var(--fg);
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-sm);
+    padding: 8px 12px; font-family: var(--font-sans); font-size: var(--text-small);
+    transition: border-color var(--duration) var(--ease);
+  }
+  .lc-textinput:focus { border-color: var(--accent-color); }
+
+  /* Navigation chips: under a reply (.lc-nav) and the persistent row (.lc-quick) */
+  :global(.lc-nav) {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px solid var(--fg-faint);
+  }
+  .lc-quick, .lc-starters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin-bottom: var(--space-md);
+  }
+  :global(.lc-nav-label) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-muted);
+  }
+  :global(.lc-chip) {
+    text-decoration: none; background: transparent; cursor: pointer;
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--accent-color);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
+    border-radius: var(--radius-full); padding: 3px 11px;
+    transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  :global(.lc-chip:hover) {
+    background: var(--accent-subtle);
+    border-color: var(--accent-color);
+  }
+
+  .lc-legend {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: var(--space-sm);
+    font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg-muted);
+  }
+  .lc-legend-label { text-transform: uppercase; letter-spacing: 0.05em; }
+  .lc-legend-bar {
+    flex: 1; min-width: 120px; max-width: 240px; height: 8px; border-radius: var(--radius-full);
+    background: linear-gradient(90deg,
+      hsl(2 75% 52%), hsl(45 80% 50%), hsl(95 60% 42%), hsl(130 55% 40%));
+  }
+  .lc-legend-ends { display: flex; justify-content: space-between; min-width: 150px; flex: 1; }
+  .lc-legend-ends em { font-style: italic; }
+
+  .lc-stats {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted); min-height: 1.4em; margin-bottom: var(--space-md);
+  }
+
+  .lc-note {
+    padding: 10px 14px;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); font-size: var(--text-small);
+    color: var(--fg-muted); line-height: 1.7;
+  }
+  .lc-note strong { color: var(--fg); }
+  .lc-note em { font-style: italic; }
+
+  /* Floating distribution tooltip */
+  .lc-tip {
+    position: fixed; z-index: 50; pointer-events: none;
+    opacity: 0; transition: opacity 0.12s ease;
+    background: var(--bg); border: 1px solid var(--fg-muted);
+    border-radius: var(--radius-md); padding: 9px 11px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+    width: 232px; max-width: 80vw;
+  }
+  .lc-tip.show { opacity: 1; }
+  .lc-tip-head {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted); margin-bottom: 7px;
+    border-bottom: 1px solid var(--fg-faint); padding-bottom: 6px;
+  }
+  :global(.lc-tip-row) {
+    display: grid; grid-template-columns: 78px 1fr 38px; align-items: center;
+    gap: 7px; margin: 3px 0;
+    font-family: var(--font-mono); font-size: var(--text-label);
+  }
+  :global(.lc-tip-tok) {
+    color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-align: right; direction: rtl;
+  }
+  :global(.lc-tip-row.chosen .lc-tip-tok) { color: var(--accent-color); font-weight: 600; }
+  :global(.lc-tip-track) {
+    height: 9px; background: var(--bg-elevated);
+    border-radius: var(--radius-full); overflow: hidden;
+  }
+  :global(.lc-tip-fill) { height: 100%; border-radius: var(--radius-full); }
+  :global(.lc-tip-pct) { color: var(--fg-muted); text-align: right; }
+  :global(.lc-tip-ws) { color: var(--fg-faint); }
+</style>
+
+<script is:inline type="module">
+import { AutoTokenizer, AutoModelForCausalLM, TextStreamer, LogitsProcessor, RepetitionPenaltyLogitsProcessor, TemperatureLogitsWarper, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+
+env.allowLocalModels = false;
+
+const loadBtn = document.getElementById('load-btn');
+const modelSelect = document.getElementById('model-select');
+const deviceBadge = document.getElementById('device-badge');
+const progress = document.getElementById('progress');
+const progressBar = document.getElementById('progress-bar');
+const progressText = document.getElementById('progress-text');
+const thread = document.getElementById('thread');
+const inputRow = document.getElementById('input-row');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+const statsEl = document.getElementById('stats');
+const legendEl = document.getElementById('legend');
+const quickEl = document.getElementById('quick');
+const startersEl = document.getElementById('starters');
+const tooltip = document.getElementById('tooltip');
+
+// Probe actual GPU capability, not just API presence: some browsers expose
+// navigator.gpu with no adapter behind it, and some adapters lack fp16.
+let gpuAdapter = null;
+try { gpuAdapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null; } catch (e) { gpuAdapter = null; }
+const hasWebGPU = !!gpuAdapter;
+const hasF16 = hasWebGPU && gpuAdapter.features.has('shader-f16');
+deviceBadge.textContent = hasWebGPU ? ('webgpu available' + (hasF16 ? '' : ' (no fp16)')) : 'no webgpu · wasm fallback (slow)';
+
+modelSelect.addEventListener('change', () => {
+  const opt = modelSelect.selectedOptions[0];
+  loadBtn.textContent = 'Load model (' + opt.dataset.size + ')';
+});
+
+let tokenizer = null;
+let model = null;
+let generating = false;
+
+// Every page the guide is allowed to point visitors to. `match` strings let us
+// detect a recommendation even when the tiny model phrases it loosely (by title
+// keyword) rather than emitting the exact path.
+const PAGES = [
+  { path: '/about',                    label: 'About Amaljith',        match: ['/about', 'about page', 'bio', 'background', 'resume', 'contact'] },
+  { path: '/apps',                     label: 'Apps',                  match: ['/apps', 'apps', 'tools', 'products'] },
+  { path: '/apps/tokenizer',           label: 'Tokenizer Arena',       match: ['/apps/tokenizer', 'tokenizer arena', 'tokenizers'] },
+  { path: '/apps/pdf-lens',            label: 'PDF Lens',              match: ['/apps/pdf-lens', 'pdf lens', 'pdf parser', 'liteparse'] },
+  { path: '/apps/gguf-inspect',        label: 'GGUF Inspect',          match: ['/apps/gguf-inspect', 'gguf', 'quantization', 'memory estimate'] },
+  { path: '/lab',                      label: 'Lab',                   match: ['/lab', 'lab', 'experiments', 'demos'] },
+  { path: '/lab/microgpt',             label: 'microGPT Trainer',      match: ['/lab/microgpt', 'microgpt', 'train a transformer', 'train a tiny'] },
+  { path: '/lab/watch-model-think',    label: 'Watch a Model Think',   match: ['/lab/watch-model-think', 'watch a model think', 'sparse autoencoder', 'gpt-2'] },
+  { path: '/radar',                    label: 'AI Radar',              match: ['/radar', 'radar', 'ai news', 'daily digest'] },
+];
+
+// Pages worth surfacing up front, regardless of what the model says.
+const QUICK_LINKS = ['/about', '/apps', '/apps/tokenizer', '/lab/watch-model-think'];
+
+// Kept deliberately short: small models follow concise, structured prompts far
+// better than long ones. Detail and tone are taught by the few-shot turns below.
+const SYSTEM_PROMPT = [
+  "You are the concierge for Amaljith Kuttamath's portfolio site. Answer confidently in one or two sentences. When a page fits the question, name it and include its path.",
+  '',
+  'Amaljith is an AI engineer who builds small tools to make language models legible — tokenizers, PDF parsers, probability views, GGUF inspection. Email: kuttamath.amaljith@gmail.com.',
+  '',
+  'Pages:',
+  '/about — bio, background, resume, contact',
+  '/apps — the four in-browser tools',
+  '/lab — educational experiments',
+  '/radar — daily AI digest',
+  '/apps/tokenizer — compare real production tokenizers',
+  '/apps/pdf-lens — parse a PDF in your browser',
+  '/apps/gguf-inspect — inspect a GGUF model file',
+  '/lab/watch-model-think — sparse autoencoders inside GPT-2',
+].join('\n');
+
+// Two-shot priming. Research on sub-1B models shows 1–2 examples are the sweet
+// spot for locking in format (concise + a real path) and tone (helpful, not
+// hedging). These turns are context only; they are never drawn as chat bubbles.
+const FEW_SHOT = [
+  { role: 'user', content: 'who built this site?' },
+  { role: 'assistant', content: 'Amaljith Kuttamath — an AI engineer focused on how language models fail and how to measure it. His background, resume, and contact details are on the About page: /about' },
+  { role: 'user', content: 'where can I see his interpretability work?' },
+  { role: 'assistant', content: 'Start with "Watch a Model Think" (/lab/watch-model-think), where he uses sparse autoencoders to look inside GPT-2. More experiments are at /lab.' },
+];
+
+const messages = [
+  { role: 'system', content: SYSTEM_PROMPT },
+  ...FEW_SHOT,
+];
+
+// Starter prompts the guide handles well (they line up with its context and the
+// few-shot examples), to give visitors an obvious way in.
+const STARTERS = [
+  'Who built this site?',
+  'Show me the interpretability work',
+  'What can I try on this site?',
+  'How do I get in touch?',
+];
+
+// Map a probability in [0,1] to a confidence tint. Low probability (a guess)
+// runs hot and saturated so it draws the eye; high probability cools to a calm
+// green. Uncertain tokens are the interesting ones, so they shout louder.
+function confColor(p) {
+  const hue = 2 + Math.max(0, Math.min(1, p)) * 128;   // red -> green
+  const sat = 78 - 28 * p;                              // guesses more saturated
+  const alpha = 0.30 - 0.16 * p;                        // guesses more opaque
+  return 'hsla(' + hue.toFixed(0) + ', ' + sat.toFixed(0) + '%, 48%, ' + alpha.toFixed(3) + ')';
+}
+function fillColor(p) {
+  const hue = 2 + Math.max(0, Math.min(1, p)) * 128;
+  return 'hsl(' + hue.toFixed(0) + ', 70%, 46%)';
+}
+// Make whitespace/newlines legible inside the tooltip token labels.
+function showWhitespace(s) {
+  return s.replace(/\n/g, '↵').replace(/ /g, '·');
+}
+
+function addBubble(role) {
+  const el = document.createElement('div');
+  el.className = 'lc-msg ' + role;
+  thread.appendChild(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return el;
+}
+
+// A logits processor that does not touch the logits — it just photographs the
+// raw next-token distribution at every step. Because custom processors run
+// after the (here absent) temperature warper, these are the model's true
+// probabilities, not sampling-warped ones.
+class DistributionProbe extends LogitsProcessor {
+  constructor(k) { super(); this.k = k; this.steps = []; }
+  _call(input_ids, logits) {
+    const dims = logits.dims;
+    const vocab = dims[dims.length - 1];
+    const data = logits.data; // batch size 1 -> first `vocab` entries
+    // One pass: running softmax denominator + an insertion-sorted top-k.
+    let mx = -Infinity;
+    for (let i = 0; i < vocab; i++) { const v = data[i]; if (v > mx) mx = v; }
+    const idx = new Int32Array(this.k).fill(-1);
+    const val = new Float32Array(this.k).fill(-Infinity);
+    let sum = 0;
+    for (let i = 0; i < vocab; i++) {
+      const v = data[i];
+      sum += Math.exp(v - mx);
+      if (v > val[this.k - 1]) {
+        let j = this.k - 1;
+        while (j > 0 && val[j - 1] < v) { val[j] = val[j - 1]; idx[j] = idx[j - 1]; j--; }
+        val[j] = v; idx[j] = i;
+      }
+    }
+    const cands = [];
+    for (let j = 0; j < this.k; j++) {
+      if (idx[j] < 0) break;
+      cands.push({ id: idx[j], p: Math.exp(val[j] - mx) / sum });
+    }
+    this.steps.push(cands);
+    return logits;
+  }
+}
+
+loadBtn.addEventListener('click', async () => {
+  loadBtn.disabled = true;
+  modelSelect.disabled = true;
+  progress.style.display = 'block';
+  const modelId = modelSelect.value;
+
+  try {
+    progressText.textContent = 'loading tokenizer…';
+    tokenizer = await AutoTokenizer.from_pretrained(modelId);
+  } catch (err) {
+    progressText.textContent = 'tokenizer failed: ' + (err && err.message || err);
+    loadBtn.disabled = false; modelSelect.disabled = false; return;
+  }
+
+  // Try configs in order of preference; q4f16 only on GPUs that support fp16 shaders.
+  const attempts = [];
+  if (hasWebGPU && hasF16) attempts.push({ device: 'webgpu', dtype: 'q4f16' });
+  if (hasWebGPU) attempts.push({ device: 'webgpu', dtype: 'q4' });
+  attempts.push({ device: 'wasm', dtype: 'q8' });
+
+  let activeDevice = null;
+  const errors = [];
+  for (const cfg of attempts) {
+    const fileProgress = {};
+    try {
+      model = await AutoModelForCausalLM.from_pretrained(modelId, {
+        dtype: cfg.dtype,
+        device: cfg.device,
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.file) {
+            fileProgress[p.file] = { loaded: p.loaded || 0, total: p.total || 0 };
+            let loaded = 0, total = 0;
+            for (const f of Object.values(fileProgress)) { loaded += f.loaded; total += f.total; }
+            if (total > 0) {
+              progressBar.style.width = Math.min(100, (loaded / total) * 100) + '%';
+              progressText.textContent = (loaded / 1048576).toFixed(0) + ' / ' + (total / 1048576).toFixed(0) + ' MB (' + cfg.device + ' ' + cfg.dtype + ')';
+            }
+          } else if (p.status === 'ready') {
+            progressText.textContent = 'compiling for ' + cfg.device + '…';
+          }
+        },
+      });
+      activeDevice = cfg.device + ' ' + cfg.dtype;
+      break;
+    } catch (err) {
+      errors.push(cfg.device + '/' + cfg.dtype + ': ' + (err && err.message || err));
+      model = null;
+      progressBar.style.width = '0%';
+      progressText.textContent = cfg.device + ' ' + cfg.dtype + ' failed, trying next config…';
+    }
+  }
+
+  if (!model) {
+    progressText.textContent = 'all configs failed — ' + errors.join(' | ');
+    loadBtn.disabled = false;
+    modelSelect.disabled = false;
+    return;
+  }
+  deviceBadge.textContent = activeDevice;
+
+  progress.style.display = 'none';
+  document.getElementById('loader').style.display = 'none';
+  thread.style.display = 'flex';
+  inputRow.style.display = 'flex';
+  legendEl.style.display = 'flex';
+
+  // Persistent quick links so navigation always works, model or not.
+  quickEl.style.display = 'flex';
+  for (const path of QUICK_LINKS) {
+    const pg = PAGES.find((p) => p.path === path);
+    if (!pg) continue;
+    const a = document.createElement('a');
+    a.className = 'lc-chip'; a.href = pg.path; a.textContent = pg.label;
+    quickEl.appendChild(a);
+  }
+
+  // Starter prompts — an obvious way in, and ones the guide answers well.
+  startersEl.style.display = 'flex';
+  for (const q of STARTERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'lc-chip'; b.textContent = q;
+    b.addEventListener('click', () => { userInput.value = q; inputRow.requestSubmit(); });
+    startersEl.appendChild(b);
+  }
+
+  const intro = addBubble('assistant');
+  intro.textContent = 'Hi — I’m running locally on your ' + (hasWebGPU ? 'GPU' : 'CPU') + ' to help you find your way around Amaljith’s site. Ask what he works on or where to find something, and I’ll point you to the page. Hover any word in my reply to see how sure I was.';
+  userInput.focus();
+});
+
+inputRow.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = userInput.value.trim();
+  if (!text || generating || !model) return;
+
+  generating = true;
+  sendBtn.disabled = true;
+  userInput.value = '';
+  startersEl.style.display = 'none';   // the conversation has started
+  const u = addBubble('user'); u.textContent = text;
+  messages.push({ role: 'user', content: text });
+
+  const el = addBubble('assistant');
+  el.classList.add('thinking');
+
+  const inputs = tokenizer.apply_chat_template(messages, { add_generation_prompt: true, return_dict: true });
+  const promptLen = inputs.input_ids.dims.at(-1);
+  const probe = new DistributionProbe(64);
+
+  let reply = '';
+  let tokenCount = 0;
+  const t0 = performance.now();
+  const streamer = new TextStreamer(tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: (chunk) => {
+      reply += chunk;
+      tokenCount++;
+      el.textContent = reply;          // plain live preview; recolored when done
+      el.scrollIntoView({ block: 'end' });
+      const dt = (performance.now() - t0) / 1000;
+      if (dt > 0.3) statsEl.textContent = (tokenCount / dt).toFixed(1) + ' tokens/sec on ' + deviceBadge.textContent;
+    },
+  });
+
+  try {
+    // The probe runs FIRST, so it photographs the model's raw logits — honest
+    // confidence numbers. Repetition penalty and temperature run AFTER it, so
+    // they shape sampling (coherent answers) without touching what we display.
+    // SmolLM2's own card recommends temperature ~0.2; we sample low and keep the
+    // X-ray truthful. generation_config.temperature stays 1.0 so the library
+    // adds no warper of its own ahead of the probe.
+    const out = await model.generate({
+      ...inputs,
+      max_new_tokens: 220,
+      do_sample: true,
+      temperature: 1.0,
+      top_k: 48,
+      streamer,
+      logits_processor: [
+        probe,
+        new RepetitionPenaltyLogitsProcessor(1.15),
+        new TemperatureLogitsWarper(0.3),
+      ],
+    });
+
+    const seq = out.tolist()[0].map(Number);
+    const genIds = seq.slice(promptLen);
+    renderXray(el, genIds, probe.steps);
+    renderNav(el, reply, text);
+    messages.push({ role: 'assistant', content: reply });
+  } catch (err) {
+    el.textContent = 'generation failed: ' + (err && err.message || err);
+  }
+
+  el.classList.remove('thinking');
+  generating = false;
+  sendBtn.disabled = false;
+  userInput.focus();
+});
+
+// Replace the plain streamed text with one tinted span per generated token,
+// each carrying the distribution it was sampled from for the hover tooltip.
+function renderXray(el, genIds, steps) {
+  el.textContent = '';
+  const n = Math.min(genIds.length, steps.length);
+  for (let i = 0; i < n; i++) {
+    const id = genIds[i];
+    const piece = tokenizer.decode([id], { skip_special_tokens: false });
+    const visible = tokenizer.decode([id], { skip_special_tokens: true });
+    if (visible === '') continue; // EOS / special tokens carry no text
+
+    const dist = steps[i] || [];
+    const hit = dist.find((c) => c.id === id);
+    const p = hit ? hit.p : (dist.length ? dist[dist.length - 1].p : 0);
+
+    const span = document.createElement('span');
+    span.className = 'lc-tok';
+    span.textContent = piece;
+    span.style.background = confColor(p);
+    // Stash the top alternatives (decoded lazily on hover to keep render cheap).
+    span.dataset.p = p.toFixed(4);
+    span.dataset.chosen = String(id);
+    span.dataset.dist = JSON.stringify(dist.slice(0, 6).map((c) => [c.id, c.p]));
+    el.appendChild(span);
+  }
+}
+
+// Surface real pages as clickable chips under a reply. We scan BOTH the model's
+// answer and the visitor's question, so the right links appear even when the
+// small model forgets to name a page — intent alone is enough.
+function renderNav(el, reply, query) {
+  const hay = (reply + ' ' + (query || '')).toLowerCase();
+  const hits = PAGES.filter((pg) => pg.match.some((m) => hay.includes(m)));
+  if (!hits.length) return;
+  const row = document.createElement('div');
+  row.className = 'lc-nav';
+  row.appendChild(Object.assign(document.createElement('span'), { className: 'lc-nav-label', textContent: 'Open:' }));
+  for (const pg of hits.slice(0, 4)) {
+    const a = document.createElement('a');
+    a.className = 'lc-chip';
+    a.href = pg.path;
+    a.textContent = pg.label;
+    row.appendChild(a);
+  }
+  el.appendChild(row);
+}
+
+// One shared tooltip, populated on hover from the span's stashed distribution.
+function showTip(span) {
+  const dist = JSON.parse(span.dataset.dist || '[]');
+  const chosen = Number(span.dataset.chosen);
+  const p = Number(span.dataset.p);
+
+  let rows = '';
+  for (const [id, prob] of dist) {
+    const label = showWhitespace(tokenizer.decode([id], { skip_special_tokens: false })) || '∅';
+    const isChosen = id === chosen;
+    rows += '<div class="lc-tip-row' + (isChosen ? ' chosen' : '') + '">'
+      + '<span class="lc-tip-tok">' + escapeHtml(label) + '</span>'
+      + '<span class="lc-tip-track"><span class="lc-tip-fill" style="width:' + (prob * 100).toFixed(1) + '%;background:' + fillColor(prob) + '"></span></span>'
+      + '<span class="lc-tip-pct">' + (prob * 100).toFixed(1) + '</span>'
+      + '</div>';
+  }
+  tooltip.innerHTML = '<div class="lc-tip-head">chose &ldquo;' + escapeHtml(showWhitespace(tokenizer.decode([chosen], { skip_special_tokens: false }))) + '&rdquo; · '
+    + (p * 100).toFixed(1) + '% · what it weighed:</div>' + rows;
+
+  const r = span.getBoundingClientRect();
+  tooltip.classList.add('show');
+  tooltip.setAttribute('aria-hidden', 'false');
+  const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+  let left = r.left + r.width / 2 - tw / 2;
+  left = Math.max(8, Math.min(window.innerWidth - tw - 8, left));
+  let top = r.top - th - 8;
+  if (top < 8) top = r.bottom + 8; // flip below if no room above
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
+}
+function hideTip() {
+  tooltip.classList.remove('show');
+  tooltip.setAttribute('aria-hidden', 'true');
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// Delegate hover handling so it works for every token span without per-span listeners.
+thread.addEventListener('mouseover', (e) => {
+  const span = e.target.closest('.lc-tok');
+  if (span) showTip(span);
+});
+thread.addEventListener('mouseout', (e) => {
+  if (e.target.closest('.lc-tok')) hideTip();
+});
+</script>

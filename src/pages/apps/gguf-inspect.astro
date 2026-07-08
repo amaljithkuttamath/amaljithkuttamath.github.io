@@ -1,0 +1,821 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base
+  title="GGUF Inspect · Amaljith Kuttamath"
+  description="Paste a GGUF URL from Hugging Face. See architecture, quantization scheme, parameter count, context length, and whether it fits on your machine. Reads only the header bytes, in your browser."
+>
+  <div class="gg">
+    <div class="gg-head">
+      <h1>GGUF Inspect</h1>
+      <p>
+        Paste a GGUF file URL (Hugging Face resolve link works best). This tool
+        does an HTTP <code>Range</code> read of the first megabyte and parses
+        the header directly — no full download, no server round-trip. Nothing
+        you paste leaves this page.
+      </p>
+      <div class="gg-badges">
+        <span class="badge">http range read</span>
+        <span class="badge">runs locally</span>
+        <span class="badge">gguf v3</span>
+      </div>
+    </div>
+
+    <form class="gg-form" id="gg-form" autocomplete="off">
+      <input
+        type="url"
+        id="gg-url"
+        class="gg-url"
+        placeholder="https://huggingface.co/…/resolve/main/model.Q4_K_M.gguf"
+        spellcheck="false"
+        required
+      />
+      <button type="submit" class="gg-btn" id="gg-btn">Inspect</button>
+    </form>
+
+    <div class="gg-presets" id="gg-presets"></div>
+
+    <div class="gg-status" id="gg-status" style="display:none">
+      <span class="gg-status-dot" id="gg-status-dot"></span>
+      <span id="gg-status-msg">Fetching header…</span>
+    </div>
+
+    <div class="gg-result" id="gg-result" style="display:none">
+      <!-- Verdict card: will this fit? -->
+      <div class="gg-verdict" id="gg-verdict">
+        <div class="gg-verdict-head">
+          <span class="gg-verdict-label">Fit check</span>
+          <span class="gg-verdict-arch" id="gg-verdict-arch"></span>
+        </div>
+        <div class="gg-verdict-size" id="gg-verdict-size">—</div>
+        <div class="gg-verdict-detail" id="gg-verdict-detail"></div>
+        <div class="gg-verdict-devices" id="gg-verdict-devices"></div>
+      </div>
+
+      <!-- Specs table -->
+      <div class="gg-specs">
+        <div class="gg-spec-row"><span class="gg-spec-key">Architecture</span><span class="gg-spec-val" id="s-arch">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Parameters</span><span class="gg-spec-val" id="s-params">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Quantization</span><span class="gg-spec-val" id="s-quant">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Context length</span><span class="gg-spec-val" id="s-ctx">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Embedding dim</span><span class="gg-spec-val" id="s-embd">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Layers</span><span class="gg-spec-val" id="s-layers">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Attention heads</span><span class="gg-spec-val" id="s-heads">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">KV heads</span><span class="gg-spec-val" id="s-kv">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">File size</span><span class="gg-spec-val" id="s-filesize">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">Tensors</span><span class="gg-spec-val" id="s-tensors">—</span></div>
+        <div class="gg-spec-row"><span class="gg-spec-key">GGUF version</span><span class="gg-spec-val" id="s-version">—</span></div>
+      </div>
+
+      <!-- Full metadata (collapsible) -->
+      <details class="gg-metadata">
+        <summary>All metadata (<span id="gg-kv-count">0</span> keys)</summary>
+        <div class="gg-metadata-body" id="gg-metadata-body"></div>
+      </details>
+    </div>
+
+    <div class="gg-note">
+      <strong>How it works:</strong> GGUF is the file format used by
+      <a href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">llama.cpp</a>
+      and its clients. It stores model weights alongside a header of typed
+      key-value metadata: architecture, quantization, hyperparameters, tokenizer
+      config. The header lives at the start of the file, so a single
+      <code>Range</code> request is enough to read it without pulling gigabytes.
+      Parameter count is computed from tensor shapes; memory estimates use the
+      declared quantization bits per weight plus a small KV-cache allowance.
+    </div>
+  </div>
+</Base>
+
+<script>
+  // ── GGUF spec (v3) ─────────────────────────────────────────────────
+  // magic:            u32  = 'GGUF' (0x46554747 little-endian)
+  // version:          u32  = 3
+  // tensor_count:     u64
+  // metadata_kv_count:u64
+  // metadata:         (key: gguf_string, value_type: u32, value: typed)*
+  // tensors:          (name: gguf_string, n_dims: u32, dims: u64[n_dims],
+  //                    type: u32, offset: u64)*
+  //
+  // Value type enum (u32):
+  //   0=u8, 1=i8, 2=u16, 3=i16, 4=u32, 5=i32, 6=f32, 7=bool,
+  //   8=string, 9=array, 10=u64, 11=i64, 12=f64
+  //
+  // ggml_type (tensor dtype, subset relevant here):
+  //   0=F32, 1=F16, 2=Q4_0, 3=Q4_1, 6=Q5_0, 7=Q5_1, 8=Q8_0, 9=Q8_1,
+  //   10=Q2_K, 11=Q3_K, 12=Q4_K, 13=Q5_K, 14=Q6_K, 15=Q8_K,
+  //   16=IQ2_XXS, 17=IQ2_XS, 18=IQ3_XXS, 19=IQ1_S, 20=IQ4_NL,
+  //   21=IQ3_S, 22=IQ2_S, 23=IQ4_XS, 24=I8, 25=I16, 26=I32,
+  //   27=I64, 28=F64, 29=IQ1_M, 30=BF16, 31=Q4_0_4_4, 32=Q4_0_4_8, 33=Q4_0_8_8
+  //
+  // Bits per weight per ggml_type (from llama.cpp/ggml).
+  const GGML_TYPES = {
+    0:  { name: 'F32',      bpw: 32 },
+    1:  { name: 'F16',      bpw: 16 },
+    2:  { name: 'Q4_0',     bpw: 4.5 },
+    3:  { name: 'Q4_1',     bpw: 5.0 },
+    6:  { name: 'Q5_0',     bpw: 5.5 },
+    7:  { name: 'Q5_1',     bpw: 6.0 },
+    8:  { name: 'Q8_0',     bpw: 8.5 },
+    9:  { name: 'Q8_1',     bpw: 9.0 },
+    10: { name: 'Q2_K',     bpw: 2.625 },
+    11: { name: 'Q3_K',     bpw: 3.4375 },
+    12: { name: 'Q4_K',     bpw: 4.5 },
+    13: { name: 'Q5_K',     bpw: 5.5 },
+    14: { name: 'Q6_K',     bpw: 6.5625 },
+    15: { name: 'Q8_K',     bpw: 8.0 },
+    16: { name: 'IQ2_XXS',  bpw: 2.0625 },
+    17: { name: 'IQ2_XS',   bpw: 2.3125 },
+    18: { name: 'IQ3_XXS',  bpw: 3.0625 },
+    19: { name: 'IQ1_S',    bpw: 1.5625 },
+    20: { name: 'IQ4_NL',   bpw: 4.5 },
+    21: { name: 'IQ3_S',    bpw: 3.4375 },
+    22: { name: 'IQ2_S',    bpw: 2.5 },
+    23: { name: 'IQ4_XS',   bpw: 4.25 },
+    24: { name: 'I8',       bpw: 8 },
+    25: { name: 'I16',      bpw: 16 },
+    26: { name: 'I32',      bpw: 32 },
+    27: { name: 'I64',      bpw: 64 },
+    28: { name: 'F64',      bpw: 64 },
+    29: { name: 'IQ1_M',    bpw: 1.75 },
+    30: { name: 'BF16',     bpw: 16 },
+    31: { name: 'Q4_0_4_4', bpw: 4.5 },
+    32: { name: 'Q4_0_4_8', bpw: 4.5 },
+    33: { name: 'Q4_0_8_8', bpw: 4.5 },
+  };
+
+  const VALUE_TYPE = { U8:0, I8:1, U16:2, I16:3, U32:4, I32:5, F32:6, BOOL:7, STRING:8, ARRAY:9, U64:10, I64:11, F64:12 };
+
+  // A byte-oriented reader over an ArrayBuffer.
+  class Reader {
+    constructor(buffer, initialLength) {
+      this.buf = buffer;
+      this.view = new DataView(buffer);
+      this.pos = 0;
+      this.len = initialLength ?? buffer.byteLength;
+    }
+    remaining() { return this.len - this.pos; }
+    ensure(n) { if (this.pos + n > this.len) throw new Error('EOF'); }
+    u8()  { this.ensure(1); const v = this.view.getUint8(this.pos);       this.pos += 1; return v; }
+    i8()  { this.ensure(1); const v = this.view.getInt8(this.pos);        this.pos += 1; return v; }
+    u16() { this.ensure(2); const v = this.view.getUint16(this.pos, true); this.pos += 2; return v; }
+    i16() { this.ensure(2); const v = this.view.getInt16(this.pos, true);  this.pos += 2; return v; }
+    u32() { this.ensure(4); const v = this.view.getUint32(this.pos, true); this.pos += 4; return v; }
+    i32() { this.ensure(4); const v = this.view.getInt32(this.pos, true);  this.pos += 4; return v; }
+    f32() { this.ensure(4); const v = this.view.getFloat32(this.pos, true); this.pos += 4; return v; }
+    // JS numbers are f64; safe up to 2^53. Model sizes and offsets stay well below.
+    u64() {
+      this.ensure(8);
+      const lo = this.view.getUint32(this.pos, true);
+      const hi = this.view.getUint32(this.pos + 4, true);
+      this.pos += 8;
+      return hi * 2 ** 32 + lo;
+    }
+    i64() {
+      this.ensure(8);
+      const lo = this.view.getUint32(this.pos, true);
+      const hi = this.view.getInt32(this.pos + 4, true);
+      this.pos += 8;
+      return hi * 2 ** 32 + lo;
+    }
+    f64() { this.ensure(8); const v = this.view.getFloat64(this.pos, true); this.pos += 8; return v; }
+    bool() { return this.u8() !== 0; }
+    string() {
+      const len = this.u64();
+      this.ensure(len);
+      const bytes = new Uint8Array(this.buf, this.pos, len);
+      const s = new TextDecoder('utf-8').decode(bytes);
+      this.pos += len;
+      return s;
+    }
+    // Read a typed value of a given value_type enum. Arrays recurse.
+    value(type) {
+      switch (type) {
+        case VALUE_TYPE.U8:  return this.u8();
+        case VALUE_TYPE.I8:  return this.i8();
+        case VALUE_TYPE.U16: return this.u16();
+        case VALUE_TYPE.I16: return this.i16();
+        case VALUE_TYPE.U32: return this.u32();
+        case VALUE_TYPE.I32: return this.i32();
+        case VALUE_TYPE.F32: return this.f32();
+        case VALUE_TYPE.BOOL: return this.bool();
+        case VALUE_TYPE.STRING: return this.string();
+        case VALUE_TYPE.U64: return this.u64();
+        case VALUE_TYPE.I64: return this.i64();
+        case VALUE_TYPE.F64: return this.f64();
+        case VALUE_TYPE.ARRAY: {
+          const elemType = this.u32();
+          const n = this.u64();
+          // Guard against absurdly long arrays that could be corrupt or DoS.
+          if (n > 1e7) throw new Error('array too long: ' + n);
+          const out = new Array(Math.min(n, 65536));
+          for (let i = 0; i < n; i++) {
+            const v = this.value(elemType);
+            if (i < out.length) out[i] = v;
+          }
+          return out;
+        }
+        default: throw new Error('unknown value type ' + type);
+      }
+    }
+  }
+
+  // ── DOM ──────────────────────────────────────────────────────────
+  const form   = document.getElementById('gg-form');
+  const urlIn  = document.getElementById('gg-url');
+  const btn    = document.getElementById('gg-btn');
+  const statusRow = document.getElementById('gg-status');
+  const statusDot = document.getElementById('gg-status-dot');
+  const statusMsg = document.getElementById('gg-status-msg');
+  const result = document.getElementById('gg-result');
+  const kvBody = document.getElementById('gg-metadata-body');
+
+  const PRESETS = [
+    {
+      label: 'TinyLlama 1.1B (Q4_K_M, 670 MB)',
+      url: 'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+    },
+    {
+      label: 'Qwen2.5-0.5B (Q8_0, 530 MB)',
+      url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf',
+    },
+    {
+      label: 'Phi-3 mini (Q4, 2.4 GB)',
+      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+    },
+  ];
+
+  // Preset chips
+  const presetsEl = document.getElementById('gg-presets');
+  PRESETS.forEach((p) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'gg-preset';
+    b.textContent = p.label;
+    b.addEventListener('click', () => {
+      urlIn.value = p.url;
+      form.requestSubmit();
+    });
+    presetsEl.appendChild(b);
+  });
+
+  function setStatus(kind, msg) {
+    statusRow.style.display = 'flex';
+    statusDot.className = 'gg-status-dot gg-status-' + kind;
+    statusMsg.textContent = msg;
+  }
+
+  function hideStatus() { statusRow.style.display = 'none'; }
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 ** 2) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + ' MB';
+    return (n / 1024 ** 3).toFixed(2) + ' GB';
+  }
+
+  function fmtParams(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' K';
+    return String(n);
+  }
+
+  // ── Fetch + parse ────────────────────────────────────────────────
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = urlIn.value.trim();
+    if (!url) return;
+    result.style.display = 'none';
+    btn.disabled = true;
+    setStatus('loading', 'Fetching header…');
+
+    try {
+      // Ask for the first 1 MB. Most GGUFs' metadata + tensor list fit here.
+      // If not, we escalate and read up to 8 MB.
+      const meta = await inspect(url, 1024 * 1024);
+      if (meta.needsMoreBytes) {
+        setStatus('loading', 'Header runs long, fetching more…');
+        const bigger = await inspect(url, 8 * 1024 * 1024);
+        renderResult(bigger, url);
+      } else {
+        renderResult(meta, url);
+      }
+      hideStatus();
+    } catch (err) {
+      console.error(err);
+      setStatus('error', 'Could not read this file: ' + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  async function inspect(url, rangeBytes) {
+    // First, HEAD to get the total file size. Some CDNs (HF) support HEAD.
+    let totalSize = null;
+    try {
+      const head = await fetch(url, { method: 'HEAD' });
+      const cl = head.headers.get('content-length');
+      if (cl) totalSize = parseInt(cl, 10);
+    } catch (_) {
+      // HEAD may be blocked by CORS on some hosts; fall through.
+    }
+
+    // Range request for the header.
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-' + (rangeBytes - 1) },
+    });
+    if (!resp.ok && resp.status !== 206) {
+      throw new Error('HTTP ' + resp.status + '. The file may be private, or the host may not support cross-origin Range reads.');
+    }
+
+    // If server returned 200 (no range), we still got the buffer; if 206, only the range.
+    // Content-Range header can also give us the total size.
+    if (!totalSize) {
+      const cr = resp.headers.get('content-range');
+      if (cr) {
+        const m = cr.match(/\/(\d+)$/);
+        if (m) totalSize = parseInt(m[1], 10);
+      }
+      if (!totalSize) {
+        const cl = resp.headers.get('content-length');
+        if (cl && resp.status === 200) totalSize = parseInt(cl, 10);
+      }
+    }
+
+    const buf = await resp.arrayBuffer();
+    const r = new Reader(buf);
+
+    // Parse header.
+    const magic = r.u32();
+    if (magic !== 0x46554747) {
+      throw new Error('Not a GGUF file (bad magic). Make sure the URL points directly to the .gguf blob.');
+    }
+    const version = r.u32();
+    const tensorCount = r.u64();
+    const kvCount = r.u64();
+
+    if (version < 2) {
+      throw new Error('GGUF version ' + version + ' is unsupported. Only v2 and v3 are handled.');
+    }
+
+    const kv = {};
+    let needsMoreBytes = false;
+    try {
+      for (let i = 0; i < kvCount; i++) {
+        const key = r.string();
+        const type = r.u32();
+        const value = r.value(type);
+        kv[key] = value;
+      }
+    } catch (err) {
+      if (err.message === 'EOF') {
+        needsMoreBytes = true;
+        return { needsMoreBytes, totalSize, version, tensorCount, kvCount };
+      }
+      throw err;
+    }
+
+    // Parse tensor descriptors (name, dims, type, offset). This is what lets
+    // us compute parameter count precisely rather than guess from size.
+    const tensors = [];
+    let parameters = 0;
+    const typeHistogram = {};
+    try {
+      for (let i = 0; i < tensorCount; i++) {
+        const name = r.string();
+        const nDims = r.u32();
+        const dims = [];
+        let n = 1;
+        for (let d = 0; d < nDims; d++) {
+          const dim = r.u64();
+          dims.push(dim);
+          n *= dim;
+        }
+        const dtype = r.u32();
+        const offset = r.u64();
+        tensors.push({ name, dims, dtype, offset });
+        parameters += n;
+        typeHistogram[dtype] = (typeHistogram[dtype] || 0) + n;
+      }
+    } catch (err) {
+      if (err.message === 'EOF') {
+        needsMoreBytes = true;
+      } else {
+        throw err;
+      }
+    }
+
+    return {
+      needsMoreBytes,
+      totalSize,
+      version,
+      tensorCount,
+      kvCount,
+      kv,
+      tensors,
+      parameters,
+      typeHistogram,
+    };
+  }
+
+  // Pick the dominant weight quant scheme (largest by parameter count).
+  function dominantQuant(hist) {
+    let bestType = null, best = 0;
+    for (const t in hist) {
+      // Skip F32/F16 tensors like norms and embeddings when a real quant is present.
+      const meta = GGML_TYPES[+t];
+      if (!meta) continue;
+      if (hist[t] > best) { best = hist[t]; bestType = +t; }
+    }
+    return bestType;
+  }
+
+  // Weighted average bits per weight across all tensors.
+  function avgBpw(hist) {
+    let total = 0, weighted = 0;
+    for (const t in hist) {
+      const meta = GGML_TYPES[+t];
+      if (!meta) continue;
+      weighted += hist[t] * meta.bpw;
+      total += hist[t];
+    }
+    return total > 0 ? weighted / total : 0;
+  }
+
+  function archKey(kv, arch, field) {
+    // Try architecture-specific key first, then generic fallback.
+    return kv[arch + '.' + field] ?? kv['llm.' + field] ?? kv[field];
+  }
+
+  function renderResult(m, url) {
+    result.style.display = 'block';
+
+    const kv = m.kv || {};
+    const arch = kv['general.architecture'] || 'unknown';
+    const params = m.parameters || 0;
+    const dom = dominantQuant(m.typeHistogram || {});
+    const domName = dom !== null ? GGML_TYPES[dom].name : '—';
+    const bpw = avgBpw(m.typeHistogram || {});
+
+    // Model weight memory (parameters × bits/8).
+    const weightMem = (params * bpw) / 8;
+
+    // KV cache memory per token: 2 (K,V) × n_layers × n_kv_heads × head_dim × 2 bytes (f16).
+    const nLayers = archKey(kv, arch, 'block_count') || archKey(kv, arch, 'layer_count') || 0;
+    const nEmbd = archKey(kv, arch, 'embedding_length') || 0;
+    const nHeads = archKey(kv, arch, 'attention.head_count') || 0;
+    const nKvHeads = archKey(kv, arch, 'attention.head_count_kv') || nHeads;
+    const nCtx = archKey(kv, arch, 'context_length') || 0;
+    const headDim = nHeads ? nEmbd / nHeads : 0;
+    const kvPerToken = 2 * nLayers * nKvHeads * headDim * 2;  // bytes @ f16
+    const kvFullCtx = kvPerToken * nCtx;
+
+    // Total to load model at full context.
+    const totalMem = weightMem + kvFullCtx;
+
+    // Verdict card
+    document.getElementById('gg-verdict-arch').textContent = arch;
+    document.getElementById('gg-verdict-size').textContent = fmtBytes(totalMem);
+    const detail =
+      'Weights: ' + fmtBytes(weightMem) +
+      ' · KV cache @ ' + (nCtx.toLocaleString()) + ' tokens: ' + fmtBytes(kvFullCtx);
+    document.getElementById('gg-verdict-detail').textContent = kvFullCtx > 0 ? detail : 'Weights: ' + fmtBytes(weightMem);
+
+    // Device fit strip
+    const devices = [
+      { label: '8 GB',  bytes: 8  * 1024 ** 3 },
+      { label: '16 GB', bytes: 16 * 1024 ** 3 },
+      { label: '24 GB', bytes: 24 * 1024 ** 3 },
+      { label: '48 GB', bytes: 48 * 1024 ** 3 },
+    ];
+    const devEl = document.getElementById('gg-verdict-devices');
+    devEl.innerHTML = '';
+    devices.forEach((d) => {
+      const pill = document.createElement('span');
+      const fits = totalMem <= d.bytes * 0.85;   // leave 15% headroom for OS + activations
+      pill.className = 'gg-device ' + (fits ? 'gg-fit' : 'gg-nofit');
+      pill.textContent = d.label + (fits ? ' ✓' : ' ✗');
+      devEl.appendChild(pill);
+    });
+
+    // Specs table
+    const set = (id, v) => { document.getElementById(id).textContent = v; };
+    set('s-arch', arch);
+    set('s-params', params > 0 ? fmtParams(params) : '—');
+    set('s-quant', domName + (bpw > 0 ? ' · ' + bpw.toFixed(2) + ' bpw avg' : ''));
+    set('s-ctx', nCtx > 0 ? nCtx.toLocaleString() + ' tokens' : '—');
+    set('s-embd', nEmbd || '—');
+    set('s-layers', nLayers || '—');
+    set('s-heads', nHeads || '—');
+    set('s-kv', nKvHeads || '—');
+    set('s-filesize', m.totalSize ? fmtBytes(m.totalSize) : '—');
+    set('s-tensors', m.tensorCount ? m.tensorCount.toLocaleString() : '—');
+    set('s-version', m.version || '—');
+
+    // Full metadata (collapsed by default)
+    document.getElementById('gg-kv-count').textContent = Object.keys(kv).length;
+    kvBody.innerHTML = '';
+    const sortedKeys = Object.keys(kv).sort();
+    sortedKeys.forEach((k) => {
+      const row = document.createElement('div');
+      row.className = 'gg-kv-row';
+      const kEl = document.createElement('span');
+      kEl.className = 'gg-kv-key';
+      kEl.textContent = k;
+      const vEl = document.createElement('span');
+      vEl.className = 'gg-kv-val';
+      const v = kv[k];
+      vEl.textContent = formatValue(v);
+      row.appendChild(kEl);
+      row.appendChild(vEl);
+      kvBody.appendChild(row);
+    });
+  }
+
+  function formatValue(v) {
+    if (Array.isArray(v)) {
+      if (v.length === 0) return '[]';
+      if (v.length > 8) return '[' + v.slice(0, 8).map(shortValue).join(', ') + ', … ' + v.length + ' items]';
+      return '[' + v.map(shortValue).join(', ') + ']';
+    }
+    return shortValue(v);
+  }
+
+  function shortValue(v) {
+    if (typeof v === 'string') {
+      if (v.length > 120) return JSON.stringify(v.slice(0, 120)) + '…';
+      return JSON.stringify(v);
+    }
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'boolean') return String(v);
+    return String(v);
+  }
+</script>
+
+<style>
+  .gg { max-width: 860px; margin: 0 auto; }
+
+  .gg-head { margin-bottom: var(--space-lg); }
+  .gg-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 6px; }
+  .gg-head p  { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .gg-head code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--bg-elevated);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  .gg-head a { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+  .gg-head a:hover { color: var(--fg); }
+
+  .gg-badges { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    padding: 2px 8px;
+    border-radius: 100px;
+  }
+
+  /* Form */
+  .gg-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .gg-url {
+    flex: 1;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    transition: border-color var(--duration) var(--ease);
+  }
+  .gg-url:focus { outline: none; border-color: var(--accent-color); }
+  .gg-btn {
+    background: var(--fg);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 0 20px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: opacity var(--duration) var(--ease);
+  }
+  .gg-btn:hover { opacity: 0.85; }
+  .gg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Preset chips */
+  .gg-presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: var(--space-md); }
+  :global(.gg-preset) {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: 100px;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  :global(.gg-preset:hover) { color: var(--accent-color); border-color: var(--accent-color); }
+
+  /* Status */
+  .gg-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-md);
+  }
+  .gg-status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .gg-status-loading { background: var(--signal); animation: pulse 1.6s ease-in-out infinite; }
+  .gg-status-error { background: var(--danger); }
+
+  /* Verdict */
+  .gg-verdict {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+  }
+  .gg-verdict-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.35rem;
+  }
+  .gg-verdict-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fg-muted);
+  }
+  .gg-verdict-arch {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--signal);
+    text-transform: lowercase;
+  }
+  .gg-verdict-size {
+    font-family: var(--font-serif);
+    font-size: 2rem;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    line-height: 1.1;
+    margin: 0.35rem 0 0.5rem;
+  }
+  .gg-verdict-detail {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-md);
+  }
+  .gg-verdict-devices {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .gg-device {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    padding: 3px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.04em;
+  }
+  .gg-fit {
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
+  }
+  .gg-nofit {
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+  }
+
+  /* Specs table */
+  .gg-specs {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-lg);
+    margin-bottom: var(--space-md);
+  }
+  .gg-spec-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+  }
+  .gg-spec-row:last-child { border-bottom: none; }
+  .gg-spec-key {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+  }
+  .gg-spec-val {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg);
+    text-align: right;
+  }
+
+  /* Metadata details */
+  .gg-metadata {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-lg);
+    margin-bottom: var(--space-md);
+  }
+  .gg-metadata summary {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 0.35rem 0;
+    list-style: none;
+  }
+  .gg-metadata summary::-webkit-details-marker { display: none; }
+  .gg-metadata summary::before {
+    content: '▸ ';
+    color: var(--fg-muted);
+    transition: transform var(--duration) var(--ease);
+    display: inline-block;
+  }
+  .gg-metadata[open] summary::before { content: '▾ '; }
+  .gg-metadata-body {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--fg-faint);
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  :global(.gg-kv-row) {
+    display: grid;
+    grid-template-columns: minmax(200px, 40%) 1fr;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+  }
+  :global(.gg-kv-row:last-child) { border-bottom: none; }
+  :global(.gg-kv-key) { color: var(--fg-muted); word-break: break-all; }
+  :global(.gg-kv-val) { color: var(--fg); word-break: break-all; }
+
+  /* Note */
+  .gg-note {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .gg-note strong { color: var(--fg); font-weight: 600; }
+  .gg-note code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-hover);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  .gg-note a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+
+  @media (max-width: 600px) {
+    .gg-form { flex-direction: column; }
+    .gg-btn { padding: 10px 20px; }
+  }
+</style>
