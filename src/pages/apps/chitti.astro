@@ -25,139 +25,165 @@ const PRESETS = [
 >
   <div class="ch">
     <!-- Header -->
-    <div class="ch-head">
-      <h1>Chitti</h1>
-      <h2 class="ch-subtitle">Charting Indicators From Trusted Institutional Data</h2>
-      <p>
-        Ask a question about the world. Chitti is a deep-agent that plans,
-        picks the right World Bank indicators and countries, fetches the real
-        numbers, charts them, and verifies its own answer — all in your browser,
-        with your own API key. Every finding is cited to
-        <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data</a>.
-      </p>
-      <div class="ch-badges">
-        <span class="badge">world bank</span>
-        <span class="badge">browser-only</span>
-        <span class="badge">byok</span>
-        <span class="badge">cited</span>
-      </div>
-    </div>
-
-    <!-- BYOK strip -->
-    <div class="ch-byok" id="ch-byok">
-      <div class="ch-byok-row">
-        <label class="ch-field">
-          <span class="ch-field-label">Provider</span>
-          <select id="ch-provider" class="ch-select">
-            {PROVIDERS.map((p) => (
-              <option value={p.id}>{p.label}</option>
-            ))}
-          </select>
-        </label>
-        <label class="ch-field">
-          <span class="ch-field-label">Model</span>
-          <select id="ch-model" class="ch-select"></select>
-        </label>
-        <label class="ch-field ch-field-grow">
-          <span class="ch-field-label">API key</span>
-          <input
-            type="password"
-            id="ch-key"
-            class="ch-input"
-            placeholder="sk-… (never leaves your browser)"
-            spellcheck="false"
-            autocomplete="off"
-          />
-        </label>
-      </div>
-      <div class="ch-byok-row ch-byok-foot">
-        <label class="ch-save">
-          <input type="checkbox" id="ch-save" />
-          <span>Save key for this session</span>
-        </label>
-        <div class="ch-keylinks" id="ch-keylinks"></div>
-      </div>
-      <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
-    </div>
-
-    <!-- Question input -->
-    <form class="ch-ask" id="ch-ask" autocomplete="off">
-      <textarea
-        id="ch-q"
-        class="ch-q"
-        rows="2"
-        placeholder="Which countries reduced child mortality the most since 2000?"
-        spellcheck="false"
-      ></textarea>
-      <div class="ch-ask-foot">
-        <div class="ch-chips" id="ch-chips">
-          {PRESETS.map((p) => (
-            <button type="button" class="ch-chip" data-q={p}>{p}</button>
-          ))}
+    <header class="ch-head">
+      <div class="ch-title-row">
+        <h1>Chitti</h1>
+        <div class="ch-badges">
+          <span class="badge">world bank</span>
+          <span class="badge">browser-only</span>
+          <span class="badge">byok</span>
+          <span class="badge">cited</span>
         </div>
-        <button type="submit" class="ch-btn" id="ch-btn">Ask</button>
       </div>
-    </form>
+      <p class="ch-subtitle">Charting Indicators From Trusted Institutional Data</p>
+      <p class="ch-lede">
+        Ask a question about the world, then watch a deep-agent work: it plans,
+        picks World Bank indicators, fetches real numbers, charts them, and
+        verifies its own answer, live in your browser.
+        <a href="#ch-how">How it works ↓</a>
+      </p>
+    </header>
 
-    <!-- Status -->
+    <!-- Ask console: question first, connection tucked below -->
+    <section class="ch-console">
+      <form class="ch-ask" id="ch-ask" autocomplete="off">
+        <textarea
+          id="ch-q"
+          class="ch-q"
+          rows="2"
+          placeholder="Which countries reduced child mortality the most since 2000?"
+          spellcheck="false"
+        ></textarea>
+        <div class="ch-ask-foot">
+          <div class="ch-chips" id="ch-chips">
+            {PRESETS.map((p) => (
+              <button type="button" class="ch-chip" data-q={p}>{p}</button>
+            ))}
+          </div>
+          <button type="submit" class="ch-btn" id="ch-btn">Ask</button>
+        </div>
+      </form>
+
+      <details class="ch-byok" id="ch-byok">
+        <summary class="ch-byok-sum">
+          <span class="ch-byok-caret" aria-hidden="true"></span>
+          <span class="ch-byok-state" id="ch-byok-state">openrouter · no key</span>
+          <span class="ch-byok-cta" id="ch-byok-cta">needs an api key · free via openrouter</span>
+        </summary>
+        <div class="ch-byok-body">
+          <div class="ch-byok-row">
+            <label class="ch-field">
+              <span class="ch-field-label">Provider</span>
+              <select id="ch-provider" class="ch-select">
+                {PROVIDERS.map((p) => (
+                  <option value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </label>
+            <label class="ch-field">
+              <span class="ch-field-label">Model</span>
+              <select id="ch-model" class="ch-select"></select>
+            </label>
+            <label class="ch-field ch-field-grow">
+              <span class="ch-field-label">API key</span>
+              <input
+                type="password"
+                id="ch-key"
+                class="ch-input"
+                placeholder="sk-… (never leaves your browser)"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+          </div>
+          <div class="ch-byok-row ch-byok-foot">
+            <label class="ch-save">
+              <input type="checkbox" id="ch-save" />
+              <span>Save key for this session</span>
+            </label>
+            <div class="ch-keylinks" id="ch-keylinks"></div>
+          </div>
+          <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+        </div>
+      </details>
+    </section>
+
+    <!-- Status line -->
     <div class="ch-status" id="ch-status" style="display:none">
       <span class="ch-status-dot" id="ch-status-dot"></span>
       <span id="ch-status-msg">Planning…</span>
     </div>
 
-    <!-- Two-column agent panel -->
-    <div class="ch-panel" id="ch-panel" style="display:none">
+    <!-- The agent at work: live timeline + virtual workspace -->
+    <section class="ch-panel" id="ch-panel" style="display:none">
       <div class="ch-col ch-col-trace">
-        <div class="ch-col-head">Agent trace</div>
+        <div class="ch-col-head">
+          <span>Agent</span>
+          <span class="ch-col-sub">every tool call, live</span>
+        </div>
         <div class="ch-trace" id="ch-trace"></div>
       </div>
       <div class="ch-col ch-col-files">
         <div class="ch-col-head">
-          Files
+          <span>Workspace</span>
+          <span class="ch-col-sub" id="ch-files-sub">files the agent writes</span>
           <span class="ch-render-flag" id="ch-render-flag" style="display:none">Rendering…</span>
         </div>
         <div class="ch-files" id="ch-files"></div>
       </div>
-    </div>
+    </section>
 
-    <!-- Chart -->
-    <div class="ch-chart-wrap" id="ch-chart-wrap" style="display:none">
-      <div class="ch-chart" id="ch-chart"></div>
-      <div class="ch-finding-block">
-        <div class="ch-chart-title" id="ch-chart-title"></div>
-        <p class="ch-finding" id="ch-finding"></p>
-        <span class="ch-conf" id="ch-conf" style="display:none">confidence: low</span>
-      </div>
-    </div>
+    <!-- Answer: finding first, then the chart, then the receipts -->
+    <section class="ch-answer" id="ch-chart-wrap" style="display:none">
+      <p class="ch-finding" id="ch-finding"></p>
+      <span class="ch-conf" id="ch-conf" style="display:none">confidence: low</span>
+      <figure class="ch-chart-card">
+        <figcaption class="ch-chart-title" id="ch-chart-title"></figcaption>
+        <div class="ch-chart" id="ch-chart"></div>
+      </figure>
 
-    <!-- Data table -->
-    <details class="ch-data" id="ch-data" style="display:none">
-      <summary>Raw data (<span id="ch-data-count">0</span> rows) · <button type="button" class="ch-csv" id="ch-csv">Download CSV</button></summary>
-      <div class="ch-table-scroll">
-        <table class="ch-table" id="ch-table"></table>
-      </div>
-    </details>
+      <details class="ch-data" id="ch-data" style="display:none">
+        <summary>Raw data (<span id="ch-data-count">0</span> rows) · <button type="button" class="ch-csv" id="ch-csv">Download CSV</button></summary>
+        <div class="ch-table-scroll">
+          <table class="ch-table" id="ch-table"></table>
+        </div>
+      </details>
 
-    <!-- Citations -->
-    <div class="ch-cite" id="ch-cite" style="display:none"></div>
+      <div class="ch-cite" id="ch-cite" style="display:none"></div>
+    </section>
 
     <!-- How it works -->
-    <div class="ch-note">
-      <strong>How it works:</strong> Chitti ports the
-      <a href="https://github.com/langchain-ai/deepagents" target="_blank" rel="noopener noreferrer">deepagents</a>
-      pattern to the browser. A planning loop calls tools —
-      <code>search_indicators</code>, <code>list_countries</code>,
-      <code>fetch_worldbank</code>, <code>write_file</code>,
-      <code>render_chart</code>, <code>finish</code> — writing intermediate
-      artifacts to a virtual filesystem you can watch fill up on the right.
-      Data comes straight from the
-      <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data API</a>
-      over CORS-enabled requests. After the agent renders a chart, a second
-      model call verifies the chart actually answers your question; if not, it
-      retries once, then ships with a confidence note. Your API key stays in
-      this tab — it is sent only to the provider you choose, never to any
-      server of ours.
-    </div>
+    <aside class="ch-note" id="ch-how">
+      <div class="ch-note-step">
+        <span class="ch-note-num">01</span>
+        <div>
+          <strong>Plan &amp; fetch.</strong> Chitti ports the
+          <a href="https://github.com/langchain-ai/deepagents" target="_blank" rel="noopener noreferrer">deepagents</a>
+          pattern to the browser. A planning loop calls tools
+          (<code>search_indicators</code>, <code>fetch_worldbank</code>,
+          <code>render_chart</code>, …), writing artifacts to a virtual
+          filesystem you watch fill up in the workspace.
+        </div>
+      </div>
+      <div class="ch-note-step">
+        <span class="ch-note-num">02</span>
+        <div>
+          <strong>Chart &amp; verify.</strong> Data comes straight from the
+          <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data API</a>.
+          After the chart renders, a second model call checks it actually
+          answers your question. If not, one retry, then it ships with a
+          confidence note.
+        </div>
+      </div>
+      <div class="ch-note-step">
+        <span class="ch-note-num">03</span>
+        <div>
+          <strong>Your key, your tab.</strong> The API key stays in this tab
+          and is sent only to the provider you choose, never to any server of
+          ours. Every finding is cited back to the indicator it came from.
+        </div>
+      </div>
+    </aside>
   </div>
 
   <!-- Island: curated indicator names for client-side citation enrichment -->
@@ -186,6 +212,10 @@ const PRESETS = [
   const saveChk = $('ch-save') as HTMLInputElement;
   const keyLinks = $('ch-keylinks');
   const providerNote = $('ch-provider-note');
+
+  const byokDetails = $('ch-byok') as HTMLDetailsElement;
+  const byokState = $('ch-byok-state');
+  const byokCta = $('ch-byok-cta');
 
   const askForm = $('ch-ask') as HTMLFormElement;
   const qIn = $('ch-q') as HTMLTextAreaElement;
@@ -244,6 +274,7 @@ const PRESETS = [
     } else if (models.length) {
       modelSel.value = models[0].id;
     }
+    updateByokState();
   }
 
   // Populate the model dropdown — first from the hardcoded fallback (instant),
@@ -308,6 +339,19 @@ const PRESETS = [
     }
   }
 
+  // One-line summary of the connection, shown even when the panel is closed.
+  function updateByokState() {
+    const pid = currentProvider();
+    const meta = providerMeta(pid);
+    const model = meta.models.find((m) => m.id === modelSel.value);
+    const hasKey = keyIn.value.trim().length > 0;
+    byokState.textContent =
+      pid + ' · ' + (model ? model.label : modelSel.value) + (hasKey ? ' · key ✓' : '');
+    byokState.classList.toggle('ch-byok-ready', hasKey);
+    byokCta.style.display = hasKey ? 'none' : 'inline';
+    byokDetails.classList.toggle('ch-byok-missing', !hasKey);
+  }
+
   function onProviderChange() {
     const pid = currentProvider();
     void populateModels(pid);
@@ -317,9 +361,12 @@ const PRESETS = [
       : pid === 'openrouter' ? 'sk-or-… (never leaves your browser)'
       : 'sk-… (never leaves your browser)';
     if (saveChk.checked) sessionStorage.setItem(SESSION_PROVIDER, pid);
+    updateByokState();
   }
 
   providerSel.addEventListener('change', onProviderChange);
+  modelSel.addEventListener('change', updateByokState);
+  keyIn.addEventListener('input', updateByokState);
 
   // When the user enters a key for OpenAI/Anthropic, refresh the model list.
   // Debounced so we don't hit the API on every keystroke.
@@ -350,6 +397,7 @@ const PRESETS = [
     // Fires the dynamic model fetch with the key already present, so the
     // dropdown lands with real slugs on first paint.
     onProviderChange();
+    updateByokState();
   })();
 
   // Persist / clear the session key when the checkbox toggles or key changes.
@@ -381,26 +429,22 @@ const PRESETS = [
   }
   function hideStatus() { statusRow.style.display = 'none'; }
 
-  // ── Trace rendering ────────────────────────────────────────────────────
+  // ── Trace rendering: a live timeline of the agent's tool calls ────────
   const startTimes: number[] = [];
   function renderTrace(events: TraceEvent[]) {
-    // Row: [dot]  tool_name  ·  arg_summary                42ms
-    //           detail (result info) on second line, muted
     panel.style.display = 'grid';
+    const stick =
+      traceEl.scrollHeight - traceEl.scrollTop - traceEl.clientHeight < 40;
     traceEl.innerHTML = '';
     events.forEach((e, i) => {
       if (startTimes[i] === undefined) startTimes[i] = performance.now();
-
       const row = document.createElement('div');
       row.className = 'ch-trace-row ch-trace-' + e.status;
-
       const dot = document.createElement('span');
       dot.className = 'ch-trace-dot';
-
       const body = document.createElement('div');
       body.className = 'ch-trace-body';
-
-      // Head: tool_name  ·  arg_summary all on one line, wraps only if it must.
+      // Head: tool_name · arg_summary on one line, wraps only if it must.
       const head = document.createElement('div');
       head.className = 'ch-trace-head';
       const name = document.createElement('span');
@@ -418,14 +462,12 @@ const PRESETS = [
         head.appendChild(arg);
       }
       body.appendChild(head);
-
       if (e.detail) {
         const d = document.createElement('div');
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
         body.appendChild(d);
       }
-
       const meta = document.createElement('span');
       meta.className = 'ch-trace-meta';
       if (e.status === 'ok') {
@@ -436,18 +478,20 @@ const PRESETS = [
       } else {
         meta.textContent = '…';
       }
-
       row.appendChild(dot);
       row.appendChild(body);
       row.appendChild(meta);
       traceEl.appendChild(row);
     });
-
-    // Auto-scroll so the newest tool call is visible.
-    traceEl.scrollTop = traceEl.scrollHeight;
+    if (stick) traceEl.scrollTop = traceEl.scrollHeight;
   }
 
   // ── Virtual-FS rendering ───────────────────────────────────────────────
+  function fileExt(path: string): string {
+    const dot = path.lastIndexOf('.');
+    return dot === -1 ? 'txt' : path.slice(dot + 1).toLowerCase();
+  }
+
   function renderFiles(files: Record<string, string>) {
     panel.style.display = 'grid';
     // Preserve open/closed state of each file across re-renders.
@@ -461,7 +505,7 @@ const PRESETS = [
     if (!paths.length) {
       const empty = document.createElement('div');
       empty.className = 'ch-files-empty';
-      empty.textContent = 'No files yet.';
+      empty.textContent = 'Nothing yet. The agent writes its notes and data here as it works.';
       filesEl.appendChild(empty);
       return;
     }
@@ -472,7 +516,13 @@ const PRESETS = [
       if (openSet.has(path)) det.open = true;
       const sum = document.createElement('summary');
       sum.className = 'ch-file-name';
-      sum.textContent = path;
+      const label = document.createElement('span');
+      label.textContent = path;
+      const ext = document.createElement('span');
+      ext.className = 'ch-file-ext ch-file-ext-' + fileExt(path);
+      ext.textContent = fileExt(path);
+      sum.appendChild(label);
+      sum.appendChild(ext);
       const pre = document.createElement('pre');
       pre.className = 'ch-file-body';
       pre.textContent = files[path];
@@ -510,6 +560,9 @@ const PRESETS = [
     const palette = [signal, muted, fg, '#6b8ab8', '#5fa97c', '#c0605a', '#9a7cc0', '#b8946b'];
 
     const baseText = { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
+    // Shared y-axis name styling. (main referenced this without defining it,
+    // which threw a ReferenceError and broke chart rendering; defined here.)
+    const yAxisName = { nameTextStyle: baseText };
     const grid = { left: 52, right: 24, top: 28, bottom: 44, containLabel: true };
     const axisLine = { lineStyle: { color: faint } };
     const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
@@ -703,7 +756,13 @@ const PRESETS = [
 
     const apiKey = keyIn.value.trim();
     if (!apiKey) {
-      setStatus('error', 'Enter an API key above. Use the free OpenRouter link if you don’t have one.');
+      byokDetails.open = true;
+      byokDetails.classList.remove('ch-byok-nudge');
+      // Restart the nudge animation on repeat attempts.
+      void byokDetails.offsetWidth;
+      byokDetails.classList.add('ch-byok-nudge');
+      keyIn.focus();
+      setStatus('error', 'Add an API key below. The OpenRouter link has free models.');
       return;
     }
 
@@ -716,6 +775,7 @@ const PRESETS = [
     // Reset UI.
     running = true;
     askBtn.disabled = true;
+    askBtn.textContent = 'Working…';
     startTimes.length = 0;
     traceEl.innerHTML = '';
     filesEl.innerHTML = '';
@@ -723,9 +783,12 @@ const PRESETS = [
     dataDetails.style.display = 'none';
     citeEl.style.display = 'none';
     confEl.style.display = 'none';
+    findingEl.textContent = '';
+    byokDetails.open = false;
     if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
     setStatus('loading', 'Planning…');
     panel.style.display = 'grid';
+    renderFiles({});
 
     try {
       const out = await runAgent(cfg, question, {
@@ -745,12 +808,14 @@ const PRESETS = [
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus('ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
+      chartWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err: any) {
       console.error(err);
       setStatus('error', 'Run failed: ' + (err?.message ?? String(err)));
     } finally {
       running = false;
       askBtn.disabled = false;
+      askBtn.textContent = 'Ask';
     }
   });
 </script>
@@ -762,7 +827,14 @@ const PRESETS = [
 
   /* ── Header ── */
   .ch-head { margin-bottom: var(--space-lg); }
-  .ch-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 2px; }
+  .ch-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+  }
+  .ch-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 0; }
   .ch-subtitle {
     font-family: var(--font-serif);
     font-size: var(--text-subsection);
@@ -770,13 +842,19 @@ const PRESETS = [
     font-style: italic;
     letter-spacing: -0.01em;
     color: var(--fg-muted);
-    margin: 0 0 10px;
+    margin: 2px 0 10px;
   }
-  .ch-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; max-width: 680px; margin-bottom: 0; }
-  .ch-head a { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
-  .ch-head a:hover { color: var(--fg); }
+  .ch-lede {
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    line-height: 1.6;
+    max-width: 620px;
+    margin-bottom: 0;
+  }
+  .ch-lede a { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+  .ch-lede a:hover { color: var(--fg); }
 
-  .ch-badges { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .ch-badges { display: flex; gap: 6px; flex-wrap: wrap; }
   .badge {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -785,26 +863,109 @@ const PRESETS = [
     color: var(--fg-muted);
     border: 1px solid var(--fg-faint);
     padding: 2px 8px;
-    border-radius: 100px;
+    border-radius: var(--radius-full);
   }
 
-  /* ── BYOK strip ── */
-  .ch-byok {
+  /* ── Ask console ── */
+  .ch-console {
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    padding: var(--space-md);
+    border-radius: 12px;
     margin-bottom: var(--space-md);
+    transition: border-color var(--duration) var(--ease);
+    overflow: hidden;
   }
-  .ch-byok-row {
-    display: grid;
-    grid-template-columns: minmax(120px, 200px) minmax(180px, 280px) 1fr;
+  .ch-console:focus-within {
+    border-color: color-mix(in srgb, var(--fg) 22%, transparent);
+  }
+
+  .ch-q {
+    display: block;
+    width: 100%;
+    background: transparent;
+    color: var(--fg);
+    border: none;
+    padding: var(--space-md) var(--space-md) 4px;
+    font-family: var(--font-sans);
+    font-size: var(--text-body-lg);
+    line-height: 1.5;
+    resize: none;
+    min-height: 68px;
+  }
+  .ch-q:focus { outline: none; }
+  .ch-q::placeholder { color: var(--fg-muted); opacity: 0.55; }
+
+  .ch-ask-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
     gap: 10px;
-    align-items: end;
+    padding: 6px var(--space-md) var(--space-md);
+    flex-wrap: wrap;
   }
-  .ch-byok-foot { display: flex; margin-top: 10px; justify-content: space-between; align-items: center; }
-  .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .ch-field-grow { min-width: 0; }
+  .ch-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .ch-chip {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 3px 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  .ch-chip:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+  .ch-btn {
+    background: var(--fg);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 10px 26px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity var(--duration) var(--ease);
+  }
+  .ch-btn:hover { opacity: 0.85; }
+  .ch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Connection strip (BYOK) ── */
+  .ch-byok { border-top: 1px solid var(--fg-faint); }
+  .ch-byok-sum {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px var(--space-md);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+  .ch-byok-sum::-webkit-details-marker { display: none; }
+  .ch-byok-caret::before { content: '▸'; color: var(--fg-muted); }
+  .ch-byok[open] .ch-byok-caret::before { content: '▾'; }
+  .ch-byok-state { letter-spacing: 0.03em; }
+  .ch-byok-state.ch-byok-ready { color: var(--success); }
+  .ch-byok-cta { margin-left: auto; color: var(--signal); letter-spacing: 0.03em; }
+  .ch-byok-nudge { animation: ch-nudge 0.35s var(--ease); }
+  @keyframes ch-nudge {
+    0%, 100% { transform: translateX(0); }
+    30% { transform: translateX(-4px); }
+    60% { transform: translateX(4px); }
+  }
+
+  .ch-byok-body { padding: 4px var(--space-md) var(--space-md); }
+  .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
+  .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .ch-field-grow { flex: 1; min-width: 220px; }
   .ch-field-label {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -859,163 +1020,115 @@ const PRESETS = [
     margin: 10px 0 0;
   }
 
-  /* ── Question input ── */
-  .ch-ask { margin-bottom: var(--space-md); }
-  .ch-q {
-    width: 100%;
-    background: var(--bg-elevated);
-    color: var(--fg);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    padding: 12px 14px;
-    font-family: var(--font-sans);
-    font-size: var(--text-body);
-    line-height: 1.5;
-    resize: vertical;
-    transition: border-color var(--duration) var(--ease);
-  }
-  .ch-q:focus { outline: none; border-color: var(--accent-color); }
-  .ch-ask-foot {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 10px;
-    margin-top: 10px;
-    flex-wrap: wrap;
-  }
-  .ch-chips { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
-  .ch-chip {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    background: transparent;
-    color: var(--fg-muted);
-    border: 1px solid var(--fg-faint);
-    border-radius: 100px;
-    padding: 4px 12px;
-    cursor: pointer;
-    text-align: left;
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
-  }
-  .ch-chip:hover { color: var(--accent-color); border-color: var(--accent-color); }
-  .ch-btn {
-    background: var(--fg);
-    color: var(--bg);
-    border: none;
-    border-radius: var(--radius-md);
-    padding: 10px 24px;
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: opacity var(--duration) var(--ease);
-  }
-  .ch-btn:hover { opacity: 0.85; }
-  .ch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  /* ── Status ── */
+  /* ── Status line ── */
   .ch-status {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
+    gap: 8px;
     font-family: var(--font-mono);
-    font-size: var(--text-small);
+    font-size: var(--text-label);
     color: var(--fg-muted);
-    margin-bottom: var(--space-md);
+    margin: 0 2px var(--space-md);
   }
-  .ch-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
+  .ch-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
   .ch-status-loading { background: var(--signal); animation: pulse 1.6s ease-in-out infinite; }
   .ch-status-ok { background: var(--success); }
   .ch-status-error { background: var(--danger); }
 
-  /* Agent panel: two columns. Trace gets more room than files so long
-     tool-arg summaries (like 'SH.DYN.MORT · IND;CHN;BRA · 2000–2020')
-     stay on one line. */
+  /* ── Agent panel: timeline + workspace ── */
+  /* Trace gets more room than files so long tool-arg summaries
+     (like 'SH.DYN.MORT · IND;CHN;BRA · 2000–2020') stay on one line. */
   .ch-panel {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     gap: 12px;
-    margin-bottom: var(--space-md);
+    margin-bottom: var(--space-lg);
+    animation: fadeIn 0.3s var(--ease);
   }
   .ch-col {
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
+    border-radius: 12px;
     padding: var(--space-sm) var(--space-md);
-    min-height: 120px;
+    min-height: 140px;
+    min-width: 0;
   }
   .ch-col-head {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--fg-muted);
+    color: var(--fg);
     padding-bottom: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     border-bottom: 1px solid var(--fg-faint);
   }
+  .ch-col-sub {
+    color: var(--fg-muted);
+    text-transform: none;
+    letter-spacing: 0.02em;
+    font-size: var(--text-tag);
+  }
   .ch-render-flag {
+    margin-left: auto;
     color: var(--signal);
     text-transform: none;
     letter-spacing: 0.02em;
     animation: pulse 1.4s ease-in-out infinite;
   }
 
-  /* Trace rows — flex-based, always renders as a single row.
-     [dot] tool_name  ·  arg_summary                          42ms
-            detail (if any, on second line)
-  */
+  /* Trace timeline: a rail with one dot per tool call */
   .ch-trace {
-    display: flex; flex-direction: column;
+    position: relative;
+    display: flex;
+    flex-direction: column;
     max-height: 340px;
     overflow-y: auto;
+    padding-left: 2px;
+  }
+  .ch-trace::before {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 10px;
+    bottom: 10px;
+    width: 1px;
+    background: var(--fg-faint);
   }
   .ch-trace-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--fg-faint);
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: baseline;
+    padding: 6px 0 6px 18px;
   }
-  .ch-trace-row:last-child { border-bottom: none; }
   .ch-trace-dot {
-    flex: 0 0 auto;
-    width: 8px; height: 8px; border-radius: 50%;
+    position: absolute;
+    left: 0;
+    top: 11px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
     background: var(--fg-muted);
-    margin-top: 7px;
+    box-shadow: 0 0 0 3px var(--bg);
   }
-  .ch-trace-running .ch-trace-dot { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
   .ch-trace-ok .ch-trace-dot { background: var(--success); }
   .ch-trace-error .ch-trace-dot { background: var(--danger); }
-  .ch-trace-body {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .ch-trace-head {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+  .ch-trace-running .ch-trace-dot { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
+  .ch-trace-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .ch-trace-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .ch-trace-sep { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); opacity: 0.5; }
   .ch-trace-name {
     font-family: var(--font-mono);
     font-size: var(--text-label);
     font-weight: 500;
     color: var(--fg);
   }
-  .ch-trace-sep {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-faint);
-  }
+  .ch-trace-running .ch-trace-name { color: var(--signal); }
   .ch-trace-arg {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -1026,37 +1139,53 @@ const PRESETS = [
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
-    margin-top: 3px;
-    opacity: 0.85;
+    opacity: 0.8;
   }
   .ch-trace-error .ch-trace-detail { color: var(--danger); }
   .ch-trace-meta {
-    flex: 0 0 auto;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     white-space: nowrap;
-    margin-top: 3px;
   }
 
-  /* Files */
-  .ch-files { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
-  .ch-files-empty { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg-muted); padding: 8px 0; }
+  /* Workspace: the agent's virtual files */
+  .ch-files { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; }
+  .ch-files-empty {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    padding: 8px 0;
+  }
   .ch-file { border-bottom: 1px solid var(--fg-faint); }
   .ch-file:last-child { border-bottom: none; }
   .ch-file-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
     font-size: var(--text-label);
     color: var(--fg);
     cursor: pointer;
-    padding: 5px 0;
+    padding: 6px 0;
     list-style: none;
   }
   .ch-file-name::-webkit-details-marker { display: none; }
-  .ch-file-name::before {
-    content: '▸ '; color: var(--fg-muted); display: inline-block;
+  .ch-file-name::before { content: '▸'; color: var(--fg-muted); }
+  .ch-file[open] .ch-file-name::before { content: '▾'; }
+  .ch-file-ext {
+    margin-left: auto;
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 0 7px;
   }
-  .ch-file[open] .ch-file-name::before { content: '▾ '; }
+  .ch-file-ext-json { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
+  .ch-file-ext-csv { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+  .ch-file-ext-md { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 40%, transparent); }
   .ch-file-body {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -1073,36 +1202,21 @@ const PRESETS = [
     line-height: 1.5;
   }
 
-  /* ── Chart ── */
-  .ch-chart-wrap { margin-bottom: var(--space-md); }
-  .ch-chart {
-    width: 100%;
-    height: 420px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    padding: 8px;
-  }
-  .ch-finding-block { margin-top: var(--space-sm); }
-  .ch-chart-title {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-    margin-bottom: 4px;
-  }
+  /* ── Answer ── */
+  .ch-answer { margin-bottom: var(--space-lg); animation: fadeIn 0.3s var(--ease); }
   .ch-finding {
     font-family: var(--font-serif);
     font-style: italic;
-    font-size: var(--text-body-lg);
+    font-size: var(--text-section);
     color: var(--fg);
-    line-height: 1.5;
-    margin: 0;
+    line-height: 1.45;
+    margin: 0 0 6px;
+    max-width: 780px;
   }
+  .ch-finding:empty { display: none; }
   .ch-conf {
     display: inline-block;
-    margin-top: 8px;
+    margin-bottom: var(--space-sm);
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     text-transform: lowercase;
@@ -1111,8 +1225,24 @@ const PRESETS = [
     border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
     background: color-mix(in srgb, var(--signal) 8%, transparent);
     padding: 2px 10px;
-    border-radius: 100px;
+    border-radius: var(--radius-full);
   }
+  .ch-chart-card {
+    margin: var(--space-sm) 0 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: 12px;
+    padding: 10px 12px 12px;
+  }
+  .ch-chart-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    padding: 2px 4px 8px;
+  }
+  .ch-chart { width: 100%; height: 400px; }
 
   /* ── Data table ── */
   .ch-data {
@@ -1120,7 +1250,7 @@ const PRESETS = [
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-md);
     padding: var(--space-sm) var(--space-md);
-    margin-bottom: var(--space-md);
+    margin-top: var(--space-sm);
   }
   .ch-data summary {
     font-family: var(--font-mono);
@@ -1174,25 +1304,32 @@ const PRESETS = [
     font-size: var(--text-tag);
     color: var(--fg-muted);
     line-height: 1.7;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-md);
+    margin-top: var(--space-sm);
+    padding: 0 2px;
     word-break: break-word;
   }
   :global(.ch-cite a) { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
   :global(.ch-cite a:hover) { color: var(--fg); }
 
-  /* ── Note ── */
+  /* ── How it works ── */
   .ch-note {
-    padding: var(--space-md) var(--space-lg);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-lg);
+    padding: var(--space-lg);
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
+    border-radius: 12px;
     color: var(--fg-muted);
     font-size: var(--text-small);
-    line-height: 1.7;
+    line-height: 1.65;
+  }
+  .ch-note-step { display: flex; flex-direction: column; gap: 6px; }
+  .ch-note-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    letter-spacing: 0.08em;
+    color: var(--signal);
   }
   .ch-note strong { color: var(--fg); font-weight: 600; }
   .ch-note code {
@@ -1205,16 +1342,18 @@ const PRESETS = [
   .ch-note a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
 
   /* ── Responsive ── */
+  @media (max-width: 820px) {
+    .ch-note { grid-template-columns: 1fr; gap: var(--space-md); }
+  }
   @media (max-width: 700px) {
-    .ch-byok-row {
-      grid-template-columns: 1fr;
-    }
-
     .ch-panel { grid-template-columns: 1fr; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
     .ch-field { min-width: 0; }
     .ch-byok-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
-    .ch-ask-foot { flex-direction: column; }
+    .ch-byok-cta { margin-left: 0; }
+    .ch-byok-sum { flex-wrap: wrap; }
+    .ch-ask-foot { flex-direction: column; align-items: stretch; }
     .ch-btn { width: 100%; }
+    .ch-chart { height: 300px; }
   }
 </style>
