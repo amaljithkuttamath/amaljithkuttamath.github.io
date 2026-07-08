@@ -1,0 +1,220 @@
+{
+  "Economy": [
+    [
+      "NY.GDP.MKTP.CD",
+      "GDP (current US$)"
+    ],
+    [
+      "NY.GDP.MKTP.KD.ZG",
+      "GDP growth (annual %)"
+    ],
+    [
+      "NY.GDP.PCAP.CD",
+      "GDP per capita (current US$)"
+    ],
+    [
+      "NY.GDP.PCAP.PP.CD",
+      "GDP per capita, PPP (current international $)"
+    ],
+    [
+      "FP.CPI.TOTL.ZG",
+      "Inflation, consumer prices (annual %)"
+    ],
+    [
+      "SL.UEM.TOTL.ZS",
+      "Unemployment, total (% of total labor force)"
+    ],
+    [
+      "BX.KLT.DINV.WD.GD.ZS",
+      "Foreign direct investment, net inflows (% of GDP)"
+    ],
+    [
+      "NE.EXP.GNFS.ZS",
+      "Exports of goods and services (% of GDP)"
+    ],
+    [
+      "NE.IMP.GNFS.ZS",
+      "Imports of goods and services (% of GDP)"
+    ],
+    [
+      "GC.DOD.TOTL.GD.ZS",
+      "Central government debt, total (% of GDP)"
+    ]
+  ],
+  "Health": [
+    [
+      "SP.DYN.LE00.IN",
+      "Life expectancy at birth, total (years)"
+    ],
+    [
+      "SP.DYN.LE00.MA.IN",
+      "Life expectancy at birth, male (years)"
+    ],
+    [
+      "SP.DYN.LE00.FE.IN",
+      "Life expectancy at birth, female (years)"
+    ],
+    [
+      "SH.DYN.MORT",
+      "Mortality rate, under-5 (per 1,000 live births)"
+    ],
+    [
+      "SP.DYN.IMRT.IN",
+      "Mortality rate, infant (per 1,000 live births)"
+    ],
+    [
+      "SH.STA.MMRT",
+      "Maternal mortality ratio (per 100,000 live births)"
+    ],
+    [
+      "SH.XPD.CHEX.GD.ZS",
+      "Current health expenditure (% of GDP)"
+    ],
+    [
+      "SH.MED.PHYS.ZS",
+      "Physicians (per 1,000 people)"
+    ],
+    [
+      "SH.IMM.MEAS",
+      "Immunization, measles (% of children 12-23 months)"
+    ],
+    [
+      "SH.HIV.INCD.ZS",
+      "Incidence of HIV, all (per 1,000 uninfected population)"
+    ]
+  ],
+  "Population & Demographics": [
+    [
+      "SP.POP.TOTL",
+      "Population, total"
+    ],
+    [
+      "SP.POP.GROW",
+      "Population growth (annual %)"
+    ],
+    [
+      "SP.URB.TOTL.IN.ZS",
+      "Urban population (% of total)"
+    ],
+    [
+      "SP.DYN.TFRT.IN",
+      "Fertility rate, total (births per woman)"
+    ],
+    [
+      "SP.POP.65UP.TO.ZS",
+      "Population ages 65 and above (% of total)"
+    ],
+    [
+      "SM.POP.NETM",
+      "Net migration"
+    ]
+  ],
+  "Education": [
+    [
+      "SE.XPD.TOTL.GD.ZS",
+      "Government expenditure on education (% of GDP)"
+    ],
+    [
+      "SE.ADT.LITR.ZS",
+      "Literacy rate, adult total (% of people ages 15+)"
+    ],
+    [
+      "SE.SEC.ENRR",
+      "School enrollment, secondary (% gross)"
+    ],
+    [
+      "SE.TER.ENRR",
+      "School enrollment, tertiary (% gross)"
+    ],
+    [
+      "SE.PRM.CMPT.ZS",
+      "Primary completion rate, total (% of relevant age)"
+    ]
+  ],
+  "Poverty & Inequality": [
+    [
+      "SI.POV.DDAY",
+      "Poverty headcount ratio at $2.15/day, 2017 PPP (% of pop)"
+    ],
+    [
+      "SI.POV.GINI",
+      "Gini index"
+    ],
+    [
+      "SI.DST.10TH.10",
+      "Income share held by highest 10%"
+    ],
+    [
+      "SI.DST.FRST.10",
+      "Income share held by lowest 10%"
+    ]
+  ],
+  "Environment & Climate": [
+    [
+      "EN.GHG.CO2.MT.CE.AR5",
+      "Carbon dioxide (CO2) emissions (Mt CO2e)"
+    ],
+    [
+      "EN.GHG.CO2.PC.CE.AR5",
+      "Carbon dioxide (CO2) emissions per capita (t CO2e)"
+    ],
+    [
+      "EG.USE.ELEC.KH.PC",
+      "Electric power consumption (kWh per capita)"
+    ],
+    [
+      "EG.FEC.RNEW.ZS",
+      "Renewable energy consumption (% of final energy consumption)"
+    ],
+    [
+      "AG.LND.FRST.ZS",
+      "Forest area (% of land area)"
+    ],
+    [
+      "ER.H2O.FWTL.ZS",
+      "Annual freshwater withdrawals (% of internal resources)"
+    ]
+  ],
+  "Gender": [
+    [
+      "SL.TLF.CACT.FE.ZS",
+      "Labor force participation rate, female (% of females 15+)"
+    ],
+    [
+      "SG.GEN.PARL.ZS",
+      "Proportion of seats held by women in national parliaments (%)"
+    ],
+    [
+      "SE.ENR.PRSC.FM.ZS",
+      "School enrollment, primary and secondary (gross), gender parity index"
+    ]
+  ],
+  "Trade & Business": [
+    [
+      "IC.BUS.EASE.XQ",
+      "Ease of doing business score (unavailable post-2020)"
+    ],
+    [
+      "BX.GSR.TOTL.CD",
+      "Exports of goods and services (BoP, current US$)"
+    ],
+    [
+      "MS.MIL.XPND.GD.ZS",
+      "Military expenditure (% of GDP)"
+    ]
+  ],
+  "Technology & Infrastructure": [
+    [
+      "IT.NET.USER.ZS",
+      "Individuals using the Internet (% of population)"
+    ],
+    [
+      "IT.CEL.SETS.P2",
+      "Mobile cellular subscriptions (per 100 people)"
+    ],
+    [
+      "EG.ELC.ACCS.ZS",
+      "Access to electricity (% of population)"
+    ]
+  ]
+}
