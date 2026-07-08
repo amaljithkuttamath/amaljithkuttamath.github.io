@@ -384,30 +384,48 @@ const PRESETS = [
   // ── Trace rendering ────────────────────────────────────────────────────
   const startTimes: number[] = [];
   function renderTrace(events: TraceEvent[]) {
+    // Row: [dot]  tool_name  ·  arg_summary                42ms
+    //           detail (result info) on second line, muted
     panel.style.display = 'grid';
     traceEl.innerHTML = '';
     events.forEach((e, i) => {
       if (startTimes[i] === undefined) startTimes[i] = performance.now();
+
       const row = document.createElement('div');
       row.className = 'ch-trace-row ch-trace-' + e.status;
+
       const dot = document.createElement('span');
-      dot.className = 'ch-trace-dot' + (e.status === 'running' ? ' ch-trace-dot-run' : '');
+      dot.className = 'ch-trace-dot';
+
       const body = document.createElement('div');
       body.className = 'ch-trace-body';
+
+      // Head: tool_name  ·  arg_summary all on one line, wraps only if it must.
+      const head = document.createElement('div');
+      head.className = 'ch-trace-head';
       const name = document.createElement('span');
       name.className = 'ch-trace-name';
       name.textContent = e.tool;
-      const arg = document.createElement('span');
-      arg.className = 'ch-trace-arg';
-      arg.textContent = e.argSummary;
-      body.appendChild(name);
-      if (e.argSummary) body.appendChild(arg);
+      head.appendChild(name);
+      if (e.argSummary) {
+        const sep = document.createElement('span');
+        sep.className = 'ch-trace-sep';
+        sep.textContent = '·';
+        head.appendChild(sep);
+        const arg = document.createElement('span');
+        arg.className = 'ch-trace-arg';
+        arg.textContent = e.argSummary;
+        head.appendChild(arg);
+      }
+      body.appendChild(head);
+
       if (e.detail) {
-        const d = document.createElement('span');
+        const d = document.createElement('div');
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
         body.appendChild(d);
       }
+
       const meta = document.createElement('span');
       meta.className = 'ch-trace-meta';
       if (e.status === 'ok') {
@@ -418,11 +436,15 @@ const PRESETS = [
       } else {
         meta.textContent = '…';
       }
+
       row.appendChild(dot);
       row.appendChild(body);
       row.appendChild(meta);
       traceEl.appendChild(row);
     });
+
+    // Auto-scroll so the newest tool call is visible.
+    traceEl.scrollTop = traceEl.scrollHeight;
   }
 
   // ── Virtual-FS rendering ───────────────────────────────────────────────
@@ -513,7 +535,7 @@ const PRESETS = [
         legend,
         tooltip: { ...tooltip, trigger: 'item' as const },
         xAxis: { type: 'value', name: spec.x_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
-        yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
         series: spec.series.map((s) => ({
           name: s.name,
           type: 'scatter',
@@ -541,7 +563,7 @@ const PRESETS = [
           axisLine,
           axisLabel: { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
         },
-        yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
         series: spec.series.map((s) => {
           const map = new Map(s.data.map(([x, y]) => [x, y]));
           return {
@@ -576,7 +598,7 @@ const PRESETS = [
           return cats;
         })(),
       },
-      yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+      yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
       series: spec.series.map((s, i) => ({
         name: s.name,
         type: 'line',
@@ -774,10 +796,15 @@ const PRESETS = [
     padding: var(--space-md);
     margin-bottom: var(--space-md);
   }
-  .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-  .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
-  .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
-  .ch-field-grow { flex: 1; min-width: 220px; }
+  .ch-byok-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 200px) minmax(180px, 280px) 1fr;
+    gap: 10px;
+    align-items: end;
+  }
+  .ch-byok-foot { display: flex; margin-top: 10px; justify-content: space-between; align-items: center; }
+  .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .ch-field-grow { min-width: 0; }
   .ch-field-label {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -906,11 +933,13 @@ const PRESETS = [
   .ch-status-ok { background: var(--success); }
   .ch-status-error { background: var(--danger); }
 
-  /* ── Agent panel ── */
+  /* Agent panel: two columns. Trace gets more room than files so long
+     tool-arg summaries (like 'SH.DYN.MORT · IND;CHN;BRA · 2000–2020')
+     stay on one line. */
   .ch-panel {
     display: grid;
-    grid-template-columns: 40% 60%;
-    gap: 10px;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 12px;
     margin-bottom: var(--space-md);
   }
   .ch-col {
@@ -940,31 +969,52 @@ const PRESETS = [
     animation: pulse 1.4s ease-in-out infinite;
   }
 
-  /* Trace rows */
-  .ch-trace { display: flex; flex-direction: column; gap: 2px; }
+  /* Trace rows — flex-based, always renders as a single row.
+     [dot] tool_name  ·  arg_summary                          42ms
+            detail (if any, on second line)
+  */
+  .ch-trace {
+    display: flex; flex-direction: column;
+    max-height: 340px;
+    overflow-y: auto;
+  }
   .ch-trace-row {
-    display: grid;
-    grid-template-columns: 12px 1fr auto;
-    gap: 8px;
-    align-items: baseline;
-    padding: 5px 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
     border-bottom: 1px solid var(--fg-faint);
   }
   .ch-trace-row:last-child { border-bottom: none; }
   .ch-trace-dot {
-    width: 7px; height: 7px; border-radius: 50%;
+    flex: 0 0 auto;
+    width: 8px; height: 8px; border-radius: 50%;
     background: var(--fg-muted);
-    align-self: center;
+    margin-top: 7px;
   }
+  .ch-trace-running .ch-trace-dot { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
   .ch-trace-ok .ch-trace-dot { background: var(--success); }
   .ch-trace-error .ch-trace-dot { background: var(--danger); }
-  .ch-trace-dot-run { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
-  .ch-trace-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ch-trace-body {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .ch-trace-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
   .ch-trace-name {
     font-family: var(--font-mono);
     font-size: var(--text-label);
     font-weight: 500;
     color: var(--fg);
+  }
+  .ch-trace-sep {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-faint);
   }
   .ch-trace-arg {
     font-family: var(--font-mono);
@@ -976,14 +1026,17 @@ const PRESETS = [
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
-    opacity: 0.8;
+    margin-top: 3px;
+    opacity: 0.85;
   }
   .ch-trace-error .ch-trace-detail { color: var(--danger); }
   .ch-trace-meta {
+    flex: 0 0 auto;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     white-space: nowrap;
+    margin-top: 3px;
   }
 
   /* Files */
@@ -1153,6 +1206,10 @@ const PRESETS = [
 
   /* ── Responsive ── */
   @media (max-width: 700px) {
+    .ch-byok-row {
+      grid-template-columns: 1fr;
+    }
+
     .ch-panel { grid-template-columns: 1fr; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
     .ch-field { min-width: 0; }
