@@ -1,0 +1,1098 @@
+---
+import Base from '../../layouts/Base.astro';
+import { PROVIDERS } from '../../lib/chitti/providers';
+import indicatorsData from '../../data/worldbank/indicators.json';
+
+// Curated indicators flattened for the client-side id → name lookup used in
+// citations. Passed in as a JSON island so the runtime script can enrich ids.
+const indicatorMap: Record<string, string> = {};
+for (const topic of Object.keys(indicatorsData as Record<string, [string, string][]>)) {
+  for (const [id, name] of (indicatorsData as Record<string, [string, string][]>)[topic]) {
+    indicatorMap[id] = name;
+  }
+}
+
+const PRESETS = [
+  'Which countries reduced child mortality the most since 2000?',
+  'How has global life expectancy changed since 1960, by region?',
+  'Compare GDP per capita of India, China, and Brazil since 1990',
+];
+---
+
+<Base
+  title="Chitti · Amaljith Kuttamath"
+  description="Chitti — Charting Indicators From Trusted Institutional Data. A browser-only deep-agent that answers questions about the world using the World Bank Open Data API. Ask about the world. Get real numbers, cited."
+>
+  <div class="ch">
+    <!-- Header -->
+    <div class="ch-head">
+      <h1>Chitti</h1>
+      <h2 class="ch-subtitle">Charting Indicators From Trusted Institutional Data</h2>
+      <p>
+        Ask a question about the world. Chitti is a deep-agent that plans,
+        picks the right World Bank indicators and countries, fetches the real
+        numbers, charts them, and verifies its own answer — all in your browser,
+        with your own API key. Every finding is cited to
+        <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data</a>.
+      </p>
+      <div class="ch-badges">
+        <span class="badge">world bank</span>
+        <span class="badge">browser-only</span>
+        <span class="badge">byok</span>
+        <span class="badge">cited</span>
+      </div>
+    </div>
+
+    <!-- BYOK strip -->
+    <div class="ch-byok" id="ch-byok">
+      <div class="ch-byok-row">
+        <label class="ch-field">
+          <span class="ch-field-label">Provider</span>
+          <select id="ch-provider" class="ch-select">
+            {PROVIDERS.map((p) => (
+              <option value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+        <label class="ch-field">
+          <span class="ch-field-label">Model</span>
+          <select id="ch-model" class="ch-select"></select>
+        </label>
+        <label class="ch-field ch-field-grow">
+          <span class="ch-field-label">API key</span>
+          <input
+            type="password"
+            id="ch-key"
+            class="ch-input"
+            placeholder="sk-… (never leaves your browser)"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </label>
+      </div>
+      <div class="ch-byok-row ch-byok-foot">
+        <label class="ch-save">
+          <input type="checkbox" id="ch-save" />
+          <span>Save key for this session</span>
+        </label>
+        <div class="ch-keylinks" id="ch-keylinks"></div>
+      </div>
+      <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+    </div>
+
+    <!-- Question input -->
+    <form class="ch-ask" id="ch-ask" autocomplete="off">
+      <textarea
+        id="ch-q"
+        class="ch-q"
+        rows="2"
+        placeholder="Which countries reduced child mortality the most since 2000?"
+        spellcheck="false"
+      ></textarea>
+      <div class="ch-ask-foot">
+        <div class="ch-chips" id="ch-chips">
+          {PRESETS.map((p) => (
+            <button type="button" class="ch-chip" data-q={p}>{p}</button>
+          ))}
+        </div>
+        <button type="submit" class="ch-btn" id="ch-btn">Ask</button>
+      </div>
+    </form>
+
+    <!-- Status -->
+    <div class="ch-status" id="ch-status" style="display:none">
+      <span class="ch-status-dot" id="ch-status-dot"></span>
+      <span id="ch-status-msg">Planning…</span>
+    </div>
+
+    <!-- Two-column agent panel -->
+    <div class="ch-panel" id="ch-panel" style="display:none">
+      <div class="ch-col ch-col-trace">
+        <div class="ch-col-head">Agent trace</div>
+        <div class="ch-trace" id="ch-trace"></div>
+      </div>
+      <div class="ch-col ch-col-files">
+        <div class="ch-col-head">
+          Files
+          <span class="ch-render-flag" id="ch-render-flag" style="display:none">Rendering…</span>
+        </div>
+        <div class="ch-files" id="ch-files"></div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="ch-chart-wrap" id="ch-chart-wrap" style="display:none">
+      <div class="ch-chart" id="ch-chart"></div>
+      <div class="ch-finding-block">
+        <div class="ch-chart-title" id="ch-chart-title"></div>
+        <p class="ch-finding" id="ch-finding"></p>
+        <span class="ch-conf" id="ch-conf" style="display:none">confidence: low</span>
+      </div>
+    </div>
+
+    <!-- Data table -->
+    <details class="ch-data" id="ch-data" style="display:none">
+      <summary>Raw data (<span id="ch-data-count">0</span> rows) · <button type="button" class="ch-csv" id="ch-csv">Download CSV</button></summary>
+      <div class="ch-table-scroll">
+        <table class="ch-table" id="ch-table"></table>
+      </div>
+    </details>
+
+    <!-- Citations -->
+    <div class="ch-cite" id="ch-cite" style="display:none"></div>
+
+    <!-- How it works -->
+    <div class="ch-note">
+      <strong>How it works:</strong> Chitti ports the
+      <a href="https://github.com/langchain-ai/deepagents" target="_blank" rel="noopener noreferrer">deepagents</a>
+      pattern to the browser. A planning loop calls tools —
+      <code>search_indicators</code>, <code>list_countries</code>,
+      <code>fetch_worldbank</code>, <code>write_file</code>,
+      <code>render_chart</code>, <code>finish</code> — writing intermediate
+      artifacts to a virtual filesystem you can watch fill up on the right.
+      Data comes straight from the
+      <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data API</a>
+      over CORS-enabled requests. After the agent renders a chart, a second
+      model call verifies the chart actually answers your question; if not, it
+      retries once, then ships with a confidence note. Your API key stays in
+      this tab — it is sent only to the provider you choose, never to any
+      server of ours.
+    </div>
+  </div>
+
+  <!-- Island: curated indicator names for client-side citation enrichment -->
+  <script type="application/json" id="ch-indicator-map" set:html={JSON.stringify(indicatorMap)} is:inline></script>
+</Base>
+
+<script>
+  import { runAgent } from '../../lib/chitti/agent';
+  import {
+    PROVIDERS,
+    providerMeta,
+    type ProviderId,
+    type ProviderConfig,
+  } from '../../lib/chitti/providers';
+  import type { TraceEvent } from '../../lib/chitti/agent';
+  import type { ChartSpec, DataRow } from '../../lib/chitti/tools';
+
+  // ── Elements ──────────────────────────────────────────────────────────
+  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+
+  const providerSel = $('ch-provider') as HTMLSelectElement;
+  const modelSel = $('ch-model') as HTMLSelectElement;
+  const keyIn = $('ch-key') as HTMLInputElement;
+  const saveChk = $('ch-save') as HTMLInputElement;
+  const keyLinks = $('ch-keylinks');
+  const providerNote = $('ch-provider-note');
+
+  const askForm = $('ch-ask') as HTMLFormElement;
+  const qIn = $('ch-q') as HTMLTextAreaElement;
+  const askBtn = $('ch-btn') as HTMLButtonElement;
+  const chips = $('ch-chips');
+
+  const statusRow = $('ch-status');
+  const statusDot = $('ch-status-dot');
+  const statusMsg = $('ch-status-msg');
+
+  const panel = $('ch-panel');
+  const traceEl = $('ch-trace');
+  const filesEl = $('ch-files');
+  const renderFlag = $('ch-render-flag');
+
+  const chartWrap = $('ch-chart-wrap');
+  const chartEl = $('ch-chart');
+  const chartTitle = $('ch-chart-title');
+  const findingEl = $('ch-finding');
+  const confEl = $('ch-conf');
+
+  const dataDetails = $('ch-data') as HTMLDetailsElement;
+  const dataCount = $('ch-data-count');
+  const csvBtn = $('ch-csv') as HTMLButtonElement;
+  const tableEl = $('ch-table') as HTMLTableElement;
+
+  const citeEl = $('ch-cite');
+
+  // Curated indicator id → friendly name, for citations.
+  const INDICATOR_MAP: Record<string, string> = JSON.parse(
+    ($('ch-indicator-map') as HTMLScriptElement).textContent || '{}'
+  );
+
+  const SESSION_KEY = 'chitti:key';
+  const SESSION_PROVIDER = 'chitti:provider';
+
+  // ── Provider / model dropdown wiring ───────────────────────────────────
+  function currentProvider(): ProviderId {
+    return providerSel.value as ProviderId;
+  }
+
+  function populateModels(pid: ProviderId, selected?: string) {
+    const meta = providerMeta(pid);
+    modelSel.innerHTML = '';
+    for (const m of meta.models) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      if (m.free) opt.classList.add('ch-free-opt');
+      modelSel.appendChild(opt);
+    }
+    modelSel.value = selected && meta.models.some((m) => m.id === selected)
+      ? selected
+      : meta.defaultModel;
+  }
+
+  function renderKeyLinks(pid: ProviderId) {
+    keyLinks.innerHTML = '';
+    for (const p of PROVIDERS) {
+      const a = document.createElement('a');
+      a.href = p.keyUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = p.keyLabel;
+      a.className = 'ch-keylink' + (p.freeNote ? ' ch-keylink-free' : '');
+      keyLinks.appendChild(a);
+    }
+    const meta = providerMeta(pid);
+    if (meta.note) {
+      providerNote.textContent = meta.note;
+      providerNote.style.display = 'block';
+    } else {
+      providerNote.style.display = 'none';
+    }
+  }
+
+  function onProviderChange() {
+    const pid = currentProvider();
+    populateModels(pid);
+    renderKeyLinks(pid);
+    keyIn.placeholder =
+      pid === 'anthropic' ? 'sk-ant-… (never leaves your browser)'
+      : pid === 'openrouter' ? 'sk-or-… (never leaves your browser)'
+      : 'sk-… (never leaves your browser)';
+    if (saveChk.checked) sessionStorage.setItem(SESSION_PROVIDER, pid);
+  }
+
+  providerSel.addEventListener('change', onProviderChange);
+
+  // Restore a session-saved key if the user opted in previously this session.
+  (function restoreSession() {
+    const savedKey = sessionStorage.getItem(SESSION_KEY);
+    const savedProvider = sessionStorage.getItem(SESSION_PROVIDER) as ProviderId | null;
+    if (savedProvider && PROVIDERS.some((p) => p.id === savedProvider)) {
+      providerSel.value = savedProvider;
+    }
+    onProviderChange();
+    if (savedKey) {
+      keyIn.value = savedKey;
+      saveChk.checked = true;
+    }
+  })();
+
+  // Persist / clear the session key when the checkbox toggles or key changes.
+  function syncSession() {
+    if (saveChk.checked && keyIn.value) {
+      sessionStorage.setItem(SESSION_KEY, keyIn.value);
+      sessionStorage.setItem(SESSION_PROVIDER, currentProvider());
+    } else {
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_PROVIDER);
+    }
+  }
+  saveChk.addEventListener('change', syncSession);
+  keyIn.addEventListener('input', () => { if (saveChk.checked) syncSession(); });
+
+  // ── Preset chips ───────────────────────────────────────────────────────
+  chips.querySelectorAll<HTMLButtonElement>('.ch-chip').forEach((b) => {
+    b.addEventListener('click', () => {
+      qIn.value = b.dataset.q || '';
+      qIn.focus();
+    });
+  });
+
+  // ── Status helpers ─────────────────────────────────────────────────────
+  function setStatus(kind: 'loading' | 'ok' | 'error', msg: string) {
+    statusRow.style.display = 'flex';
+    statusDot.className = 'ch-status-dot ch-status-' + kind;
+    statusMsg.textContent = msg;
+  }
+  function hideStatus() { statusRow.style.display = 'none'; }
+
+  // ── Trace rendering ────────────────────────────────────────────────────
+  const startTimes: number[] = [];
+  function renderTrace(events: TraceEvent[]) {
+    panel.style.display = 'grid';
+    traceEl.innerHTML = '';
+    events.forEach((e, i) => {
+      if (startTimes[i] === undefined) startTimes[i] = performance.now();
+      const row = document.createElement('div');
+      row.className = 'ch-trace-row ch-trace-' + e.status;
+      const dot = document.createElement('span');
+      dot.className = 'ch-trace-dot' + (e.status === 'running' ? ' ch-trace-dot-run' : '');
+      const body = document.createElement('div');
+      body.className = 'ch-trace-body';
+      const name = document.createElement('span');
+      name.className = 'ch-trace-name';
+      name.textContent = e.tool;
+      const arg = document.createElement('span');
+      arg.className = 'ch-trace-arg';
+      arg.textContent = e.argSummary;
+      body.appendChild(name);
+      if (e.argSummary) body.appendChild(arg);
+      if (e.detail) {
+        const d = document.createElement('span');
+        d.className = 'ch-trace-detail';
+        d.textContent = e.detail;
+        body.appendChild(d);
+      }
+      const meta = document.createElement('span');
+      meta.className = 'ch-trace-meta';
+      if (e.status === 'ok') {
+        const ms = Math.round(performance.now() - startTimes[i]);
+        meta.textContent = ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's';
+      } else if (e.status === 'error') {
+        meta.textContent = 'error';
+      } else {
+        meta.textContent = '…';
+      }
+      row.appendChild(dot);
+      row.appendChild(body);
+      row.appendChild(meta);
+      traceEl.appendChild(row);
+    });
+  }
+
+  // ── Virtual-FS rendering ───────────────────────────────────────────────
+  function renderFiles(files: Record<string, string>) {
+    panel.style.display = 'grid';
+    // Preserve open/closed state of each file across re-renders.
+    const openSet = new Set(
+      Array.from(filesEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
+        (d) => d.dataset.path || ''
+      )
+    );
+    filesEl.innerHTML = '';
+    const paths = Object.keys(files);
+    if (!paths.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ch-files-empty';
+      empty.textContent = 'No files yet.';
+      filesEl.appendChild(empty);
+      return;
+    }
+    for (const path of paths) {
+      const det = document.createElement('details');
+      det.className = 'ch-file';
+      det.dataset.path = path;
+      if (openSet.has(path)) det.open = true;
+      const sum = document.createElement('summary');
+      sum.className = 'ch-file-name';
+      sum.textContent = path;
+      const pre = document.createElement('pre');
+      pre.className = 'ch-file-body';
+      pre.textContent = files[path];
+      det.appendChild(sum);
+      det.appendChild(pre);
+      filesEl.appendChild(det);
+    }
+  }
+
+  // ── ECharts (dynamic CDN import, dark-theme aware) ─────────────────────
+  let echartsMod: any = null;
+  let chartInstance: any = null;
+  let lastSpec: ChartSpec | null = null;
+
+  async function loadECharts() {
+    if (echartsMod) return echartsMod;
+    echartsMod = await import(
+      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.esm.min.js'
+    );
+    return echartsMod;
+  }
+
+  function cssVar(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function buildOption(spec: ChartSpec) {
+    const signal = cssVar('--signal') || '#d9a13b';
+    const muted = cssVar('--fg-muted') || '#79817c';
+    const fg = cssVar('--fg') || '#e6e9e7';
+    const faint = cssVar('--fg-faint') || 'rgba(255,255,255,0.08)';
+    const bg = cssVar('--bg') || '#0b0d0c';
+
+    // Palette: primary in signal amber, the rest in muted-derived tones.
+    const palette = [signal, muted, fg, '#6b8ab8', '#5fa97c', '#c0605a', '#9a7cc0', '#b8946b'];
+
+    const baseText = { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
+    const grid = { left: 52, right: 24, top: 28, bottom: 44, containLabel: true };
+    const axisLine = { lineStyle: { color: faint } };
+    const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
+
+    const legend = {
+      textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
+      top: 0,
+      type: 'scroll' as const,
+      icon: 'roundRect',
+    };
+    const tooltip = {
+      trigger: 'axis' as const,
+      backgroundColor: bg,
+      borderColor: faint,
+      textStyle: { color: fg, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+    };
+
+    if (spec.type === 'scatter') {
+      return {
+        color: palette,
+        textStyle: baseText,
+        grid,
+        legend,
+        tooltip: { ...tooltip, trigger: 'item' as const },
+        xAxis: { type: 'value', name: spec.x_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        series: spec.series.map((s) => ({
+          name: s.name,
+          type: 'scatter',
+          symbolSize: 8,
+          data: s.data,
+        })),
+      };
+    }
+
+    if (spec.type === 'bar' || spec.type === 'grouped-bar') {
+      // Categories come from the union of x values across series.
+      const cats: (string | number)[] = [];
+      for (const s of spec.series) for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
+      return {
+        color: palette,
+        textStyle: baseText,
+        grid,
+        legend: spec.series.length > 1 ? legend : { show: false },
+        tooltip,
+        xAxis: {
+          type: 'category',
+          data: cats,
+          name: spec.x_axis,
+          nameTextStyle: baseText,
+          axisLine,
+          axisLabel: { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
+        },
+        yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        series: spec.series.map((s) => {
+          const map = new Map(s.data.map(([x, y]) => [x, y]));
+          return {
+            name: s.name,
+            type: 'bar',
+            barMaxWidth: 28,
+            data: cats.map((c) => map.get(c) ?? null),
+            itemStyle: spec.series.length === 1 ? { color: signal } : {},
+          };
+        }),
+      };
+    }
+
+    // Default: line time-series.
+    return {
+      color: palette,
+      textStyle: baseText,
+      grid,
+      legend: spec.series.length > 1 ? legend : { show: false },
+      tooltip,
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        name: spec.x_axis,
+        nameTextStyle: baseText,
+        axisLine,
+        axisLabel: baseText,
+        data: (() => {
+          const cats: (string | number)[] = [];
+          for (const s of spec.series) for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
+          cats.sort((a, b) => Number(a) - Number(b));
+          return cats;
+        })(),
+      },
+      yAxis: { type: 'value', name: spec.y_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+      series: spec.series.map((s, i) => ({
+        name: s.name,
+        type: 'line',
+        smooth: false,
+        showSymbol: false,
+        lineStyle: { width: i === 0 ? 2 : 1.4 },
+        data: [...s.data].sort((a, b) => Number(a[0]) - Number(b[0])),
+      })),
+    };
+  }
+
+  async function renderChart(spec: ChartSpec) {
+    lastSpec = spec;
+    renderFlag.style.display = 'inline';
+    chartWrap.style.display = 'block';
+    const echarts = await loadECharts();
+    if (chartInstance) chartInstance.dispose();
+    chartInstance = echarts.init(chartEl, null, { renderer: 'canvas' });
+    chartInstance.setOption(buildOption(spec));
+    chartTitle.textContent = spec.title;
+    renderFlag.style.display = 'none';
+  }
+
+  // Re-theme the chart if the site theme toggles.
+  const themeObserver = new MutationObserver(() => {
+    if (chartInstance && lastSpec) {
+      chartInstance.dispose();
+      chartInstance = echartsMod.init(chartEl, null, { renderer: 'canvas' });
+      chartInstance.setOption(buildOption(lastSpec));
+    }
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+
+  // ── Data table + CSV ───────────────────────────────────────────────────
+  let lastRows: DataRow[] = [];
+  let lastCSV = '';
+
+  function renderTable(rows: DataRow[], csv: string) {
+    lastRows = rows;
+    lastCSV = csv;
+    if (!rows.length) { dataDetails.style.display = 'none'; return; }
+    dataDetails.style.display = 'block';
+    dataCount.textContent = String(rows.length);
+    const head = '<thead><tr><th>Country</th><th>ISO3</th><th>Year</th><th>Value</th></tr></thead>';
+    const shown = rows.slice(0, 500);
+    const body =
+      '<tbody>' +
+      shown
+        .map(
+          (r) =>
+            `<tr><td>${esc(r.country)}</td><td>${esc(r.iso3)}</td><td>${r.year}</td><td>${
+              r.value === null ? '—' : r.value
+            }</td></tr>`
+        )
+        .join('') +
+      (rows.length > 500 ? `<tr><td colspan="4" class="ch-table-more">… ${rows.length - 500} more rows (in CSV)</td></tr>` : '') +
+      '</tbody>';
+    tableEl.innerHTML = head + body;
+  }
+
+  csvBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const blob = new Blob([lastCSV], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chitti-data.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  function esc(s: string): string {
+    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+  }
+
+  // ── Citations ──────────────────────────────────────────────────────────
+  function renderCitations(indicators: { id: string; name: string }[]) {
+    if (!indicators.length) { citeEl.style.display = 'none'; return; }
+    citeEl.style.display = 'block';
+    const iso = new Date().toISOString().slice(0, 10);
+    const parts = indicators.map((ind) => {
+      const name = INDICATOR_MAP[ind.id] || ind.name || ind.id;
+      const url = 'https://data.worldbank.org/indicator/' + encodeURIComponent(ind.id);
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${esc(ind.id)} — ${esc(name)}</a>`;
+    });
+    citeEl.innerHTML =
+      'Data from <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data</a> · Indicator: ' +
+      parts.join(' · ') +
+      ' · Retrieved ' + iso;
+  }
+
+  // ── Run ────────────────────────────────────────────────────────────────
+  let running = false;
+
+  askForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (running) return;
+    const question = qIn.value.trim() || (qIn.placeholder || '').trim();
+    if (!question) return;
+
+    const apiKey = keyIn.value.trim();
+    if (!apiKey) {
+      setStatus('error', 'Enter an API key above. Use the free OpenRouter link if you don’t have one.');
+      return;
+    }
+
+    const cfg: ProviderConfig = {
+      provider: currentProvider(),
+      model: modelSel.value,
+      apiKey,
+    };
+
+    // Reset UI.
+    running = true;
+    askBtn.disabled = true;
+    startTimes.length = 0;
+    traceEl.innerHTML = '';
+    filesEl.innerHTML = '';
+    chartWrap.style.display = 'none';
+    dataDetails.style.display = 'none';
+    citeEl.style.display = 'none';
+    confEl.style.display = 'none';
+    if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
+    setStatus('loading', 'Planning…');
+    panel.style.display = 'grid';
+
+    try {
+      const out = await runAgent(cfg, question, {
+        onTrace: (events) => renderTrace(events),
+        onFiles: (files) => renderFiles(files),
+        onChart: (spec) => { void renderChart(spec); },
+        onStatus: (msg, kind) => setStatus(kind, msg),
+      });
+
+      // Chart may not have been rendered via callback if spec came late.
+      if (out.chartSpec && !chartInstance) await renderChart(out.chartSpec);
+
+      findingEl.textContent = out.finding || 'No finding produced.';
+      if (out.confidence === 'low') confEl.style.display = 'inline-block';
+      renderTable(out.rows, out.csv);
+      renderCitations(out.indicators);
+
+      const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
+      setStatus('ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
+    } catch (err: any) {
+      console.error(err);
+      setStatus('error', 'Run failed: ' + (err?.message ?? String(err)));
+    } finally {
+      running = false;
+      askBtn.disabled = false;
+    }
+  });
+</script>
+
+<style>
+  /* Break out of the 700px container so charts + two-column panel have room. */
+  :global(main.container:has(.ch)) { max-width: 960px !important; }
+  .ch { width: 100%; margin: 0 auto; }
+
+  /* ── Header ── */
+  .ch-head { margin-bottom: var(--space-lg); }
+  .ch-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 2px; }
+  .ch-subtitle {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    font-style: italic;
+    letter-spacing: -0.01em;
+    color: var(--fg-muted);
+    margin: 0 0 10px;
+  }
+  .ch-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; max-width: 680px; margin-bottom: 0; }
+  .ch-head a { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+  .ch-head a:hover { color: var(--fg); }
+
+  .ch-badges { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    padding: 2px 8px;
+    border-radius: 100px;
+  }
+
+  /* ── BYOK strip ── */
+  .ch-byok {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+  }
+  .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
+  .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .ch-field-grow { flex: 1; min-width: 220px; }
+  .ch-field-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+  }
+  .ch-select, .ch-input {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    transition: border-color var(--duration) var(--ease);
+  }
+  .ch-select:focus, .ch-input:focus { outline: none; border-color: var(--accent-color); }
+  .ch-input::placeholder { color: var(--fg-muted); opacity: 0.6; }
+
+  .ch-save {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .ch-save input { accent-color: var(--signal); }
+
+  .ch-keylinks { display: flex; gap: 12px; flex-wrap: wrap; }
+  :global(.ch-keylink) {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  :global(.ch-keylink:hover) { color: var(--fg); }
+  :global(.ch-keylink-free) {
+    color: var(--signal);
+    font-weight: 500;
+    text-decoration-color: var(--signal);
+  }
+  :global(.ch-keylink-free:hover) { color: var(--signal); opacity: 0.8; }
+
+  .ch-provider-note {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--signal);
+    margin: 10px 0 0;
+  }
+
+  /* ── Question input ── */
+  .ch-ask { margin-bottom: var(--space-md); }
+  .ch-q {
+    width: 100%;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.5;
+    resize: vertical;
+    transition: border-color var(--duration) var(--ease);
+  }
+  .ch-q:focus { outline: none; border-color: var(--accent-color); }
+  .ch-ask-foot {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .ch-chips { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+  .ch-chip {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: 100px;
+    padding: 4px 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  .ch-chip:hover { color: var(--accent-color); border-color: var(--accent-color); }
+  .ch-btn {
+    background: var(--fg);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 10px 24px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity var(--duration) var(--ease);
+  }
+  .ch-btn:hover { opacity: 0.85; }
+  .ch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Status ── */
+  .ch-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-md);
+  }
+  .ch-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-muted); flex-shrink: 0; }
+  .ch-status-loading { background: var(--signal); animation: pulse 1.6s ease-in-out infinite; }
+  .ch-status-ok { background: var(--success); }
+  .ch-status-error { background: var(--danger); }
+
+  /* ── Agent panel ── */
+  .ch-panel {
+    display: grid;
+    grid-template-columns: 40% 60%;
+    gap: 10px;
+    margin-bottom: var(--space-md);
+  }
+  .ch-col {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    min-height: 120px;
+  }
+  .ch-col-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--fg-faint);
+  }
+  .ch-render-flag {
+    color: var(--signal);
+    text-transform: none;
+    letter-spacing: 0.02em;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+
+  /* Trace rows */
+  .ch-trace { display: flex; flex-direction: column; gap: 2px; }
+  .ch-trace-row {
+    display: grid;
+    grid-template-columns: 12px 1fr auto;
+    gap: 8px;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--fg-faint);
+  }
+  .ch-trace-row:last-child { border-bottom: none; }
+  .ch-trace-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--fg-muted);
+    align-self: center;
+  }
+  .ch-trace-ok .ch-trace-dot { background: var(--success); }
+  .ch-trace-error .ch-trace-dot { background: var(--danger); }
+  .ch-trace-dot-run { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
+  .ch-trace-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ch-trace-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .ch-trace-arg {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    word-break: break-word;
+  }
+  .ch-trace-detail {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.8;
+  }
+  .ch-trace-error .ch-trace-detail { color: var(--danger); }
+  .ch-trace-meta {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+
+  /* Files */
+  .ch-files { display: flex; flex-direction: column; gap: 4px; max-height: 360px; overflow-y: auto; }
+  .ch-files-empty { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg-muted); padding: 8px 0; }
+  .ch-file { border-bottom: 1px solid var(--fg-faint); }
+  .ch-file:last-child { border-bottom: none; }
+  .ch-file-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg);
+    cursor: pointer;
+    padding: 5px 0;
+    list-style: none;
+  }
+  .ch-file-name::-webkit-details-marker { display: none; }
+  .ch-file-name::before {
+    content: '▸ '; color: var(--fg-muted); display: inline-block;
+  }
+  .ch-file[open] .ch-file-name::before { content: '▾ '; }
+  .ch-file-body {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: var(--bg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin: 2px 0 8px;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+
+  /* ── Chart ── */
+  .ch-chart-wrap { margin-bottom: var(--space-md); }
+  .ch-chart {
+    width: 100%;
+    height: 420px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 8px;
+  }
+  .ch-finding-block { margin-top: var(--space-sm); }
+  .ch-chart-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin-bottom: 4px;
+  }
+  .ch-finding {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: var(--text-body-lg);
+    color: var(--fg);
+    line-height: 1.5;
+    margin: 0;
+  }
+  .ch-conf {
+    display: inline-block;
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    color: var(--signal);
+    border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+    background: color-mix(in srgb, var(--signal) 8%, transparent);
+    padding: 2px 10px;
+    border-radius: 100px;
+  }
+
+  /* ── Data table ── */
+  .ch-data {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+  }
+  .ch-data summary {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 5px 0;
+    list-style: none;
+  }
+  .ch-data summary::-webkit-details-marker { display: none; }
+  .ch-data summary::before { content: '▸ '; color: var(--fg-muted); }
+  .ch-data[open] summary::before { content: '▾ '; }
+  .ch-csv {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--signal);
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 0;
+  }
+  .ch-table-scroll { max-height: 340px; overflow: auto; margin-top: 8px; }
+  .ch-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-tag); }
+  :global(.ch-table th) {
+    text-align: left;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--fg-faint);
+    position: sticky;
+    top: 0;
+    background: var(--bg-elevated);
+  }
+  :global(.ch-table td) {
+    padding: 4px 8px;
+    color: var(--fg);
+    border-bottom: 1px solid var(--fg-faint);
+  }
+  :global(.ch-table-more) { color: var(--fg-muted); text-align: center; }
+
+  /* ── Citations ── */
+  .ch-cite {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    line-height: 1.7;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+    word-break: break-word;
+  }
+  :global(.ch-cite a) { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+  :global(.ch-cite a:hover) { color: var(--fg); }
+
+  /* ── Note ── */
+  .ch-note {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    line-height: 1.7;
+  }
+  .ch-note strong { color: var(--fg); font-weight: 600; }
+  .ch-note code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-hover);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  .ch-note a { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    .ch-panel { grid-template-columns: 1fr; }
+    .ch-byok-row { flex-direction: column; align-items: stretch; }
+    .ch-field { min-width: 0; }
+    .ch-byok-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .ch-ask-foot { flex-direction: column; }
+    .ch-btn { width: 100%; }
+  }
+</style>

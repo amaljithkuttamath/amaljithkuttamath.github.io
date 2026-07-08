@@ -63,6 +63,21 @@ const lab = [
       <h2 id="lane-apps" class="lane-label">Apps</h2>
       <span class="lane-hint">things you'll use again</span>
     </div>
+    <a href="/apps/chitti" class="featured-card">
+      <div class="featured-main">
+        <div class="featured-head">
+          <span class="featured-title">Chitti</span>
+          <span class="featured-tag">deep-agent</span>
+        </div>
+        <p class="featured-tagline">Ask about the world. Get real numbers, cited.</p>
+        <p class="featured-sub">
+          A browser-only agent over the World Bank Open Data API &mdash; it
+          plans, fetches, charts, and verifies its own answer. Bring your own
+          key.
+        </p>
+      </div>
+      <span class="featured-cta">Open Chitti &rarr;</span>
+    </a>
     <div class="apps-grid">
       {apps.map((a) => (
         <a href={a.href} class="app-card">
@@ -162,6 +177,80 @@ const lab = [
     color: var(--fg-muted);
     letter-spacing: 0.02em;
     text-transform: lowercase;
+  }
+
+  /* ── Featured card (flagship agent) ── */
+  .featured-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: var(--space-md) var(--space-lg);
+    margin-bottom: 0.5rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .featured-card:hover {
+    border-color: var(--signal);
+    background: var(--bg-hover);
+  }
+
+  .featured-main { min-width: 0; }
+
+  .featured-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .featured-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .featured-tag {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--signal);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+    background: color-mix(in srgb, var(--signal) 8%, transparent);
+    border-radius: 100px;
+    padding: 0.05rem 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .featured-tagline {
+    font-size: var(--text-body);
+    color: var(--fg);
+    line-height: 1.4;
+    margin: 0 0 0.25rem;
+  }
+
+  .featured-sub {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.5;
+    margin: 0;
+    max-width: 60ch;
+  }
+
+  .featured-cta {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
   }
 
   /* ── Apps grid ── */
@@ -323,6 +412,12 @@ const lab = [
   @media (max-width: 600px) {
     .apps-grid {
       grid-template-columns: 1fr;
+    }
+
+    .featured-card {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
     }
 
     .radar-strip {
