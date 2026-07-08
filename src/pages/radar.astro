@@ -35,9 +35,10 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
       </span>
     </div>
     <p class="hero-lede">
-      A live intelligence view of AI research, releases, and social signal.
-      Observed signals below; synthesis is machine-generated commentary on the
-      board.
+      An automated pipeline scans new AI papers, models, repos, and lab posts
+      every day, scores each item for relevance, and writes a short brief.
+      The brief below is today's machine-generated summary; the board under
+      it is the ranked evidence behind it.
       <a href={`https://github.com/${RADAR_REPO}`} target="_blank" rel="noopener noreferrer">
         method &amp; source &rarr;
       </a>
@@ -45,80 +46,31 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
   </section>
 
   <!-- ── STATUS BAR ───────────────────────────────────────────────── -->
-  <!-- System telemetry: what the reader needs to trust the instrument.
-       Coverage window + universe size + freshness. Never publication cadence. -->
-  <section class="status-bar animate-in animate-in-delay-1" aria-label="System telemetry">
+  <!-- Three numbers a cold reader can parse without a legend:
+       how many items are tracked, how many rank high today, and how
+       fresh the data is. -->
+  <section class="status-bar animate-in animate-in-delay-1" aria-label="System status">
     <div class="status-cell">
-      <span class="status-label">coverage</span>
-      <span class="status-value" id="status-window">—</span>
-    </div>
-    <div class="status-cell">
-      <span class="status-label">universe</span>
-      <span class="status-value" id="status-universe">—</span>
+      <span class="status-label">tracked</span>
+      <span class="status-value" id="status-tracked">–</span>
     </div>
     <div class="status-cell">
-      <span class="status-label">active</span>
-      <span class="status-value" id="status-active">—</span>
+      <span class="status-label">high signal</span>
+      <span class="status-value" id="status-high">–</span>
     </div>
     <div class="status-cell">
-      <span class="status-label">escalating</span>
-      <span class="status-value" id="status-escalating">—</span>
-    </div>
-    <div class="status-cell">
-      <span class="status-label">last sync</span>
-      <span class="status-value" id="status-sync">—</span>
-    </div>
-  </section>
-
-  <!-- ── SIGNAL TAPE ──────────────────────────────────────────────── -->
-  <!-- 14-tick history of pipeline runs. Amber intensity encodes escalation
-       count that day. Clickable to jump to that day's source digest on
-       GitHub. Creates spatial memory across visits — you can see the
-       shape of the last two weeks at a glance.
-       (GPT-5.5's signature suggestion, adopted.) -->
-  <section class="signal-tape animate-in animate-in-delay-1" aria-label="Recent run history">
-    <div class="section-head">
-      <span class="section-label">tape</span>
-      <span class="section-hint">last 14 runs · amber = elevated activity</span>
-    </div>
-    <div class="tape-strip" id="tape-strip" role="list">
-      <div class="tape-loading">loading&hellip;</div>
-    </div>
-  </section>
-
-  <!-- ── THE BOARD ────────────────────────────────────────────────── -->
-  <!-- The hero of the page: dense ranked field of items currently under
-       observation. Sortable header, per-row sparkline, expand-in-place
-       drill-down. This is where a cold reader lands and understands the
-       state in seconds. -->
-  <section class="board animate-in animate-in-delay-2" aria-label="Ranked board of active signals">
-    <div class="section-head">
-      <span class="section-label">board</span>
-      <div class="board-controls" id="board-controls">
-        <button class="board-sort" data-sort="score" data-active="true">score</button>
-        <button class="board-sort" data-sort="delta">Δ mag</button>
-        <button class="board-sort" data-sort="streak">streak</button>
-        <button class="board-sort" data-sort="age">first seen</button>
-      </div>
-    </div>
-    <div class="board-header" role="row" aria-hidden="true">
-      <span class="col-score">score</span>
-      <span class="col-item">item</span>
-      <span class="col-evidence">evidence</span>
-      <span class="col-trajectory">trajectory</span>
-      <span class="col-signal">signal</span>
-      <span class="col-age">seen</span>
-    </div>
-    <div id="board-body" class="board-body">
-      <div class="loading">loading board&hellip;</div>
+      <span class="status-label">updated</span>
+      <span class="status-value" id="status-sync">–</span>
     </div>
   </section>
 
   <!-- ── BRIEF ────────────────────────────────────────────────────── -->
-  <!-- The LLM synthesis. Structurally demoted below the board and clearly
-       labeled as machine commentary. Reads in a narrow measure for
-       comfort; the wider canvas above is for the instrument. -->
-  <section class="brief animate-in animate-in-delay-2" aria-label="Synthesized brief">
+  <!-- The daily digest is verbose machine prose that repeats every item
+       two or three times. We do not reprint the newsletter. We parse it:
+       the one-paragraph top-line leads, the "new today" list follows,
+       and the full raw digest sits behind a toggle for anyone who wants
+       the model's complete commentary. -->
+  <section class="brief animate-in animate-in-delay-1" aria-label="Synthesized brief">
     <div class="section-head">
       <span class="section-label">brief</span>
       <span class="section-hint" id="brief-attribution">machine synthesis · attribution loading</span>
@@ -128,16 +80,51 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     </article>
   </section>
 
-  <!-- ── RUN LOG ──────────────────────────────────────────────────── -->
-  <!-- Dated pipeline runs. Utility drawer, not a "back issues" shelf. -->
-  <section class="run-log animate-in animate-in-delay-2" aria-label="Historical run log">
+  <!-- ── THE BOARD ────────────────────────────────────────────────── -->
+  <!-- Ranked evidence behind the brief. Columns only exist when the
+       data behind them exists: the trend column shows a sparkline once
+       an item has multi-day history, and reads "new" until then.
+       No evidence stacks, streak chips, or tape until the pipeline
+       actually produces that data. Every element earns its space. -->
+  <section class="board animate-in animate-in-delay-2" aria-label="Ranked list of tracked items">
     <div class="section-head">
-      <span class="section-label">run log</span>
-      <span class="section-hint" id="run-log-count"></span>
+      <span class="section-label">evidence</span>
+      <div class="board-controls" id="board-controls">
+        <button class="board-sort" data-sort="score" data-active="true">top rated</button>
+        <button class="board-sort" data-sort="age" data-active="false">newest</button>
+        <button class="board-sort board-toggle" id="board-toggle" data-active="false">show all</button>
+      </div>
     </div>
-    <div id="run-log-body" class="run-log-body">
-      <div class="loading">loading&hellip;</div>
+    <!-- Source filter chips, rendered from the data with live counts. -->
+    <div class="board-filters" id="board-filters" role="group" aria-label="Filter by source"></div>
+    <div class="board-header" role="row" aria-hidden="true">
+      <span class="col-score">score</span>
+      <span class="col-item">item</span>
+      <span class="col-trend">trend</span>
+      <span class="col-age">seen</span>
     </div>
+    <div id="board-body" class="board-body">
+      <div class="loading">loading board&hellip;</div>
+    </div>
+    <div class="board-more-wrap">
+      <button class="board-more" id="board-more" style="display:none">show 20 more</button>
+    </div>
+    <p class="board-foot" id="board-foot"></p>
+  </section>
+
+  <!-- ── RUN LOG ──────────────────────────────────────────────────── -->
+  <!-- Dated pipeline runs. A utility drawer, closed by default: the
+       history matters for accountability, not for the first read. -->
+  <section class="run-log animate-in animate-in-delay-2" aria-label="Historical run log">
+    <details class="run-log-drawer">
+      <summary class="run-log-summary">
+        <span class="section-label">run log</span>
+        <span class="section-hint" id="run-log-count">loading&hellip;</span>
+      </summary>
+      <div id="run-log-body" class="run-log-body">
+        <div class="loading">loading&hellip;</div>
+      </div>
+    </details>
   </section>
 
   </div><!-- /radar-canvas -->
@@ -172,7 +159,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     }
 
     function fmtAge(hours) {
-      if (hours == null) return '—';
+      if (hours == null) return '–';
       if (hours < 24) return `${hours}h`;
       const d = Math.floor(hours / 24);
       return d < 30 ? `${d}d` : `${Math.floor(d / 7)}w`;
@@ -193,10 +180,10 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
         const state = await res.json();
 
         const entries = Object.entries(state);
-        $('status-universe').textContent = String(entries.length);
+        $('status-tracked').textContent = String(entries.length);
 
-        // Rows are the tracked items. We build the same shape the board
-        // renderer consumes. Escalating = streak >= 3 with rising mag.
+        // Rows are the tracked items. Escalating = streak >= 3 with
+        // rising magnitude (only possible once multi-day history exists).
         const rows = entries.map(([id, snap]) => {
           const history = Array.isArray(snap.mag_history) ? snap.mag_history : [];
           const first = history[0] || 0;
@@ -214,49 +201,19 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
             firstSeen: snap.first_seen || null,
             escalating,
             pct,
-            // Evidence layers inferred from id prefix + presence markers.
-            // Layers we honestly can't determine yet stay 'unknown'
-            // (will show as neutral in the Evidence Stack), never faked.
-            evidence: inferEvidence(id, snap),
-            // Corroboration count = platforms the item appears on.
-            // Currently 1 for everything (no cross-source fuse yet); when
-            // social collectors land this rises for URL-matched items and
-            // powers the LOW SIGNAL state.
-            corroboration: 1,
           };
         });
 
-        // Active = score >= 2, matching the digest's include threshold.
-        const active = rows.filter((r) => r.score >= 2);
-        const escalating = rows.filter((r) => r.escalating);
-        $('status-active').textContent = String(active.length);
-        $('status-escalating').textContent = String(escalating.length);
+        $('status-high').textContent = String(rows.filter((r) => r.score >= 3).length);
 
         STATE.rows = rows;
         renderBoardIfReady();
       } catch (err) {
         showErr($('board-body'), `Could not load state (${err.message})`);
-        $('status-universe').textContent = '—';
-        $('status-active').textContent = '—';
-        $('status-escalating').textContent = '—';
+        $('status-tracked').textContent = '–';
+        $('status-high').textContent = '–';
       }
     })();
-
-    // Infer which evidence layers an item has, from what state.json
-    // exposes today. Honest about what we don't know yet — layers we
-    // can't determine remain 'unknown'.
-    function inferEvidence(id, snap) {
-      const prefix = id.split(':')[0].toLowerCase();
-      const url = String(snap.url || '').toLowerCase();
-      const has = { paper: false, repo: false, model: false, social: false, lab: false };
-      if (prefix === 'arxiv' || url.includes('arxiv.org')) has.paper = true;
-      if (prefix === 'ghrepo' || url.includes('github.com')) has.repo = true;
-      if (prefix === 'hfmodel' || url.includes('huggingface.co/')) has.model = true;
-      if (prefix === 'hfpaper') has.paper = true;
-      if (prefix === 'blog') has.lab = true;
-      // Social is empty until the social collectors land (PR D).
-      return has;
-    }
 
     // ═════════════════════════════════════════════════════════════════
     // Fetch 2: reports/latest.md → BRIEF + today's date + status window
@@ -282,17 +239,6 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
           $('status-sync').textContent = fmtAge(dHours) + ' ago';
         }
 
-        // Extract the window hint from the digest body ("past 48 hours"
-        // / "past week") to fill the coverage cell. Falls back to "48h".
-        const windowMatch = md.match(/past (?:(\d+)\s*hours?|(\d+)\s*days?|week)/i);
-        if (windowMatch) {
-          if (windowMatch[1]) $('status-window').textContent = `${windowMatch[1]}h`;
-          else if (windowMatch[2]) $('status-window').textContent = `${windowMatch[2]}d`;
-          else if (windowMatch[0].toLowerCase().includes('week')) $('status-window').textContent = '7d';
-        } else {
-          $('status-window').textContent = '48h';
-        }
-
         // ── Attribution ───────────────────────────────────────────
         // The digest.md prompt doesn't yet embed the generating model
         // by name — that's a follow-up PR on the ai-radar side. Until
@@ -310,7 +256,37 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
         // "brief" already frames it, and repeating "AI Radar — 2026-07-02"
         // inside a page already titled AI Radar is diary redundancy.
         md = md.replace(/^#\s*AI Radar[^\n]*\n/, '');
-        briefHost.innerHTML = marked.parse(md);
+
+        // ── Structured render ─────────────────────────────────────
+        // The digest repeats every item in three places (sections,
+        // insights, action items). Surface only the two parts that
+        // carry unique information: the top-line paragraph and the
+        // "new today" list. The full digest stays available behind a
+        // toggle. If the format ever changes and parsing fails, fall
+        // back to rendering the whole thing.
+        const topline = md.match(/\*\*Top-line:?\*\*\s*\n+([\s\S]*?)\n\s*---/);
+        const newToday = md.match(/\*\*New today\*\*\s*\n([\s\S]*?)(?:\n\s*---|\n\s*\*\*|\n###)/);
+
+        if (topline) {
+          const newItems = newToday
+            ? newToday[1].split('\n')
+                .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
+                .filter(Boolean)
+            : [];
+          briefHost.innerHTML = `
+            <p class="brief-lede">${marked.parseInline(topline[1].trim())}</p>
+            ${newItems.length ? `
+              <div class="brief-new-label">new today</div>
+              <ul class="brief-new">
+                ${newItems.map((item) => `<li>${marked.parseInline(item)}</li>`).join('')}
+              </ul>` : ''}
+            <details class="brief-full">
+              <summary>full digest</summary>
+              <div class="brief-full-body">${marked.parse(md)}</div>
+            </details>`;
+        } else {
+          briefHost.innerHTML = marked.parse(md);
+        }
 
         // Open external links in a new tab.
         briefHost.querySelectorAll('a[href^="http"]').forEach((a) => {
@@ -325,7 +301,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     })();
 
     // ═════════════════════════════════════════════════════════════════
-    // Fetch 3: reports/README.md → run log + tape
+    // Fetch 3: reports/README.md → run log
     // ═════════════════════════════════════════════════════════════════
     (async () => {
       try {
@@ -340,41 +316,11 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
         }
 
         STATE.indexRows = rows;
-        renderTape();
         renderRunLog();
       } catch (err) {
         showErr($('run-log-body'), `Could not load run log (${err.message}).`);
-        $('tape-strip').innerHTML = `<div class="tape-loading err">failed</div>`;
       }
     })();
-
-    // ─── Signal Tape ─────────────────────────────────────────────
-    // 14 ticks representing the last 14 runs. Amber intensity encodes
-    // "elevated activity" — we approximate this from the teaser length
-    // as a proxy (until we can persist per-run escalation counts).
-    // A visitor can see the two-week rhythm at a glance and click any
-    // tick to jump to that day's source digest.
-    function renderTape() {
-      const host = $('tape-strip');
-      if (!STATE.indexRows || STATE.indexRows.length === 0) {
-        host.innerHTML = `<div class="tape-loading">no history yet</div>`;
-        return;
-      }
-      const last14 = STATE.indexRows.slice(0, 14).reverse();
-      const teaserLens = last14.map((r) => r.teaser.length);
-      const maxLen = Math.max(...teaserLens, 1);
-      host.innerHTML = last14.map((r, i) => {
-        const intensity = teaserLens[i] / maxLen;   // 0..1
-        const level = Math.min(4, Math.floor(intensity * 5));   // 0..4 tiers
-        const isToday = i === last14.length - 1;
-        const label = `${r.date}: ${r.teaser.slice(0, 80)}${r.teaser.length > 80 ? '…' : ''}`;
-        return `<a class="tape-tick" data-level="${level}" data-today="${isToday}"
-          href="https://github.com/${RADAR_REPO}/blob/main/reports/${r.date}-digest.md"
-          target="_blank" rel="noopener noreferrer"
-          title="${escapeHtml(label)}" role="listitem" aria-label="${escapeHtml(label)}"
-        ></a>`;
-      }).join('');
-    }
 
     function renderRunLog() {
       const host = $('run-log-body');
@@ -382,8 +328,10 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
         host.innerHTML = `<div class="empty">no runs recorded yet</div>`;
         return;
       }
-      // Skip the newest (it's the current BRIEF above) and cap at 30.
-      const past = STATE.indexRows.slice(1, 31);
+      // Skip the newest (it's the current BRIEF above) and cap at 14.
+      // Older runs live in the repo; this drawer is a recency check,
+      // not an archive.
+      const past = STATE.indexRows.slice(1, 15);
       $('run-log-count').textContent = `${STATE.indexRows.length - 1} prior run${STATE.indexRows.length - 1 === 1 ? '' : 's'}`;
       host.innerHTML = past.map((row) => `
         <a class="run-row" href="https://github.com/${RADAR_REPO}/blob/main/reports/${row.date}-digest.md"
@@ -399,22 +347,70 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     // ═════════════════════════════════════════════════════════════════
 
     let currentSort = 'score';
+    let showAll = false;
+    let filterGroup = 'all';
+    // Open with a short, high-signal list. Ten rows is scannable;
+    // "show more" and "show all" are one click away.
+    const HIGH_SCORE = 3;
+    const FIRST_PAGE = 10;
+    const PAGE = 20;
+    let visibleCount = FIRST_PAGE;
+
+    // Source groups, derived from the id prefix. This is the one
+    // grouping the data actually supports; topic tags would be guesses
+    // from titles and belong in the pipeline, not the client.
+    const SOURCE_GROUPS = {
+      papers:      ['arxiv', 'hfpaper'],
+      models:      ['hfmodel', 'hfdataset'],
+      repos:       ['ghrepo'],
+      'lab posts': ['blog'],
+    };
+
+    function groupOf(id) {
+      const prefix = id.split(':')[0].toLowerCase();
+      for (const [group, prefixes] of Object.entries(SOURCE_GROUPS)) {
+        if (prefixes.includes(prefix)) return group;
+      }
+      return 'other';
+    }
+
     function renderBoardIfReady() {
       if (!STATE.rows) return;
+      renderFilters();
       renderBoard(currentSort);
     }
 
+    // Filter chips with live counts, computed over the current score
+    // pool so the numbers always match what the board can show.
+    function renderFilters() {
+      const host = $('board-filters');
+      const pool = showAll ? STATE.rows : STATE.rows.filter((r) => r.score >= HIGH_SCORE);
+      const counts = {};
+      pool.forEach((r) => {
+        const g = groupOf(r.id);
+        counts[g] = (counts[g] || 0) + 1;
+      });
+      const groups = ['all', ...Object.keys(SOURCE_GROUPS), ...(counts.other ? ['other'] : [])];
+      host.innerHTML = groups.map((g) => {
+        const n = g === 'all' ? pool.length : (counts[g] || 0);
+        if (g !== 'all' && n === 0) return '';
+        return `<button class="filter-chip" data-group="${g}"
+          data-active="${g === filterGroup}">${g} <span class="chip-count">${n}</span></button>`;
+      }).join('');
+      host.querySelectorAll('.filter-chip').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          filterGroup = btn.getAttribute('data-group');
+          visibleCount = FIRST_PAGE;
+          renderBoardIfReady();
+        });
+      });
+    }
+
     function sparkline(history, sharedMax) {
-      if (!history || history.length === 0) return '<span class="spark-empty">—</span>';
-      // A single data point isn't a trajectory — be honest about that
-      // rather than rendering a lone block that reads as a bar. When we
-      // only have one observation, show a small dot glyph indicating
-      // "single reading, no trajectory yet."
-      if (history.length === 1) return '<span class="spark-empty" title="single reading — no trajectory yet">·</span>';
       const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-      // Opus's honesty fix: use a SHARED max across the whole board so
-      // trajectories are comparable row-to-row instead of each row
-      // dramatizing its own noise.
+      // Shared max across the whole board so trajectories are comparable
+      // row-to-row instead of each row dramatizing its own noise.
       const max = sharedMax || Math.max(...history, 1);
       return history.map((v) => {
         const idx = Math.min(7, Math.max(0, Math.floor((v / max) * 7)));
@@ -422,83 +418,86 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
       }).join('');
     }
 
-    function evidenceStack(e) {
-      // Compact five-cell stack: paper · repo · model · social · lab.
-      // Filled = confirmed present, empty = not present or unknown.
-      // Consistent order so the reader learns to scan the shape.
-      const cells = [
-        { key: 'paper', label: 'paper',  filled: e.paper  },
-        { key: 'repo',  label: 'repo',   filled: e.repo   },
-        { key: 'model', label: 'model',  filled: e.model  },
-        { key: 'social',label: 'social', filled: e.social },
-        { key: 'lab',   label: 'lab',    filled: e.lab    },
-      ];
-      return `<span class="ev-stack" aria-label="evidence layers">${
-        cells.map((c) => `<span class="ev-cell ${c.filled ? 'ev-on' : 'ev-off'}" title="${c.label}"></span>`).join('')
-      }</span>`;
+    // The trend cell only claims a trajectory when one exists. A single
+    // reading is labeled "new", not dressed up as a chart.
+    function trendCell(r, sharedMax) {
+      if (!r.magHistory || r.magHistory.length < 2) {
+        return '<span class="trend-new" title="first reading, no history yet">new</span>';
+      }
+      const hasDelta = Math.abs(r.pct) > 0.5;
+      const deltaStr = !hasDelta ? ''
+        : r.pct > 0 ? `▲${Math.round(r.pct)}%`
+        : `▼${Math.round(Math.abs(r.pct))}%`;
+      const hot = r.escalating ? ' spark-hot' : '';
+      const chip = r.escalating ? '<span class="chip chip-hot">rising</span>' : '';
+      return `<span class="spark${hot}">${sparkline(r.magHistory, sharedMax)}</span>
+        <span class="spark-delta">${deltaStr}</span>${chip}`;
     }
 
     function renderBoard(sort) {
       const host = $('board-body');
       if (!STATE.rows) return;
-      const rows = STATE.rows.slice();
+      const all = STATE.rows.slice();
+      // Default view is high-signal only; "show all" reveals everything.
+      let pool = showAll ? all : all.filter((r) => r.score >= HIGH_SCORE);
+      if (filterGroup !== 'all') pool = pool.filter((r) => groupOf(r.id) === filterGroup);
       const cmp = {
-        score:  (a, b) => b.score - a.score  || b.mag - a.mag,
-        delta:  (a, b) => b.pct   - a.pct    || b.score - a.score,
-        streak: (a, b) => b.streak - a.streak || b.mag - a.mag,
-        age:    (a, b) => (b.firstSeen || '').localeCompare(a.firstSeen || ''),
-      }[sort] || cmp.score;
-      rows.sort(cmp);
-      // Cap the board to 40 rows visible; a "show more" would layer later.
-      const shown = rows.slice(0, 40);
+        score: (a, b) => b.score - a.score || b.mag - a.mag,
+        age:   (a, b) => (b.firstSeen || '').localeCompare(a.firstSeen || '') || b.score - a.score,
+      }[sort] || ((a, b) => b.score - a.score);
+      pool.sort(cmp);
+
+      // The trend column only exists when the corpus has trajectories
+      // to show. With a young pipeline nearly every row has a single
+      // reading, and a column of identical "new" labels is noise, not
+      // information. Suppress the whole column until at least a few
+      // items have real multi-day history. Computed (and applied) before
+      // the empty-pool early return below so the static header's column
+      // layout never goes stale against the current filter/sort state.
+      const withHistory = pool.filter((r) => r.magHistory && r.magHistory.length > 1).length;
+      const showTrend = withHistory >= 3;
+      document.querySelector('.board').classList.toggle('no-trend', !showTrend);
+
+      const shown = pool.slice(0, visibleCount);
       if (shown.length === 0) {
-        host.innerHTML = `<div class="empty">no items under observation in the current window.</div>`;
+        host.innerHTML = `<div class="empty">no items match the current filters.</div>`;
+        $('board-foot').textContent = '';
+        $('board-more').style.display = 'none';
         return;
       }
 
-      // Shared sparkline max — one scale across the board.
+      // Shared sparkline max: one scale across the board.
       const sharedMax = Math.max(
         1,
         ...shown.flatMap((r) => (r.magHistory && r.magHistory.length ? r.magHistory : [r.mag || 0])),
       );
 
-      host.innerHTML = shown.map((r) => {
-        const lowSignal = r.corroboration <= 1 && r.score < 2;
-        const escalatingCls = r.escalating ? 'row-escalating' : '';
-        const lowCls = lowSignal ? 'row-low' : '';
-        // Delta: only show a percentage when we actually have movement
-        // between two or more points. A single-reading item has no
-        // delta — render nothing rather than a stub period.
-        const hasDelta = r.magHistory && r.magHistory.length >= 2 && Math.abs(r.pct) > 0.5;
-        const deltaStr = !hasDelta
-          ? ''
-          : r.pct > 0
-            ? `▲${Math.round(r.pct)}%`
-            : `▼${Math.round(Math.abs(r.pct))}%`;
-        const ageStr = r.firstSeen ? fmtAge(hoursAgo(r.firstSeen + 'T00:00:00Z')) : '—';
-        const streakStr = `${r.streak}r`;
-        return `<a class="board-row ${escalatingCls} ${lowCls}"
+      host.innerHTML = shown.map((r) => `<a class="board-row ${r.escalating ? 'row-escalating' : ''}"
                     href="${escapeHtml(r.url)}"
                     target="_blank" rel="noopener noreferrer"
                     role="row">
-          <span class="col-score" title="magnitude ${r.mag.toFixed(2)}">${r.score}<span class="score-slash">/5</span></span>
+          <span class="col-score" title="model relevance score, 0 to 5">${r.score}<span class="score-slash">/5</span></span>
           <span class="col-item">
             <span class="item-title">${escapeHtml(r.title)}</span>
             <span class="item-meta">${escapeHtml(sourceLabel(r.id))}</span>
           </span>
-          <span class="col-evidence">${evidenceStack(r.evidence)}</span>
-          <span class="col-trajectory">
-            <span class="spark ${r.escalating ? 'spark-hot' : ''}">${sparkline(r.magHistory, sharedMax)}</span>
-            <span class="spark-delta">${deltaStr}</span>
-          </span>
-          <span class="col-signal">
-            ${lowSignal ? '<span class="chip chip-low">low signal</span>' : ''}
-            ${r.escalating ? '<span class="chip chip-hot">escalating</span>' : ''}
-            <span class="chip-streak">${streakStr}</span>
-          </span>
-          <span class="col-age mono">${ageStr}</span>
-        </a>`;
-      }).join('');
+          ${showTrend ? `<span class="col-trend">${trendCell(r, sharedMax)}</span>` : ''}
+          <span class="col-age mono">${r.firstSeen ? fmtAge(hoursAgo(r.firstSeen + 'T00:00:00Z')) : '–'}</span>
+        </a>`).join('');
+
+      const remaining = pool.length - shown.length;
+      const more = $('board-more');
+      if (remaining > 0) {
+        more.style.display = '';
+        more.textContent = `show ${Math.min(PAGE, remaining)} more (${remaining} left)`;
+      } else {
+        more.style.display = 'none';
+      }
+
+      const scopeStr = filterGroup === 'all' ? '' : ` in ${filterGroup}`;
+      $('board-foot').textContent = showAll
+        ? `showing ${shown.length} of ${pool.length}${scopeStr}, all scores`
+        : `showing ${shown.length} of ${pool.length}${scopeStr}, ranked by model score. Items scoring below ${HIGH_SCORE} are hidden.`;
     }
 
     function sourceLabel(id) {
@@ -513,17 +512,33 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
       }[prefix] || prefix;
     }
 
-    // ─── Sort control wiring ─────────────────────────────────────
-    document.querySelectorAll('.board-sort').forEach((btn) => {
+    // ─── Sort + filter control wiring ────────────────────────────
+    document.querySelectorAll('.board-sort[data-sort]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const s = btn.getAttribute('data-sort');
-        currentSort = s;
-        document.querySelectorAll('.board-sort').forEach((b) => {
+        currentSort = btn.getAttribute('data-sort');
+        visibleCount = FIRST_PAGE;
+        document.querySelectorAll('.board-sort[data-sort]').forEach((b) => {
           b.setAttribute('data-active', b === btn ? 'true' : 'false');
         });
         renderBoardIfReady();
       });
+    });
+
+    $('board-toggle').addEventListener('click', (e) => {
+      e.preventDefault();
+      showAll = !showAll;
+      visibleCount = FIRST_PAGE;
+      const t = $('board-toggle');
+      t.setAttribute('data-active', String(showAll));
+      t.textContent = showAll ? 'top only' : 'show all';
+      renderBoardIfReady();
+    });
+
+    $('board-more').addEventListener('click', (e) => {
+      e.preventDefault();
+      visibleCount += PAGE;
+      renderBoard(currentSort);
     });
   </script>
 </Base>
@@ -531,15 +546,15 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
 <style is:global>
   /*
      is:global here is deliberate: half the DOM on this page is
-     generated by client-side JS after hydration (board rows, tape
-     ticks, evidence stacks, sort chips). Astro's default scoped styles
-     apply data-astro-cid-* attributes only to elements Astro rendered
-     at build time, so dynamically-inserted elements would miss the
-     scoping and appear unstyled. Going global for this one page keeps
-     JS-generated markup consistent with the static markup.
+     generated by client-side JS after hydration (board rows, sort
+     chips). Astro's default scoped styles apply data-astro-cid-*
+     attributes only to elements Astro rendered at build time, so
+     dynamically-inserted elements would miss the scoping and appear
+     unstyled. Going global for this one page keeps JS-generated markup
+     consistent with the static markup.
 
-     The class names are all radar-specific (board-row, tape-tick,
-     item-title, etc.) so leakage into other pages is not a concern.
+     The class names are all radar-specific (board-row, item-title,
+     etc.) so leakage into other pages is not a concern.
 
      ══════════════════════════════════════════════════════════════════
      Canvas: escape the site's 700px reading column for the instrument
@@ -659,7 +674,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
   /* ── Status bar ───────────────────────────────────────────────── */
   .status-bar {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 1px;
     background: var(--fg-faint);
     border: 1px solid var(--fg-faint);
@@ -692,56 +707,6 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-variant-numeric: tabular-nums;
   }
 
-  @media (max-width: 700px) {
-    .status-bar { grid-template-columns: repeat(2, 1fr); }
-  }
-
-  /* ── Signal tape ──────────────────────────────────────────────── */
-  .signal-tape { margin-bottom: var(--space-lg); }
-
-  .tape-strip {
-    display: flex;
-    gap: 4px;
-    padding: 0.6rem 0;
-    border-top: 1px solid var(--fg-faint);
-    border-bottom: 1px solid var(--fg-faint);
-    min-height: 36px;
-    align-items: center;
-  }
-
-  .tape-tick {
-    display: block;
-    flex: 1 1 0;
-    height: 20px;
-    min-width: 8px;
-    border-radius: 2px;
-    background: var(--fg-faint);
-    transition: transform 0.15s var(--ease), background 0.15s var(--ease);
-  }
-
-  .tape-tick[data-level="0"] { background: color-mix(in srgb, var(--fg-faint) 100%, transparent); }
-  .tape-tick[data-level="1"] { background: color-mix(in srgb, var(--signal) 25%, var(--fg-faint)); }
-  .tape-tick[data-level="2"] { background: color-mix(in srgb, var(--signal) 45%, var(--fg-faint)); }
-  .tape-tick[data-level="3"] { background: color-mix(in srgb, var(--signal) 65%, var(--fg-faint)); }
-  .tape-tick[data-level="4"] { background: color-mix(in srgb, var(--signal) 90%, var(--fg-faint)); }
-
-  .tape-tick[data-today="true"] {
-    outline: 1px solid var(--signal);
-    outline-offset: 2px;
-  }
-
-  .tape-tick:hover {
-    transform: scaleY(1.15);
-  }
-
-  .tape-loading {
-    grid-column: 1 / -1;
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    text-align: center;
-  }
-
   /* ── The board ────────────────────────────────────────────────── */
   .board { margin-bottom: var(--space-xl); }
 
@@ -771,9 +736,43 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     border-color: var(--fg-faint);
   }
 
+  /* ── Source filter chips ──────────────────────────────────────── */
+  .board-filters {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+  }
+
+  .filter-chip {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+
+  .filter-chip:hover { color: var(--fg); border-color: var(--fg-muted); }
+
+  .filter-chip[data-active="true"] {
+    color: var(--fg);
+    border-color: var(--accent-color);
+  }
+
+  .chip-count {
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
   .board-header {
     display: grid;
-    grid-template-columns: 3rem minmax(0, 1fr) 5rem 8rem 7rem 3rem;
+    grid-template-columns: 3rem minmax(0, 1fr) 10rem 3.5rem;
     gap: var(--space-sm);
     padding: 0.4rem 0;
     border-bottom: 1px solid var(--fg-faint);
@@ -794,7 +793,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     /* minmax(0, 1fr) on the item column is critical: it lets the child
        .item-title's text-overflow: ellipsis actually engage. Without it,
        a long title (e.g. 300 chars of Chinese) blows out the whole grid. */
-    grid-template-columns: 3rem minmax(0, 1fr) 5rem 8rem 7rem 3rem;
+    grid-template-columns: 3rem minmax(0, 1fr) 10rem 3.5rem;
     gap: var(--space-sm);
     align-items: center;
     padding: 0.7rem 0;
@@ -810,11 +809,7 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
 
   .board-row.row-escalating {
     /* Escalating rows earn the accent color on the score column,
-       not the whole row — keeps chromatic hierarchy readable. */
-  }
-
-  .board-row.row-low .col-item .item-title {
-    color: var(--fg-muted);
+       not the whole row. Keeps chromatic hierarchy readable. */
   }
 
   .col-score {
@@ -863,28 +858,19 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     letter-spacing: 0.04em;
   }
 
-  .col-evidence { display: flex; justify-content: flex-start; }
-
-  .ev-stack {
-    display: inline-flex;
-    gap: 3px;
-  }
-
-  .ev-cell {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 1px;
-  }
-
-  .ev-on  { background: var(--fg); }
-  .ev-off { background: var(--fg-faint); }
-
-  .col-trajectory {
+  .col-trend {
     display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    align-items: flex-start;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .trend-new {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
   }
 
   .spark {
@@ -897,21 +883,11 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
 
   .spark-hot { color: var(--signal); }
 
-  .spark-empty { color: var(--fg-faint); font-family: var(--font-mono); }
-
   .spark-delta {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
-  }
-
-  .col-signal {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    flex-wrap: wrap;
-    justify-content: flex-start;
   }
 
   .chip {
@@ -930,19 +906,6 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     border-color: color-mix(in srgb, var(--signal) 45%, transparent);
   }
 
-  .chip-low {
-    color: var(--fg-muted);
-    border-color: var(--fg-faint);
-    background: transparent;
-  }
-
-  .chip-streak {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
   .col-age {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
@@ -951,23 +914,58 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-variant-numeric: tabular-nums;
   }
 
+  .board-more-wrap {
+    display: flex;
+    justify-content: center;
+    padding: 0.75rem 0 0;
+  }
+
+  .board-more {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    padding: 0.35rem 1rem;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+
+  .board-more:hover { color: var(--fg); border-color: var(--accent-color); }
+
+  .board-foot {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    margin: 0.6rem 0 0;
+    letter-spacing: 0.03em;
+  }
+
+  /* When the corpus has no multi-day history the trend column is
+     suppressed entirely (see renderBoard). Collapse the grid so the
+     item column absorbs the space. */
+  .board.no-trend .board-header,
+  .board.no-trend .board-row {
+    grid-template-columns: 3rem minmax(0, 1fr) 3.5rem;
+  }
+
+  .board.no-trend .col-trend { display: none; }
+
   /* Compact the board on smaller screens.
-     On phones (< 780px) we drop the evidence + age columns entirely
-     and give the trajectory + signal columns tight fixed widths so the
-     item column keeps as much room as possible. Item titles wrap to two
-     lines instead of ellipsising, since on a phone the extra line is
-     acceptable and truncation is more painful. */
+     On phones (< 780px) drop the seen column and give the trend column a
+     tight fixed width so the item column keeps as much room as possible.
+     Item titles wrap to two lines instead of ellipsising, since on a
+     phone the extra line is acceptable and truncation is more painful. */
   @media (max-width: 780px) {
     .board-header,
     .board-row {
-      grid-template-columns: 2.25rem minmax(0, 1fr) 3.5rem 3.5rem;
+      grid-template-columns: 2.25rem minmax(0, 1fr) 4.5rem;
       gap: 0.5rem;
       align-items: flex-start;
       padding: 0.6rem 0;
     }
-    .col-evidence,
     .col-age,
-    .board-header .col-evidence,
     .board-header .col-age {
       display: none;
     }
@@ -977,9 +975,14 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
       text-overflow: clip;
       line-height: 1.35;
     }
-    .col-trajectory .spark { font-size: var(--text-small); }
-    .col-signal { flex-direction: column; align-items: flex-end; gap: 0.15rem; }
+    .col-trend { justify-content: flex-end; }
+    .col-trend .spark { font-size: var(--text-small); }
     .chip { font-size: 0.6rem; padding: 0.05rem 0.25rem; }
+
+    .board.no-trend .board-header,
+    .board.no-trend .board-row {
+      grid-template-columns: 2.25rem minmax(0, 1fr);
+    }
   }
 
   /* ── Brief ────────────────────────────────────────────────────── */
@@ -996,6 +999,73 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-size: var(--text-body);
     line-height: 1.7;
     color: var(--fg);
+  }
+
+  /* Structured brief: lede, new-today list, collapsed full digest. */
+  .brief-lede {
+    font-family: var(--font-serif);
+    font-size: var(--text-body-lg);
+    line-height: 1.6;
+    color: var(--fg);
+    margin: 0 0 var(--space-md);
+  }
+
+  .brief-lede a {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent);
+    text-underline-offset: 2px;
+  }
+
+  .brief-new-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    margin-bottom: 0.4rem;
+  }
+
+  .brief-new {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-md);
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .brief-new li {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    font-size: var(--text-small);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+
+  .brief-new li a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .brief-new li a:hover { color: var(--accent-color); }
+
+  .brief-full summary {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 0.3rem 0;
+    list-style: none;
+  }
+
+  .brief-full summary::before { content: '+ '; }
+  .brief-full[open] summary::before { content: '− '; }
+  .brief-full summary::-webkit-details-marker { display: none; }
+  .brief-full summary:hover { color: var(--fg); }
+
+  .brief-full-body {
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--fg-faint);
+    margin-top: 0.5rem;
   }
 
   .brief-body h2 {
@@ -1055,10 +1125,27 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
   }
 
   /* ── Run log ──────────────────────────────────────────────────── */
+  .run-log-drawer { max-width: 800px; }
+
+  .run-log-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    cursor: pointer;
+    list-style: none;
+    padding: 0.3rem 0;
+  }
+
+  .run-log-summary::-webkit-details-marker { display: none; }
+  .run-log-summary .section-label::before { content: '+ '; }
+  .run-log-drawer[open] .run-log-summary .section-label::before { content: '− '; }
+  .run-log-summary:hover .section-label { color: var(--fg); }
+
   .run-log-body {
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--fg-faint);
+    margin-top: 0.5rem;
     max-width: 800px;
   }
 
@@ -1085,6 +1172,9 @@ const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
     font-size: var(--text-small);
     color: var(--fg-muted);
     line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .run-row:hover .run-teaser { color: var(--fg); }
