@@ -83,14 +83,18 @@ export const PROVIDERS: ProviderMeta[] = [
     label: 'OpenRouter',
     models: [
       // Populated dynamically from openrouter.ai/api/v1/models on page load.
-      // Fallback slugs kept intentionally short; the live fetch replaces them.
-      { id: 'openrouter/free', label: 'openrouter/free (auto)', free: true },
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'llama-3.3-70b :free', free: true },
+      // Fallback slugs kept intentionally short.
+      { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'nemotron-3-super-120b (free)', free: true },
+      { id: 'openrouter/free', label: 'openrouter/free (auto-router)', free: true },
     ],
-    defaultModel: 'openrouter/free',
+    // Pin to a single tool-capable model. openrouter/free auto-routes across
+    // *different* models between turns, which confuses multi-step tool loops:
+    // each turn gets a different model with a different sense of the schema.
+    // A specific free model with good tool support behaves consistently.
+    defaultModel: 'nvidia/nemotron-3-super-120b-a12b:free',
     keyUrl: 'https://openrouter.ai/keys',
     keyLabel: 'Get a free OpenRouter key',
-    note: 'Free models load dynamically — pick a :free model above.',
+    note: 'Free models load dynamically. Tip: pick one specific model — the auto-router shuffles between turns.',
     freeNote: true,
   },
   {
@@ -130,7 +134,7 @@ export function providerMeta(id: ProviderId): ProviderMeta {
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
   openai: 'gpt-5-mini',
   anthropic: 'claude-haiku-latest',
-  openrouter: 'openrouter/free',
+  openrouter: 'nvidia/nemotron-3-super-120b-a12b:free',
 };
 
 // ── Dynamic model discovery ────────────────────────────────────────────

@@ -189,17 +189,34 @@ export async function runAgent(
     ];
 
     let calls = 0;
+    let noopTurns = 0;  // model kept talking without calling tools
     while (calls < MAX_TOOL_CALLS) {
-      cb.onStatus('Thinking…', 'loading');
+      // Give a more informative status hint based on where we are in the pipeline.
+      const status = pipelineStatus(state, calls);
+      cb.onStatus(status, 'loading');
+
       const res = await complete(cfg, messages, TOOL_SCHEMAS);
       totalCost += estimateCost(cfg.model, res.usage);
 
       if (!res.toolCalls.length) {
-        // Model spoke without calling a tool — nudge it to act or finish.
+        noopTurns++;
+        // If the model has produced a chart already and is now just talking,
+        // extract a finding from its text rather than looping forever asking it to call finish.
+        if (state.chartSpec && state.rows.length && res.text.trim()) {
+          state.finding = extractOneSentence(res.text);
+          return;
+        }
+        // If it keeps refusing to call tools, give up on nudging and bail to
+        // the post-loop summarizer.
+        if (noopTurns >= 2) return;
         messages.push({ role: 'assistant', content: res.text });
         messages.push({
           role: 'user',
-          content: 'Continue by calling a tool. If the chart is rendered, call finish with the one-line finding.',
+          content:
+            'Continue by calling a tool. ' +
+            (state.chartSpec
+              ? 'The chart is already rendered — call finish now with a one-line finding.'
+              : 'Pick the next tool in the pipeline.'),
         });
         calls++;
         continue;
@@ -216,6 +233,12 @@ export async function runAgent(
         if (calls >= MAX_TOOL_CALLS) break;
       }
       if (finished) return;
+
+      // Early-exit heuristic: if we've rendered a chart with real data and
+      // used at least 6 calls, don't wait for the model to explicitly finish
+      // — synthesize the finding from the data. Prevents the free auto-router
+      // from burning tool-call budget on redundant write_file spam.
+      if (state.chartSpec && state.rows.length && calls >= 6) return;
     }
 
     // Hit the cap without finishing: force a summary from what we have.
@@ -277,6 +300,31 @@ function indicatorName(id: string): string {
   // Enrich the raw indicator id with its friendly curated name when we have one.
   const hit = INDICATORS.find((i) => i.id === id);
   return hit ? hit.name : id;
+}
+
+// Pull the first plausible one-sentence takeaway out of a model's text.
+// Free models sometimes narrate progress instead of calling finish; if they've
+// done the real work, we can still get a usable finding.
+function extractOneSentence(text: string): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  if (!t) return '';
+  // Prefer a sentence that has a number or a ranking word.
+  const sentences = t.split(/(?<=[.!?])\s+/);
+  const numbery = sentences.find((s) => /\d/.test(s));
+  return (numbery || sentences[0] || t).slice(0, 400);
+}
+
+// A short user-facing hint of where we are in the pipeline.
+function pipelineStatus(
+  state: { rows: unknown[]; chartSpec: unknown; finding: string },
+  calls: number
+): string {
+  if (state.finding) return 'Finalizing…';
+  if (state.chartSpec) return 'Verifying answer…';
+  if (state.rows && (state.rows as unknown[]).length) return 'Choosing a chart…';
+  if (calls > 3) return 'Fetching data…';
+  if (calls > 1) return 'Picking indicators…';
+  return 'Planning…';
 }
 
 // ── Verifier: a second LLM call judging whether the chart answers the question.
