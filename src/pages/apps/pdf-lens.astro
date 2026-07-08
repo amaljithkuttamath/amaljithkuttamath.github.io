@@ -4,14 +4,14 @@ import Base from '../../layouts/Base.astro';
 
 <Base
   title="PDF Lens · Amaljith Kuttamath"
-  description="Drop a PDF. LiteParse WASM extracts clean text entirely in your browser — no upload, no server."
+  description="Drop a PDF. LiteParse WASM extracts clean text entirely in your browser. No upload, no server."
 >
   <div class="pl">
     <div class="pl-head">
       <h1>PDF Lens</h1>
       <p>
         Drop any PDF. <a href="https://www.llamaindex.ai/blog/liteparse-v2-0-runs-everywhere" target="_blank" rel="noopener noreferrer">LiteParse WASM</a>
-        parses it entirely in your browser — no upload, no server, nothing leaves the page.
+        parses it entirely in your browser. No upload, no server, nothing leaves the page.
       </p>
       <div class="pl-badges">
         <span class="badge">no upload</span>
@@ -154,27 +154,26 @@ import Base from '../../layouts/Base.astro';
   }
 </style>
 
-<!-- importmap so we can bare-import the ESM package -->
-<script type="importmap">
-{
-  "imports": {
-    "@llamaindex/liteparse-wasm": "https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm.js"
-  }
-}
-</script>
+<script type="module" is:inline>
+// Direct URL import, pinned. No importmap: Astro hoists the layout's module
+// scripts into <head>, and Safari/Firefox reject import maps that appear
+// after module loading has started.
+// is:inline keeps Astro from touching this tag at all: it needs to stay a
+// literal <script type="module"> so the runtime CDN import resolves exactly
+// as written, matching every other playground page's runtime script.
+import initWasm, { LiteParse } from 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2.4.2/pkg/liteparse_wasm.js';
 
-<script type="module">
-import initWasm, { LiteParse } from '@llamaindex/liteparse-wasm';
-
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm_bg.wasm';
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2.4.2/pkg/liteparse_wasm_bg.wasm';
 
 // ── State ──────────────────────────────────────────────────────────────────────
 let _pageTexts = [];   // plain text per page
+let _pageMd    = [];   // markdown per page
 let _pageJson  = [];   // raw parsed JSON per page
 let _fullText  = '';
 let _mode      = 'text';   // 'text' | 'markdown' | 'json'
 let _curPage   = 0;
 let _wasmReady = false;
+let _wasmInit  = null;  // in-flight init promise, so idle prewarm and a user drop never race
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const zone      = document.getElementById('drop-zone');
@@ -200,39 +199,40 @@ function status(msg, state) {
 // ── WASM init (called once, lazily) ───────────────────────────────────────────
 async function ensureWasm() {
   if (_wasmReady) return;
-  status('Loading LiteParse WASM…');
-  await initWasm({ module_or_path: WASM_URL });
+  if (!_wasmInit) {
+    status('Loading LiteParse WASM…');
+    _wasmInit = initWasm({ module_or_path: WASM_URL });
+  }
+  await _wasmInit;
   _wasmReady = true;
 }
 
 // ── Parse ──────────────────────────────────────────────────────────────────────
 async function processFile(file) {
   outputEl.style.display = 'none';
-  _pageTexts = []; _pageJson = []; _fullText = ''; _curPage = 0;
+  _pageTexts = []; _pageMd = []; _pageJson = []; _fullText = ''; _curPage = 0;
 
   try {
     await ensureWasm();
     status(`Parsing "${file.name}"…`);
 
-    const bytes  = new Uint8Array(await file.arrayBuffer());
+    const bytes = new Uint8Array(await file.arrayBuffer());
 
-    // Parse twice: once for plain text, once for markdown
-    const parserText = new LiteParse({ ocrEnabled: false, outputFormat: 'text' });
-    const parserMd   = new LiteParse({ ocrEnabled: false, outputFormat: 'markdown' });
-    const parserJson = new LiteParse({ ocrEnabled: false, outputFormat: 'json' });
+    // One parse. In markdown mode each ParsedPage carries text, markdown,
+    // and textItems, so a single pass feeds all three views.
+    const parser = new LiteParse({ ocrEnabled: false, outputFormat: 'markdown', quiet: true });
+    const result = await parser.parse(bytes);
+    parser.free();
 
-    const [resText, resMd, resJson] = await Promise.all([
-      parserText.parse(bytes),
-      parserMd.parse(bytes),
-      parserJson.parse(bytes),
-    ]);
-    parserText.free(); parserMd.free(); parserJson.free();
+    const pages = result.pages || [];
+    if (pages.length === 0 && !result.text) {
+      throw new Error('no text extracted. PDF may be image-only or protected.');
+    }
 
-    // Build per-page arrays
-    _pageTexts = buildPageTexts(resText);
-    _pageMd    = buildPageTexts(resMd);
-    _pageJson  = (resJson.pages || []).map(pg => JSON.stringify(pg, null, 2));
-    _fullText  = resText.text || _pageTexts.join('\n\n');
+    _pageTexts = pages.length ? pages.map(pg => pg.text || '(empty page)') : [result.text];
+    _pageMd    = pages.length ? pages.map(pg => pg.markdown || pg.text || '(empty page)') : [result.text];
+    _pageJson  = pages.length ? pages.map(pg => JSON.stringify(pg, null, 2)) : ['{}'];
+    _fullText  = _pageTexts.join('\n\n');
 
     const pageCount = _pageTexts.length;
     const words     = _fullText.split(/\s+/).filter(Boolean).length;
@@ -242,6 +242,7 @@ async function processFile(file) {
       `${file.name} · ${pageCount} page${pageCount !== 1 ? 's' : ''} · ${words.toLocaleString()} words · ${chars.toLocaleString()} chars`,
       'done'
     );
+    metaEl.textContent = `${file.name} · ${pageCount} page${pageCount !== 1 ? 's' : ''}`;
 
     renderPageTabs(pageCount);
     setMode('text');
@@ -251,25 +252,6 @@ async function processFile(file) {
     console.error(err);
     status('Parse failed: ' + (err.message || String(err)), 'error');
   }
-}
-
-// ── Page text extraction ───────────────────────────────────────────────────────
-function buildPageTexts(result) {
-  if (!result) return ['(empty)'];
-
-  // v2 result shape: { text, pages: [ {items:[{text,bbox},...]} | string ] }
-  if (Array.isArray(result.pages) && result.pages.length > 0) {
-    return result.pages.map(pg => {
-      if (typeof pg === 'string') return pg;
-      if (pg && Array.isArray(pg.items)) return pg.items.map(i => i.text || '').join('\n');
-      if (pg && typeof pg.text === 'string') return pg.text;
-      return JSON.stringify(pg);
-    });
-  }
-
-  // Fallback: full text as single page
-  const t = result.text || '';
-  return t ? [t] : ['(no text extracted — PDF may be image-only or protected)'];
 }
 
 // ── Page tabs ──────────────────────────────────────────────────────────────────
@@ -347,7 +329,10 @@ zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
 zone.addEventListener('drop', e => {
   e.preventDefault(); zone.classList.remove('drag-over');
   const f = e.dataTransfer.files[0];
-  if (f?.type === 'application/pdf') processFile(f);
+  if (!f) return;
+  // Some sources drop PDFs with an empty MIME type, so check the name too
+  if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) processFile(f);
+  else status('That is not a PDF. Drop a .pdf file.', 'error');
 });
 zone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
