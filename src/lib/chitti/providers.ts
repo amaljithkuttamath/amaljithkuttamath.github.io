@@ -71,47 +71,55 @@ export interface ProviderMeta {
   freeNote?: boolean;
 }
 
+// Small hardcoded fallback lists for when the live /models endpoints are
+// unreachable (network issue, rate limit, invalid key). Kept minimal on
+// purpose — the dynamic fetch below is the source of truth.
+//
+// These slugs are only used as a last-resort fallback. Do NOT trust them to
+// be current; the live fetch will replace them within a second of page load.
 export const PROVIDERS: ProviderMeta[] = [
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    models: [
+      // Populated dynamically from openrouter.ai/api/v1/models on page load.
+      // Fallback slugs kept intentionally short; the live fetch replaces them.
+      { id: 'openrouter/free', label: 'openrouter/free (auto)', free: true },
+      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'llama-3.3-70b :free', free: true },
+    ],
+    defaultModel: 'openrouter/free',
+    keyUrl: 'https://openrouter.ai/keys',
+    keyLabel: 'Get a free OpenRouter key',
+    note: 'Free models load dynamically — pick a :free model above.',
+    freeNote: true,
+  },
   {
     id: 'openai',
     label: 'OpenAI',
     models: [
+      // Populated from api.openai.com/v1/models once a key is entered.
+      { id: 'gpt-5-mini', label: 'gpt-5-mini' },
+      { id: 'gpt-5', label: 'gpt-5' },
       { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-      { id: 'gpt-4o', label: 'gpt-4o' },
-      { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
     ],
-    defaultModel: 'gpt-4o-mini',
+    defaultModel: 'gpt-5-mini',
     keyUrl: 'https://platform.openai.com/api-keys',
     keyLabel: 'Get an OpenAI key',
+    note: 'Enter your key to load your available models.',
   },
   {
     id: 'anthropic',
     label: 'Anthropic',
     models: [
-      { id: 'claude-3-5-haiku-latest', label: 'claude-3-5-haiku' },
-      { id: 'claude-3-5-sonnet-latest', label: 'claude-3-5-sonnet' },
-      { id: 'claude-3-7-sonnet-latest', label: 'claude-3-7-sonnet' },
+      // Populated from api.anthropic.com/v1/models once a key is entered.
+      { id: 'claude-haiku-latest', label: 'claude-haiku (latest)' },
+      { id: 'claude-sonnet-latest', label: 'claude-sonnet (latest)' },
+      { id: 'claude-opus-latest', label: 'claude-opus (latest)' },
     ],
-    defaultModel: 'claude-3-5-haiku-latest',
+    defaultModel: 'claude-haiku-latest',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     keyLabel: 'Get an Anthropic key',
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    models: [
-      { id: 'deepseek/deepseek-chat-v3.1:free', label: 'deepseek-chat-v3.1 :free', free: true },
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'llama-3.3-70b :free', free: true },
-      { id: 'qwen/qwen-2.5-72b-instruct:free', label: 'qwen-2.5-72b :free', free: true },
-      { id: 'anthropic/claude-3.5-sonnet', label: 'claude-3.5-sonnet (paid)' },
-      { id: 'openai/gpt-4o-mini', label: 'gpt-4o-mini (paid)' },
-      { id: 'google/gemini-2.5-flash', label: 'gemini-2.5-flash (paid)' },
-    ],
-    defaultModel: 'deepseek/deepseek-chat-v3.1:free',
-    keyUrl: 'https://openrouter.ai/keys',
-    keyLabel: 'Get a free OpenRouter key',
-    note: 'Free models available — pick a :free model above.',
-    freeNote: true,
+    note: 'Enter your key to load your available models.',
   },
 ];
 
@@ -120,22 +128,137 @@ export function providerMeta(id: ProviderId): ProviderMeta {
 }
 
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
-  openai: 'gpt-4o-mini',
-  anthropic: 'claude-3-5-haiku-latest',
-  openrouter: 'deepseek/deepseek-chat-v3.1:free',
+  openai: 'gpt-5-mini',
+  anthropic: 'claude-haiku-latest',
+  openrouter: 'openrouter/free',
 };
 
+// ── Dynamic model discovery ────────────────────────────────────────────
+// Each provider exposes a /models endpoint we can hit from the browser to
+// list what's actually available *right now*. This is how we avoid ever
+// shipping stale model slugs again.
+//
+// Cached per provider+key for the tab session.
+const MODELS_CACHE = new Map<string, { at: number; models: ModelOption[] }>();
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+
+export async function fetchModels(provider: ProviderId, apiKey?: string): Promise<ModelOption[]> {
+  const cacheKey = provider + ':' + (apiKey || '');
+  const cached = MODELS_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
+
+  let models: ModelOption[] = [];
+  try {
+    if (provider === 'openrouter') {
+      models = await fetchOpenRouterModels();
+    } else if (provider === 'openai' && apiKey) {
+      models = await fetchOpenAIModels(apiKey);
+    } else if (provider === 'anthropic' && apiKey) {
+      models = await fetchAnthropicModels(apiKey);
+    }
+  } catch (err) {
+    console.warn('fetchModels failed for', provider, err);
+  }
+
+  // Fall back to the hardcoded list if the live fetch returned nothing.
+  if (!models.length) {
+    models = providerMeta(provider).models;
+  }
+
+  MODELS_CACHE.set(cacheKey, { at: Date.now(), models });
+  return models;
+}
+
+// OpenRouter — public endpoint, no auth. Filter to models that actually
+// support tool calling (that's what a deep-agent workload needs) and put
+// free models first.
+async function fetchOpenRouterModels(): Promise<ModelOption[]> {
+  const resp = await fetch('https://openrouter.ai/api/v1/models');
+  if (!resp.ok) return [];
+  const j = await resp.json();
+  const raw = (j.data || []) as any[];
+
+  const opts: ModelOption[] = [];
+  for (const m of raw) {
+    const id: string = m.id || '';
+    if (!id) continue;
+    const params: string[] = m.supported_parameters || [];
+    if (!params.includes('tools')) continue;
+    const pricing = m.pricing || {};
+    const isFree = String(pricing.prompt ?? '0') === '0' && String(pricing.completion ?? '0') === '0';
+    // Skip preview/deprecated models (prefixed with ~ on OpenRouter).
+    if (id.startsWith('~')) continue;
+    opts.push({
+      id,
+      label: id + (isFree ? '  · free' : ''),
+      free: isFree,
+    });
+    // Cache pricing so estimateCost is accurate for the current catalog.
+    const inPrice = parseFloat(pricing.prompt ?? '0') * 1e6;
+    const outPrice = parseFloat(pricing.completion ?? '0') * 1e6;
+    if (inPrice || outPrice) PRICING[id] = { in: inPrice, out: outPrice };
+  }
+
+  // Free first, then alphabetical.
+  opts.sort((a, b) => {
+    if (!!a.free !== !!b.free) return a.free ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  });
+  return opts;
+}
+
+// OpenAI — needs the user's key. Return only the chat-completions family.
+async function fetchOpenAIModels(apiKey: string): Promise<ModelOption[]> {
+  const resp = await fetch('https://api.openai.com/v1/models', {
+    headers: { Authorization: 'Bearer ' + apiKey },
+  });
+  if (!resp.ok) return [];
+  const j = await resp.json();
+  const raw = (j.data || []) as any[];
+  const opts: ModelOption[] = [];
+  for (const m of raw) {
+    const id: string = m.id || '';
+    // Keep chat models that support tools; drop embeddings/audio/vision-only.
+    if (!/^(gpt-|o1|o3|o4)/i.test(id)) continue;
+    if (/(embedding|whisper|tts|dall-e|realtime|image|audio|transcribe|moderation|search)/i.test(id)) continue;
+    opts.push({ id, label: id });
+  }
+  // Prefer newest models first by lexical desc within the same prefix.
+  opts.sort((a, b) => b.id.localeCompare(a.id));
+  return opts;
+}
+
+// Anthropic — needs the user's key. Every returned model supports tools.
+async function fetchAnthropicModels(apiKey: string): Promise<ModelOption[]> {
+  const resp = await fetch('https://api.anthropic.com/v1/models', {
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+  });
+  if (!resp.ok) return [];
+  const j = await resp.json();
+  const raw = (j.data || []) as any[];
+  const opts: ModelOption[] = raw.map((m: any) => ({
+    id: m.id,
+    label: (m.display_name ?? m.id) + ' (' + (m.id) + ')',
+  }));
+  opts.sort((a, b) => b.id.localeCompare(a.id));
+  return opts;
+}
+
 // Approximate USD per 1M tokens (input / output), for the rough cost meter.
+// OpenRouter models are populated dynamically from the live pricing feed.
+// Direct-provider models keep sane fallbacks; if we're wrong, worst case
+// the cost estimate shows a small over- or under-estimate.
 const PRICING: Record<string, { in: number; out: number }> = {
+  'gpt-5-mini': { in: 0.4, out: 1.6 },
+  'gpt-5': { in: 2.0, out: 8.0 },
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
-  'gpt-4o': { in: 2.5, out: 10.0 },
-  'gpt-4.1-mini': { in: 0.4, out: 1.6 },
-  'claude-3-5-haiku-latest': { in: 0.8, out: 4.0 },
-  'claude-3-5-sonnet-latest': { in: 3.0, out: 15.0 },
-  'claude-3-7-sonnet-latest': { in: 3.0, out: 15.0 },
-  'anthropic/claude-3.5-sonnet': { in: 3.0, out: 15.0 },
-  'openai/gpt-4o-mini': { in: 0.15, out: 0.6 },
-  'google/gemini-2.5-flash': { in: 0.3, out: 2.5 },
+  'claude-haiku-latest': { in: 0.8, out: 4.0 },
+  'claude-sonnet-latest': { in: 3.0, out: 15.0 },
+  'claude-opus-latest': { in: 15.0, out: 75.0 },
 };
 
 export function estimateCost(model: string, usage: { input: number; output: number }): number {

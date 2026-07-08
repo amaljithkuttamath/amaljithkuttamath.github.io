@@ -169,8 +169,10 @@ const PRESETS = [
   import {
     PROVIDERS,
     providerMeta,
+    fetchModels,
     type ProviderId,
     type ProviderConfig,
+    type ModelOption,
   } from '../../lib/chitti/providers';
   import type { TraceEvent } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow } from '../../lib/chitti/tools';
@@ -225,19 +227,65 @@ const PRESETS = [
     return providerSel.value as ProviderId;
   }
 
-  function populateModels(pid: ProviderId, selected?: string) {
-    const meta = providerMeta(pid);
+  // Renders a list of {id,label,free} options into the model <select>.
+  function renderModelOptions(models: ModelOption[], selected?: string, defaultModel?: string) {
     modelSel.innerHTML = '';
-    for (const m of meta.models) {
+    for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = m.label;
       if (m.free) opt.classList.add('ch-free-opt');
       modelSel.appendChild(opt);
     }
-    modelSel.value = selected && meta.models.some((m) => m.id === selected)
-      ? selected
-      : meta.defaultModel;
+    if (selected && models.some((m) => m.id === selected)) {
+      modelSel.value = selected;
+    } else if (defaultModel && models.some((m) => m.id === defaultModel)) {
+      modelSel.value = defaultModel;
+    } else if (models.length) {
+      modelSel.value = models[0].id;
+    }
+  }
+
+  // Populate the model dropdown — first from the hardcoded fallback (instant),
+  // then replace with the live /models fetch (right values).
+  async function populateModels(pid: ProviderId, selected?: string) {
+    const meta = providerMeta(pid);
+    // 1. Instant paint using the fallback list so the UI is never empty.
+    renderModelOptions(meta.models, selected, meta.defaultModel);
+
+    // 2. Dynamic refresh from the provider's /models endpoint.
+    const key = keyIn.value.trim();
+    const needsKey = pid !== 'openrouter';
+    if (needsKey && !key) {
+      // Direct-provider dropdowns need a key. Signal to the user.
+      const hint = document.createElement('option');
+      hint.value = '__hint__';
+      hint.textContent = '─ enter a key to load available models ─';
+      hint.disabled = true;
+      modelSel.prepend(hint);
+      return;
+    }
+
+    const loadingOpt = document.createElement('option');
+    loadingOpt.value = '__loading__';
+    loadingOpt.textContent = 'loading models…';
+    loadingOpt.disabled = true;
+    modelSel.prepend(loadingOpt);
+
+    try {
+      const live = await fetchModels(pid, key || undefined);
+      // Guard: user may have switched providers while we were fetching.
+      if (currentProvider() !== pid) return;
+      if (live.length) {
+        renderModelOptions(live, modelSel.value, meta.defaultModel);
+      } else {
+        // Fall back cleanly.
+        renderModelOptions(meta.models, modelSel.value, meta.defaultModel);
+      }
+    } catch (err) {
+      console.warn('populateModels dynamic fetch failed', err);
+      renderModelOptions(meta.models, modelSel.value, meta.defaultModel);
+    }
   }
 
   function renderKeyLinks(pid: ProviderId) {
@@ -262,7 +310,7 @@ const PRESETS = [
 
   function onProviderChange() {
     const pid = currentProvider();
-    populateModels(pid);
+    void populateModels(pid);
     renderKeyLinks(pid);
     keyIn.placeholder =
       pid === 'anthropic' ? 'sk-ant-… (never leaves your browser)'
@@ -273,6 +321,21 @@ const PRESETS = [
 
   providerSel.addEventListener('change', onProviderChange);
 
+  // When the user enters a key for OpenAI/Anthropic, refresh the model list.
+  // Debounced so we don't hit the API on every keystroke.
+  let keyDebounce: number | null = null;
+  keyIn.addEventListener('input', () => {
+    const pid = currentProvider();
+    if (pid === 'openrouter') return; // OpenRouter is already loaded (public endpoint)
+    if (keyDebounce) window.clearTimeout(keyDebounce);
+    keyDebounce = window.setTimeout(() => {
+      // Only refresh once the key looks plausibly complete.
+      if (keyIn.value.trim().length >= 20) {
+        void populateModels(pid, modelSel.value);
+      }
+    }, 800);
+  });
+
   // Restore a session-saved key if the user opted in previously this session.
   (function restoreSession() {
     const savedKey = sessionStorage.getItem(SESSION_KEY);
@@ -280,11 +343,13 @@ const PRESETS = [
     if (savedProvider && PROVIDERS.some((p) => p.id === savedProvider)) {
       providerSel.value = savedProvider;
     }
-    onProviderChange();
     if (savedKey) {
       keyIn.value = savedKey;
       saveChk.checked = true;
     }
+    // Fires the dynamic model fetch with the key already present, so the
+    // dropdown lands with real slugs on first paint.
+    onProviderChange();
   })();
 
   // Persist / clear the session key when the checkbox toggles or key changes.
