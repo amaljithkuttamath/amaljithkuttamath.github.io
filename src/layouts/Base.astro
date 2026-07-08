@@ -20,9 +20,8 @@ const ogImageURL = new URL(ogImage, Astro.site);
 
 const navItems = [
   { href: '/', label: 'Home' },
-  { href: '/work', label: 'Work' },
-  { href: '/blog', label: 'Blog' },
-  { href: '/playground', label: 'Playground' },
+  { href: '/apps', label: 'Apps' },
+  { href: '/lab', label: 'Lab' },
   { href: '/radar', label: 'Radar' },
   { href: '/about', label: 'About' },
 ];
@@ -95,7 +94,6 @@ if (matchedNav) {
   <title>{title}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="sitemap" href="/sitemap-index.xml" />
-  <link rel="alternate" type="application/rss+xml" title="Amaljith Kuttamath" href={new URL('/rss.xml', Astro.site)} />
 
   <!-- JSON-LD: Person -->
   <script type="application/ld+json" set:html={JSON.stringify({
@@ -139,9 +137,8 @@ if (matchedNav) {
     <nav>
       <a href="/" class="logo" aria-label="Home">Amaljith Kuttamath</a>
       <div class="nav-links">
-        <a href="/work" class:list={[{ active: (currentPath === '/work' || currentPath === '/work/') || currentPath.startsWith('/work/') || currentPath.startsWith('/trust-bench') }]}>work</a>
-        <a href="/blog" class:list={[{ active: currentPath.startsWith('/blog') }]}>blog</a>
-        <a href="/playground" class:list={[{ active: currentPath.startsWith('/playground') }]}>playground</a>
+        <a href="/apps" class:list={[{ active: currentPath.startsWith('/apps') }]}>apps</a>
+        <a href="/lab" class:list={[{ active: currentPath.startsWith('/lab') }]}>lab</a>
         <a href="/radar" class:list={[{ active: currentPath.startsWith('/radar') }]}>radar</a>
         <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
         <button id="theme-toggle" class="theme-toggle" aria-label="Switch between dark and light theme">

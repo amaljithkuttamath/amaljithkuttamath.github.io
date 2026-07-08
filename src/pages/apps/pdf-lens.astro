@@ -1,0 +1,362 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base
+  title="PDF Lens · Amaljith Kuttamath"
+  description="Drop a PDF. LiteParse WASM extracts clean text entirely in your browser — no upload, no server."
+>
+  <div class="pl">
+    <div class="pl-head">
+      <h1>PDF Lens</h1>
+      <p>
+        Drop any PDF. <a href="https://www.llamaindex.ai/blog/liteparse-v2-0-runs-everywhere" target="_blank" rel="noopener noreferrer">LiteParse WASM</a>
+        parses it entirely in your browser — no upload, no server, nothing leaves the page.
+      </p>
+      <div class="pl-badges">
+        <span class="badge">no upload</span>
+        <span class="badge">liteparse wasm v2</span>
+        <span class="badge">runs locally</span>
+      </div>
+    </div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="drop-zone">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/>
+      </svg>
+      <p class="drop-label">Drop a PDF here</p>
+      <p class="drop-sub">or <label class="drop-browse" for="file-input">browse files</label></p>
+      <input type="file" id="file-input" accept=".pdf" style="display:none">
+    </div>
+
+    <!-- Status -->
+    <div class="status-bar" id="status-bar" style="display:none">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-msg">Loading…</span>
+    </div>
+
+    <!-- Output -->
+    <div id="output" style="display:none">
+      <div class="output-toolbar">
+        <div class="output-meta" id="output-meta"></div>
+        <div class="toolbar-actions">
+          <button class="tb-btn" id="btn-copy">Copy text</button>
+          <button class="tb-btn" id="btn-markdown">Markdown</button>
+          <button class="tb-btn" id="btn-json">JSON</button>
+        </div>
+      </div>
+
+      <!-- Page tabs (shown when >1 page) -->
+      <div class="page-tabs" id="page-tabs" style="display:none"></div>
+
+      <!-- Text viewer -->
+      <pre class="text-viewer" id="text-viewer"></pre>
+    </div>
+  </div>
+</Base>
+
+<style>
+  .pl { max-width: 860px; margin: 0 auto; }
+
+  .pl-head { margin-bottom: var(--space-lg); }
+  .pl-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 6px; }
+  .pl-head p  { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+  .pl-head a  { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+
+  .pl-badges  { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .badge {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg-muted); border: 1px solid var(--fg-faint);
+    padding: 2px 8px; border-radius: var(--radius-full);
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 6px;
+    border: 2px dashed var(--fg-faint); border-radius: var(--radius-md);
+    padding: 56px 32px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: var(--space-md);
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent-color); background: var(--bg-elevated);
+  }
+  .drop-icon  { width: 36px; height: 36px; color: var(--fg-muted); margin-bottom: 4px; }
+  .drop-label { font-size: var(--text-small); font-weight: 600; color: var(--fg); margin: 0; }
+  .drop-sub   { font-size: var(--text-small); color: var(--fg-muted); margin: 0; }
+  .drop-browse { color: var(--accent-color); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+  /* Status */
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: var(--text-small);
+    color: var(--fg-muted); padding: 10px 0;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--fg-muted); flex-shrink: 0;
+    animation: blink 1.2s ease-in-out infinite;
+  }
+  .status-dot.done  { background: var(--success); animation: none; }
+  .status-dot.error { background: var(--danger);  animation: none; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* Output */
+  .output-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .output-meta {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted);
+  }
+  .toolbar-actions { display: flex; gap: 6px; }
+  .tb-btn {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    border: 1px solid var(--fg-faint); background: var(--bg-elevated);
+    color: var(--fg-muted); padding: 4px 12px; border-radius: var(--radius-sm);
+    cursor: pointer; transition: color .12s, border-color .12s;
+  }
+  .tb-btn:hover { color: var(--fg); border-color: var(--fg-muted); }
+  .tb-btn.active { color: var(--accent-color); border-color: var(--accent-color); }
+
+  /* Page tabs */
+  .page-tabs {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .pg-tab {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    border: 1px solid var(--fg-faint); background: var(--bg);
+    color: var(--fg-muted); padding: 3px 10px; border-radius: 3px;
+    cursor: pointer; transition: color .1s, border-color .1s;
+  }
+  .pg-tab:hover, .pg-tab.active {
+    color: var(--accent-color); border-color: var(--accent-color);
+  }
+
+  /* Text viewer */
+  .text-viewer {
+    font-family: var(--font-mono); font-size: 0.8rem;
+    line-height: 1.75; white-space: pre-wrap; word-break: break-word;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 20px 22px;
+    color: var(--fg); min-height: 300px;
+    max-height: 70vh; overflow-y: auto;
+  }
+
+  @media (max-width: 600px) {
+    .drop-zone { padding: 36px 20px; }
+    .output-toolbar { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+
+<!-- importmap so we can bare-import the ESM package -->
+<script type="importmap">
+{
+  "imports": {
+    "@llamaindex/liteparse-wasm": "https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm.js"
+  }
+}
+</script>
+
+<script type="module">
+import initWasm, { LiteParse } from '@llamaindex/liteparse-wasm';
+
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/@llamaindex/liteparse-wasm@2/pkg/liteparse_wasm_bg.wasm';
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let _pageTexts = [];   // plain text per page
+let _pageJson  = [];   // raw parsed JSON per page
+let _fullText  = '';
+let _mode      = 'text';   // 'text' | 'markdown' | 'json'
+let _curPage   = 0;
+let _wasmReady = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const zone      = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const statusBar = document.getElementById('status-bar');
+const statusDot = document.getElementById('status-dot');
+const statusMsg = document.getElementById('status-msg');
+const outputEl  = document.getElementById('output');
+const metaEl    = document.getElementById('output-meta');
+const pageTabs  = document.getElementById('page-tabs');
+const viewer    = document.getElementById('text-viewer');
+const btnCopy   = document.getElementById('btn-copy');
+const btnMd     = document.getElementById('btn-markdown');
+const btnJson   = document.getElementById('btn-json');
+
+// ── Status helpers ─────────────────────────────────────────────────────────────
+function status(msg, state) {
+  statusBar.style.display = 'flex';
+  statusMsg.textContent   = msg;
+  statusDot.className     = 'status-dot' + (state ? ' ' + state : '');
+}
+
+// ── WASM init (called once, lazily) ───────────────────────────────────────────
+async function ensureWasm() {
+  if (_wasmReady) return;
+  status('Loading LiteParse WASM…');
+  await initWasm({ module_or_path: WASM_URL });
+  _wasmReady = true;
+}
+
+// ── Parse ──────────────────────────────────────────────────────────────────────
+async function processFile(file) {
+  outputEl.style.display = 'none';
+  _pageTexts = []; _pageJson = []; _fullText = ''; _curPage = 0;
+
+  try {
+    await ensureWasm();
+    status(`Parsing "${file.name}"…`);
+
+    const bytes  = new Uint8Array(await file.arrayBuffer());
+
+    // Parse twice: once for plain text, once for markdown
+    const parserText = new LiteParse({ ocrEnabled: false, outputFormat: 'text' });
+    const parserMd   = new LiteParse({ ocrEnabled: false, outputFormat: 'markdown' });
+    const parserJson = new LiteParse({ ocrEnabled: false, outputFormat: 'json' });
+
+    const [resText, resMd, resJson] = await Promise.all([
+      parserText.parse(bytes),
+      parserMd.parse(bytes),
+      parserJson.parse(bytes),
+    ]);
+    parserText.free(); parserMd.free(); parserJson.free();
+
+    // Build per-page arrays
+    _pageTexts = buildPageTexts(resText);
+    _pageMd    = buildPageTexts(resMd);
+    _pageJson  = (resJson.pages || []).map(pg => JSON.stringify(pg, null, 2));
+    _fullText  = resText.text || _pageTexts.join('\n\n');
+
+    const pageCount = _pageTexts.length;
+    const words     = _fullText.split(/\s+/).filter(Boolean).length;
+    const chars     = _fullText.length;
+
+    status(
+      `${file.name} · ${pageCount} page${pageCount !== 1 ? 's' : ''} · ${words.toLocaleString()} words · ${chars.toLocaleString()} chars`,
+      'done'
+    );
+
+    renderPageTabs(pageCount);
+    setMode('text');
+    outputEl.style.display = 'block';
+
+  } catch (err) {
+    console.error(err);
+    status('Parse failed: ' + (err.message || String(err)), 'error');
+  }
+}
+
+// ── Page text extraction ───────────────────────────────────────────────────────
+function buildPageTexts(result) {
+  if (!result) return ['(empty)'];
+
+  // v2 result shape: { text, pages: [ {items:[{text,bbox},...]} | string ] }
+  if (Array.isArray(result.pages) && result.pages.length > 0) {
+    return result.pages.map(pg => {
+      if (typeof pg === 'string') return pg;
+      if (pg && Array.isArray(pg.items)) return pg.items.map(i => i.text || '').join('\n');
+      if (pg && typeof pg.text === 'string') return pg.text;
+      return JSON.stringify(pg);
+    });
+  }
+
+  // Fallback: full text as single page
+  const t = result.text || '';
+  return t ? [t] : ['(no text extracted — PDF may be image-only or protected)'];
+}
+
+// ── Page tabs ──────────────────────────────────────────────────────────────────
+function renderPageTabs(count) {
+  if (count <= 1) { pageTabs.style.display = 'none'; return; }
+  pageTabs.style.display = 'flex';
+  pageTabs.innerHTML = Array.from({ length: count }, (_, i) =>
+    `<button class="pg-tab${i === 0 ? ' active' : ''}" data-pg="${i}">p${i + 1}</button>`
+  ).join('');
+  pageTabs.querySelectorAll('.pg-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _curPage = parseInt(btn.dataset.pg);
+      pageTabs.querySelectorAll('.pg-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      showCurrentPage();
+    });
+  });
+}
+
+// ── Mode / viewer ──────────────────────────────────────────────────────────────
+function setMode(m) {
+  _mode = m;
+  [btnCopy, btnMd, btnJson].forEach(b => b.classList.remove('active'));
+  if (m === 'text')     btnCopy.classList.add('active');
+  if (m === 'markdown') btnMd.classList.add('active');
+  if (m === 'json')     btnJson.classList.add('active');
+  showCurrentPage();
+}
+
+function showCurrentPage() {
+  const pages = _mode === 'markdown' ? _pageMd
+              : _mode === 'json'     ? _pageJson
+              :                        _pageTexts;
+  viewer.textContent = (pages && pages[_curPage]) || '(empty)';
+}
+
+// ── Toolbar actions ────────────────────────────────────────────────────────────
+btnCopy.addEventListener('click', async () => {
+  if (_mode === 'text') {
+    // copy full doc
+    await navigator.clipboard.writeText(_fullText).catch(() => {});
+    const orig = btnCopy.textContent;
+    btnCopy.textContent = '✓ copied';
+    setTimeout(() => btnCopy.textContent = orig, 1500);
+  } else {
+    setMode('text');
+  }
+});
+
+btnMd.addEventListener('click', () => {
+  if (_mode === 'markdown') {
+    navigator.clipboard.writeText(_pageMd?.[_curPage] || '').catch(() => {});
+    const orig = btnMd.textContent;
+    btnMd.textContent = '✓ copied';
+    setTimeout(() => btnMd.textContent = 'Markdown', 1500);
+  } else {
+    setMode('markdown');
+  }
+});
+
+btnJson.addEventListener('click', () => {
+  if (_mode === 'json') {
+    navigator.clipboard.writeText(_pageJson?.[_curPage] || '').catch(() => {});
+    const orig = btnJson.textContent;
+    btnJson.textContent = '✓ copied';
+    setTimeout(() => btnJson.textContent = 'JSON', 1500);
+  } else {
+    setMode('json');
+  }
+});
+
+// ── Drop / file input ──────────────────────────────────────────────────────────
+zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f?.type === 'application/pdf') processFile(f);
+});
+zone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) processFile(f);
+});
+
+// ── Pre-warm WASM on idle ──────────────────────────────────────────────────────
+if ('requestIdleCallback' in window) {
+  requestIdleCallback(() => ensureWasm().catch(() => {}));
+}
+</script>

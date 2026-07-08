@@ -1,0 +1,127 @@
+---
+import Base from '../../layouts/Base.astro';
+
+const apps = [
+  {
+    href: '/apps/tokenizer',
+    title: 'Tokenizer Arena',
+    tagline: 'Watch five real production tokenizers shred the same text differently.',
+    detail: 'GPT-2, GPT-4o, Llama 3, Claude, and BERT vocabularies, side by side. Type anything; see the differences that decide cost, context length, and fairness across languages.',
+    tag: 'live',
+  },
+  {
+    href: '/apps/pdf-lens',
+    title: 'PDF Lens',
+    tagline: 'Drop a PDF, get clean text, token cost, and chunks for RAG.',
+    detail: 'LiteParse WASM runs entirely in your browser. No upload, no server. Parses layout, extracts key signals, estimates token cost across frontier models.',
+    tag: 'wasm',
+  },
+  {
+    href: '/apps/probability-xray',
+    title: 'Probability X-ray',
+    tagline: 'Chat with a local model, watch the confidence behind every word.',
+    detail: 'SmolLM2 running on WebGPU. Each generated token is colored by the probability the model gave it. Hover to see the runners-up. Same lens as calibration probing, just live.',
+    tag: 'webgpu',
+  },
+  {
+    href: '/apps/gguf-inspect',
+    title: 'GGUF Inspect',
+    tagline: 'Paste a GGUF URL. Get architecture, quantization, and memory fit.',
+    detail: 'Reads the GGUF header directly from Hugging Face without downloading the whole file. Shows parameters, quant scheme, tensor layout, and whether it fits on your machine.',
+    tag: 'llama.cpp',
+  },
+];
+---
+
+<Base
+  title="Apps · Amaljith Kuttamath"
+  description="Four small tools that run in your browser: Tokenizer Arena, PDF Lens, Probability X-ray, and GGUF Inspect."
+>
+  <section class="page-header animate-in">
+    <h1>Apps</h1>
+    <p class="subtitle">
+      Small tools I keep in my own toolbox. Everything runs in the browser.
+      Nothing leaves your machine.
+    </p>
+  </section>
+
+  <div class="apps-list animate-in animate-in-delay-1">
+    {apps.map((a) => (
+      <a href={a.href} class="app-row">
+        <div class="app-row-head">
+          <span class="app-row-title">{a.title}</span>
+          <span class="app-row-tag">{a.tag}</span>
+        </div>
+        <p class="app-row-tagline">{a.tagline}</p>
+        <p class="app-row-detail">{a.detail}</p>
+      </a>
+    ))}
+  </div>
+</Base>
+
+<style>
+  .apps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: var(--space-lg);
+  }
+
+  .app-row {
+    display: block;
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .app-row:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-hover);
+  }
+
+  .app-row-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .app-row-title {
+    font-size: var(--text-subsection);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .app-row-tag {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: 100px;
+    padding: 0.05rem 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .app-row-tagline {
+    font-size: var(--text-body);
+    color: var(--fg);
+    line-height: 1.5;
+    margin: 0 0 0.35rem;
+  }
+
+  .app-row-detail {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+</style>

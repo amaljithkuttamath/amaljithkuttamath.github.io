@@ -1,23 +1,69 @@
 ---
 import Base from '../layouts/Base.astro';
+
+const research = [
+  {
+    href: 'https://github.com/amaljithkuttamath/trust-bench',
+    title: 'trust-bench',
+    detail: 'Interpretability toolkit probing SAE features, activations, and circuits in Llama 3.1 8B.',
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/jlens-replication',
+    title: 'jlens-replication',
+    detail: "Replicating Anthropic's Jacobian lens on small open-weight models with free compute.",
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/sae-explorer',
+    title: 'sae-explorer',
+    detail: "One SAE feature that fires on 'and' across six languages in Gemma 2 2B, zero false positives.",
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/mlx-interp',
+    title: 'mlx-interp',
+    detail: 'First mechanistic interpretability library for Apple MLX. Sparse autoencoders on Apple Silicon.',
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5',
+    title: 'hybrid-attention-mlx',
+    detail: 'From-scratch MLX implementation of Qwen3.5 hybrid DeltaNet + full-attention architecture.',
+  },
+];
 ---
 
-<Base title="About | Amaljith Kuttamath" description="AI Engineer researching LLM trust, safety, and mechanistic interpretability. Building tooling for model evaluation and failure mode analysis.">
+<Base
+  title="About · Amaljith Kuttamath"
+  description="AI Engineer researching LLM trust, safety, and mechanistic interpretability. Building tools that make language models legible."
+>
   <article class="about-content animate-in">
     <h1>About</h1>
 
-    <section class="about-section about-intro">
+    <section class="about-intro">
       <img src="/amal.jpg" alt="Amaljith Kuttamath" class="about-photo" width="120" height="120" />
-      <p>
-        I research how language models fail and build tooling to measure it. My background is in retrieval systems and knowledge graphs for healthcare, which pulled me toward the deeper question of what's actually happening inside these models. See what I'm working on at <a href="/work">/work</a>.
-      </p>
+      <div class="intro-text">
+        <p>
+          I build small tools that make language models legible &mdash; what
+          they see, how sure they are, and where they break. My background is
+          in retrieval systems and knowledge graphs for healthcare, which
+          pulled me toward the deeper question of what's actually happening
+          inside these models.
+        </p>
+        <p>
+          Everything on this site runs in your browser. Try the
+          <a href="/apps">apps</a> or the <a href="/lab">lab</a>.
+        </p>
+      </div>
     </section>
 
     <section class="about-section">
       <div class="section-header">
         <h2>Background</h2>
       </div>
-      <p class="background-brief">Started at <a href="https://www.isro.gov.in" target="_blank" rel="noopener noreferrer">ISRO</a>. Co-founded <strong>RadianArc</strong>, where we built digital twins for predictive maintenance on industrial machinery. MS in Data Analytics from George Mason University, where my thesis focused on RAG systems for healthcare.</p>
+      <p class="background-brief">
+        Started at <a href="https://www.isro.gov.in" target="_blank" rel="noopener noreferrer">ISRO</a>.
+        Co-founded <strong>RadianArc</strong>, where we built digital twins for
+        predictive maintenance on industrial machinery. MS in Data Analytics
+        from George Mason University; thesis on RAG systems for healthcare.
+      </p>
       <div class="credentials">
         <div class="detail-row">
           <span class="detail-label">Cert</span>
@@ -25,14 +71,38 @@ import Base from '../layouts/Base.astro';
         </div>
         <div class="detail-row">
           <span class="detail-label">Paper</span>
-          <span class="detail-value"><a href="https://doi.org/10.1097/QMH.0000000000000525" target="_blank" rel="noopener noreferrer">Predicting Risk of Lung Cancer</a>, Quality Management in Health Care</span>
+          <span class="detail-value">
+            <a href="https://doi.org/10.1097/QMH.0000000000000525" target="_blank" rel="noopener noreferrer">Predicting Risk of Lung Cancer</a>,
+            Quality Management in Health Care
+          </span>
         </div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <div class="section-header">
+        <h2>Research libraries</h2>
+      </div>
+      <p class="research-lead">
+        Longer-running open-source work. These are libraries and research
+        replications rather than in-browser tools; they live on GitHub.
+      </p>
+      <div class="research-list">
+        {research.map((r) => (
+          <a href={r.href} class="research-row" target="_blank" rel="noopener noreferrer">
+            <span class="research-title">{r.title}</span>
+            <span class="research-detail">{r.detail}</span>
+          </a>
+        ))}
       </div>
     </section>
 
     <section class="about-section about-cta">
       <p>
-        Want to collaborate or talk shop? <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a> · <a href="/resume.pdf" class="resume-link">Resume (PDF)</a>
+        Want to collaborate or talk shop?
+        <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a>
+        &middot;
+        <a href="/resume.pdf" class="resume-link">Resume (PDF)</a>
       </p>
       <div class="social-links">
         <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer">GitHub</a>
@@ -41,8 +111,6 @@ import Base from '../layouts/Base.astro';
         <a href="https://substack.com/@amaljithk" target="_blank" rel="noopener noreferrer">Substack</a>
       </div>
     </section>
-
-    <a href="/work" class="work-cta">See my work &rarr;</a>
   </article>
 
   <script type="application/ld+json" set:html={JSON.stringify({
@@ -73,12 +141,17 @@ import Base from '../layouts/Base.astro';
     display: flex;
     align-items: flex-start;
     gap: var(--space-lg);
+    margin-bottom: var(--space-xl);
   }
 
   .about-photo {
     border-radius: 50%;
     flex-shrink: 0;
     object-fit: cover;
+  }
+
+  .intro-text {
+    flex: 1;
   }
 
   .about-section {
@@ -108,6 +181,49 @@ import Base from '../layouts/Base.astro';
     border-top: 1px solid var(--fg-faint);
   }
 
+  .research-lead {
+    margin-bottom: var(--space-md);
+  }
+
+  .research-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .research-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    text-decoration: none;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .research-row:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .research-row:hover {
+    color: var(--accent-color);
+  }
+
+  .research-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .research-detail {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    text-align: right;
+    line-height: 1.5;
+  }
+
   .about-cta p {
     margin-bottom: var(--space-sm);
   }
@@ -115,6 +231,7 @@ import Base from '../layouts/Base.astro';
   .social-links {
     display: flex;
     gap: var(--space-lg);
+    flex-wrap: wrap;
   }
 
   .social-links a {
@@ -129,32 +246,19 @@ import Base from '../layouts/Base.astro';
     color: var(--accent-color);
   }
 
-  @media (max-width: 480px) {
+  @media (max-width: 600px) {
     .about-intro {
       flex-direction: column;
-      align-items: center;
-      text-align: center;
+      align-items: flex-start;
     }
-  }
 
-  .work-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin-top: var(--space-lg);
-    font-family: var(--font-mono);
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-    text-decoration: none;
-    border: 1px solid var(--fg-faint);
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius-md);
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
-  }
+    .research-row {
+      flex-direction: column;
+      gap: 0.15rem;
+    }
 
-  .work-cta:hover {
-    color: var(--fg);
-    border-color: var(--fg-muted);
-    background: var(--bg-elevated);
+    .research-detail {
+      text-align: left;
+    }
   }
 </style>

@@ -1,0 +1,251 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="Tokenizer Arena · Amaljith Kuttamath" description="Type text and watch five real tokenizers shred it differently, live in your browser. GPT-2, GPT-4o, Llama 3, Claude, and BERT, side by side.">
+  <div class="ta">
+    <div class="ta-head">
+      <h1>Tokenizer Arena</h1>
+      <p>Every model sees text as tokens, and every model shreds the same text differently. Type below and watch five real tokenizers, the actual production vocabularies, split your text live in your browser. Fewer tokens means cheaper inference and more room in the context window. The differences are bigger than you think.</p>
+    </div>
+
+    <div class="ta-presets" id="presets"></div>
+
+    <textarea id="ta-input" class="ta-input" rows="3" spellcheck="false">The quick brown fox couldn't believe GPT-4o uses 3.5x fewer tokens for this: നമസ്കാരം 🤖</textarea>
+
+    <div id="arena"></div>
+
+    <div class="ta-note">
+      <strong>Why this matters:</strong> tokenization decides cost, speed, and fairness. A 200k vocabulary (GPT-4o) packs common English into single tokens, while a 2019-era 50k vocabulary (GPT-2) needs several. And languages like Malayalam can cost 10x more tokens per sentence than English, which means 10x the price and 10x less context for the same meaning. Try the presets above to see it happen.
+    </div>
+    <div class="ta-note ta-note-meta">
+      Tokenizers run entirely client-side via <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener noreferrer">Transformers.js</a>, using each model's real vocabulary files. Nothing you type leaves this page. Related: my Rust benchmark of tokenizer implementations, <a href="https://github.com/amaljithkuttamath/tokenizer-arena" target="_blank" rel="noopener noreferrer">tokenizer-arena</a>.
+    </div>
+  </div>
+</Base>
+
+<style>
+  .ta { max-width: 900px; margin: 0 auto; }
+  .ta-head { margin-bottom: var(--space-lg); }
+  .ta-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
+  .ta-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; }
+
+  .ta-presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  :global(.ta-preset) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    text-transform: lowercase; letter-spacing: 0.02em;
+    background: var(--bg-elevated); color: var(--fg-muted);
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-full);
+    padding: 4px 12px; cursor: pointer;
+    transition: all var(--duration) var(--ease);
+  }
+  :global(.ta-preset:hover) { color: var(--accent-color); border-color: var(--accent-color); }
+
+  .ta-input {
+    width: 100%; background: var(--bg-elevated); color: var(--fg);
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-md);
+    padding: 12px 14px; font-family: var(--font-mono); font-size: var(--text-small);
+    line-height: 1.7; resize: vertical; margin-bottom: var(--space-md);
+    transition: border-color var(--duration) var(--ease);
+  }
+  .ta-input:focus { border-color: var(--accent-color); }
+
+  :global(.tok-row) {
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 12px 16px;
+    margin-bottom: 10px;
+    transition: border-color var(--duration) var(--ease);
+  }
+  :global(.tok-row.winner) { border-color: var(--accent-color); }
+  :global(.tok-row-head) {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  :global(.tok-name) { font-size: var(--text-small); font-weight: 600; }
+  :global(.tok-meta) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  :global(.tok-count) {
+    margin-left: auto; font-family: var(--font-mono); font-size: var(--text-small);
+    color: var(--fg);
+  }
+  :global(.tok-count strong) { color: var(--accent-color); font-weight: 600; }
+  :global(.tok-badge) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    background: var(--accent-color); color: var(--bg);
+    border-radius: var(--radius-full); padding: 1px 8px;
+    text-transform: lowercase;
+  }
+  :global(.tok-chips) { line-height: 2.1; word-break: break-word; }
+  :global(.tok-chip) {
+    display: inline; font-family: var(--font-mono); font-size: 0.78rem;
+    padding: 2px 1px; border-radius: 3px; color: var(--fg);
+    white-space: pre-wrap;
+  }
+  :global(.tok-chip-ws) { opacity: 0.55; }
+  :global(.tok-status) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    color: var(--fg-muted);
+  }
+  :global(.tok-status.err) { color: var(--danger); }
+  :global(.tok-lossy) { color: var(--danger); }
+
+  .ta-note {
+    margin-top: var(--space-md); padding: 10px 14px;
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm); font-size: var(--text-small);
+    color: var(--fg-muted); line-height: 1.7;
+  }
+  .ta-note strong { color: var(--fg); }
+  .ta-note-meta { margin-top: 8px; font-size: var(--text-label); }
+</style>
+
+<script is:inline type="module">
+import { AutoTokenizer, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+
+env.allowLocalModels = false;
+
+const TOKENIZERS = [
+  { key: 'gpt4o',  name: 'GPT-4o',  repo: 'Xenova/gpt-4o',            meta: 'openai · 200k vocab · 2024' },
+  { key: 'claude', name: 'Claude',  repo: 'Xenova/claude-tokenizer',  meta: 'anthropic · 65k vocab' },
+  { key: 'llama3', name: 'Llama 3', repo: 'Xenova/llama-3-tokenizer', meta: 'meta · 128k vocab · 2024' },
+  { key: 'gpt2',   name: 'GPT-2',   repo: 'Xenova/gpt2',              meta: 'openai · 50k vocab · 2019' },
+  { key: 'bert',   name: 'BERT',    repo: 'Xenova/bert-base-uncased', meta: 'google · 30k wordpiece · 2018' },
+];
+
+const PRESETS = [
+  { label: 'english',      text: 'The committee unanimously recommended immediate implementation of the extraordinary proposal.' },
+  { label: 'code',         text: 'def fibonacci(n: int) -> int:\n    return n if n < 2 else fibonacci(n - 1) + fibonacci(n - 2)' },
+  { label: 'numbers',      text: 'pi is 3.14159265358979 and 123456789 * 987654321 = 121932631112635269' },
+  { label: 'malayalam',    text: 'നമസ്കാരം, എന്റെ പേര് അമൽ. ഞാൻ കേരളത്തിൽ നിന്നാണ്.' },
+  { label: 'emoji',        text: 'shipping it 🚀🤖 works on my machine 🤷🏽‍♂️✨' },
+  { label: 'weird',        text: ' SolidGoldMagikarp davidjl  petertodd  ​ indistinguishable antidisestablishmentarianism' },
+];
+
+// 6 chip background hues, translucent so they work in both color schemes
+const CHIP_BG = [
+  'rgba(140, 120, 200, 0.28)',
+  'rgba(96, 144, 192, 0.28)',
+  'rgba(112, 168, 96, 0.28)',
+  'rgba(176, 104, 152, 0.28)',
+  'rgba(168, 152, 80, 0.28)',
+  'rgba(104, 160, 160, 0.28)',
+];
+
+const state = {};   // key -> { tokenizer, error }
+const arena = document.getElementById('arena');
+const input = document.getElementById('ta-input');
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Make whitespace visible inside chips without breaking layout
+function renderTokenText(s) {
+  let h = escapeHtml(s);
+  h = h.replace(/\n/g, '<span class="tok-chip-ws">&#x21B5;</span><br>');
+  h = h.replace(/\t/g, '<span class="tok-chip-ws">&#x21E5;</span>');
+  h = h.replace(/ /g, '&nbsp;');
+  if (h === '') h = '<span class="tok-chip-ws">&#x2205;</span>';
+  return h;
+}
+
+function rowSkeleton(t) {
+  return '<div class="tok-row" id="row-' + t.key + '">' +
+    '<div class="tok-row-head">' +
+      '<span class="tok-name">' + t.name + '</span>' +
+      '<span class="tok-meta">' + t.meta + '</span>' +
+      '<span class="tok-count" id="count-' + t.key + '"></span>' +
+    '</div>' +
+    '<div class="tok-chips" id="chips-' + t.key + '"><span class="tok-status">loading vocabulary&hellip;</span></div>' +
+  '</div>';
+}
+
+function tokenizeInto(t) {
+  const s = state[t.key];
+  const chipsEl = document.getElementById('chips-' + t.key);
+  const countEl = document.getElementById('count-' + t.key);
+  if (s.error) {
+    chipsEl.innerHTML = '<span class="tok-status err">failed to load: ' + escapeHtml(s.error) + '</span>';
+    countEl.textContent = '';
+    return null;
+  }
+  if (!s.tokenizer) return null;
+
+  const text = input.value;
+  if (!text) { chipsEl.innerHTML = '<span class="tok-status">type something above</span>'; countEl.textContent = ''; return null; }
+
+  let ids;
+  try {
+    ids = s.tokenizer.encode(text, { add_special_tokens: false });
+  } catch (e) {
+    ids = s.tokenizer.encode(text);
+  }
+
+  let html = '';
+  let unk = 0;
+  for (let i = 0; i < ids.length; i++) {
+    let piece;
+    try { piece = s.tokenizer.decode([ids[i]], { skip_special_tokens: false }); }
+    catch (e) { piece = '?'; }
+    if (piece === '[UNK]' || piece === '<unk>') unk++;
+    html += '<span class="tok-chip" style="background:' + CHIP_BG[i % CHIP_BG.length] + '" title="id ' + ids[i] + '">' + renderTokenText(piece) + '</span>';
+  }
+  chipsEl.innerHTML = html;
+
+  const ratio = (text.length / ids.length).toFixed(1);
+  let stats = '<strong>' + ids.length + '</strong> tokens &middot; ' + ratio + ' chars/tok';
+  if (unk > 0) stats += ' &middot; <span class="tok-lossy">lossy: ' + unk + ' [UNK]</span>';
+  countEl.innerHTML = stats;
+  return { n: ids.length, unk };
+}
+
+function refresh() {
+  const counts = [];
+  for (const t of TOKENIZERS) {
+    const r = tokenizeInto(t);
+    // Tokenizers that collapse text into [UNK] are disqualified: fewer tokens by losing information is not winning
+    if (r && r.n > 0 && r.unk === 0) counts.push({ key: t.key, n: r.n });
+  }
+  // Crown the most efficient tokenizer once at least two are loaded
+  document.querySelectorAll('.tok-row').forEach(r => r.classList.remove('winner'));
+  document.querySelectorAll('.tok-badge').forEach(b => b.remove());
+  if (counts.length >= 2) {
+    counts.sort((a, b) => a.n - b.n);
+    const w = counts[0];
+    const row = document.getElementById('row-' + w.key);
+    row.classList.add('winner');
+    const badge = document.createElement('span');
+    badge.className = 'tok-badge';
+    badge.textContent = 'fewest tokens';
+    row.querySelector('.tok-row-head').insertBefore(badge, row.querySelector('.tok-count'));
+  }
+}
+
+let debounceTimer;
+function refreshDebounced() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(refresh, 120);
+}
+
+// Build UI
+arena.innerHTML = TOKENIZERS.map(rowSkeleton).join('');
+const presetsEl = document.getElementById('presets');
+for (const p of PRESETS) {
+  const btn = document.createElement('button');
+  btn.className = 'ta-preset';
+  btn.textContent = p.label;
+  btn.addEventListener('click', () => { input.value = p.text; refresh(); });
+  presetsEl.appendChild(btn);
+}
+input.addEventListener('input', refreshDebounced);
+
+// Load all tokenizers in parallel; each row goes live as its vocab arrives
+for (const t of TOKENIZERS) {
+  state[t.key] = { tokenizer: null, error: null };
+  AutoTokenizer.from_pretrained(t.repo)
+    .then(tok => { state[t.key].tokenizer = tok; refresh(); })
+    .catch(err => { state[t.key].error = String(err && err.message || err); refresh(); });
+}
+</script>

@@ -1,33 +1,37 @@
 # Amaljith Kuttamath
 
-> AI engineer with 7+ years of experience, researching LLM trust and safety. Builds open-source interpretability tooling and interactive machine learning experiments that run entirely in the browser.
+> AI engineer building small in-browser tools that make language models legible — what they see, how sure they are, and where they break.
 
-This is a personal portfolio and research site. All playground experiments perform real computation client-side (WebGPU / WASM), with no server or API behind them.
+This is a personal site. Every app runs client-side (WebGPU / WASM / HTTP Range reads). No server, no API keys, no upload.
 
 ## Pages
 
-- [Home](https://amaljithkuttamath.github.io/): overview, current status, featured writing
-- [Work](https://amaljithkuttamath.github.io/work): projects, interactive demos, and writing
-- [Blog](https://amaljithkuttamath.github.io/blog): all posts on LLM internals, evaluation, and tooling
-- [Playground](https://amaljithkuttamath.github.io/playground): interactive ML experiments in the browser
-- [About](https://amaljithkuttamath.github.io/about): background, credentials, contact
+- [Home](https://amaljithkuttamath.github.io/): the four apps, Radar strip, lab list
+- [Apps](https://amaljithkuttamath.github.io/apps): four in-browser tools
+- [Lab](https://amaljithkuttamath.github.io/lab): educational experiments and research libraries
+- [Radar](https://amaljithkuttamath.github.io/radar): daily AI intelligence board
+- [About](https://amaljithkuttamath.github.io/about): background, research, contact
 
-## Playground experiments
+## Apps
 
-- [microGPT Trainer](https://amaljithkuttamath.github.io/playground/microgpt): train a tiny transformer live and watch embeddings, attention, and loss evolve
-- [Tokenizer Arena](https://amaljithkuttamath.github.io/playground/tokens): compare five real production tokenizers (GPT-4o, Claude, Llama 3, GPT-2, BERT) on any text
-- [Local Chat](https://amaljithkuttamath.github.io/playground/chat): chat with SmolLM2 running on WebGPU, fully client-side
-- [Watch a Model Think](https://amaljithkuttamath.github.io/work/watch-model-think): token-by-token visualization of model predictions, calibration, and feature interference
+- [Tokenizer Arena](https://amaljithkuttamath.github.io/apps/tokenizer): compare five real production tokenizers (GPT-4o, Claude, Llama 3, GPT-2, BERT) side by side
+- [PDF Lens](https://amaljithkuttamath.github.io/apps/pdf-lens): drop a PDF, get clean text and per-model token cost via LiteParse WASM
+- [Probability X-ray](https://amaljithkuttamath.github.io/apps/probability-xray): chat with SmolLM2 on WebGPU; every generated word is colored by the model's confidence, with hover-to-see runners-up
+- [GGUF Inspect](https://amaljithkuttamath.github.io/apps/gguf-inspect): paste a Hugging Face GGUF URL to see architecture, quantization, parameter count, context length, and fit on common GPU tiers — parsed from the file header via HTTP Range read
 
-## Selected projects
+## Lab
 
-- [trust-bench](https://github.com/amaljithkuttamath/trust-bench): interpretability toolkit probing SAE features, activations, and circuits in language models
-- [calibration-probe](https://github.com/amaljithkuttamath/calibration-probe): measuring how well LLMs know what they know
-- [crux](https://github.com/amaljithkuttamath/crux): terminal dashboard for understanding AI coding sessions and token usage
-- [tokenizer-arena](https://github.com/amaljithkuttamath/tokenizer-arena): Rust benchmark of tokenizer implementations
-- [gguf-inspect](https://github.com/amaljithkuttamath/gguf-inspect): Rust tool for inspecting GGUF model files
+- [microGPT Trainer](https://amaljithkuttamath.github.io/lab/microgpt): train a tiny transformer live, watch embeddings, attention, MLP, and loss
+- [Watch a Model Think](https://amaljithkuttamath.github.io/lab/watch-model-think): step through GPT-2 with sparse autoencoders attached
+
+## Research libraries
+
+- [trust-bench](https://github.com/amaljithkuttamath/trust-bench): interpretability toolkit for Llama 3.1 8B
+- [jlens-replication](https://github.com/amaljithkuttamath/jlens-replication): Anthropic Jacobian lens replicated on small open-weight models
+- [sae-explorer](https://github.com/amaljithkuttamath/sae-explorer): one SAE feature that fires on "and" across six languages in Gemma 2 2B
+- [mlx-interp](https://github.com/amaljithkuttamath/mlx-interp): first mechanistic interpretability library for Apple MLX
+- [hybrid-attention-mlx](https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5): from-scratch MLX implementation of Qwen3.5 hybrid DeltaNet + full-attention
 
 ## Feeds
 
-- [RSS (full post content)](https://amaljithkuttamath.github.io/rss.xml)
 - [Sitemap](https://amaljithkuttamath.github.io/sitemap-index.xml)

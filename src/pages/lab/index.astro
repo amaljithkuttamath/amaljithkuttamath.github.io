@@ -1,0 +1,212 @@
+---
+import Base from '../../layouts/Base.astro';
+
+const experiments = [
+  {
+    href: '/lab/microgpt',
+    title: 'microGPT Trainer',
+    idea: 'What is a transformer actually learning, minute by minute?',
+    detail: 'A single-layer GPT trains live on 500 names. Embeddings, attention patterns, MLP activations, and the loss curve update every step. Same architecture as GPT-4, four million times smaller.',
+  },
+  {
+    href: '/lab/watch-model-think',
+    title: 'Watch a Model Think',
+    idea: 'What does GPT-2 see, token by token, from the inside?',
+    detail: 'Step through pre-recorded runs with sparse autoencoders attached: interpretable concepts, feature loops, a temperature feature that fires correctly while the model gets the answer wrong.',
+  },
+];
+
+// Research libraries: work I keep pushing, but they're not apps or demos.
+// They live in a footer strip so people who click through /lab can find them.
+const research = [
+  {
+    href: 'https://github.com/amaljithkuttamath/trust-bench',
+    title: 'trust-bench',
+    detail: 'Interpretability toolkit probing SAE features, activations, and circuits in Llama 3.1 8B.',
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/jlens-replication',
+    title: 'jlens-replication',
+    detail: "Replicating Anthropic's Jacobian lens on small open-weight models with free compute.",
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/sae-explorer',
+    title: 'sae-explorer',
+    detail: 'A single SAE feature fires on "and" across six languages in Gemma 2 2B, zero false positives.',
+  },
+  {
+    href: 'https://github.com/amaljithkuttamath/mlx-interp',
+    title: 'mlx-interp',
+    detail: 'First mechanistic interpretability library for Apple MLX. Sparse autoencoders on Apple Silicon.',
+  },
+];
+---
+
+<Base
+  title="Lab · Amaljith Kuttamath"
+  description="Interactive experiments about how models actually work. One idea each."
+>
+  <section class="page-header animate-in">
+    <h1>Lab</h1>
+    <p class="subtitle">
+      Interactive experiments. One idea each, poked at directly rather than
+      written about.
+    </p>
+  </section>
+
+  <div class="lab-list animate-in animate-in-delay-1">
+    {experiments.map((e) => (
+      <a href={e.href} class="lab-row">
+        <div class="lab-row-title">{e.title}</div>
+        <p class="lab-row-idea">{e.idea}</p>
+        <p class="lab-row-detail">{e.detail}</p>
+      </a>
+    ))}
+  </div>
+
+  <section class="research animate-in animate-in-delay-2" aria-labelledby="research-head">
+    <div class="section-header">
+      <h2 id="research-head" class="section-label">Research libraries</h2>
+      <span class="section-hint">longer-running work, on GitHub</span>
+    </div>
+    <div class="research-list">
+      {research.map((r) => (
+        <a href={r.href} class="research-row" target="_blank" rel="noopener noreferrer">
+          <span class="research-title">{r.title}</span>
+          <span class="research-detail">{r.detail}</span>
+        </a>
+      ))}
+    </div>
+  </section>
+</Base>
+
+<style>
+  .lab-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: var(--space-lg);
+    margin-bottom: var(--space-2xl);
+  }
+
+  .lab-row {
+    display: block;
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--fg);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .lab-row:hover {
+    border-color: var(--accent-color);
+    background: var(--bg-hover);
+  }
+
+  .lab-row-title {
+    font-size: var(--text-subsection);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.25rem;
+  }
+
+  .lab-row-idea {
+    font-family: var(--font-serif);
+    font-size: var(--text-body);
+    color: var(--fg);
+    font-style: italic;
+    line-height: 1.45;
+    margin: 0 0 0.35rem;
+  }
+
+  .lab-row-detail {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* ── Research strip ── */
+  .research {
+    margin-bottom: var(--space-xl);
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fg-muted);
+    margin: 0;
+  }
+
+  .section-hint {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+  }
+
+  .research-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .research-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    text-decoration: none;
+    color: var(--fg);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .research-row:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .research-row:hover {
+    color: var(--accent-color);
+  }
+
+  .research-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-body);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .research-detail {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    text-align: right;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 600px) {
+    .research-row {
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .research-detail {
+      text-align: left;
+    }
+  }
+</style>
