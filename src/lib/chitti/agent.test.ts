@@ -31,7 +31,7 @@ describe('createSession', () => {
       usage: { input: 10, output: 5 },
     });
     // Verifier call for turn 1 (pass, since chartSpec is null the pass condition needs
-    // literal PASS text from the mock — see agent.ts's verify()).
+    // literal PASS text from the mock. See agent.ts's verify()).
     mockComplete.mockResolvedValueOnce({
       text: 'PASS: chart rendered.',
       toolCalls: [],
@@ -119,7 +119,7 @@ describe('message trimming', () => {
     // execute_js's result is JSON.stringify'd verbatim into the tool message
     // (unlike fetch_worldbank, which goes through the compact summarizeRows()),
     // so it's the faithful way to force a genuinely large tool-result payload
-    // in this test — a live fetch_worldbank_all call would also work but would
+    // in this test. A live fetch_worldbank_all call would also work but would
     // need network mocking and is flakier than the deterministic code path here.
     const bigRowJson = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ iso3: 'ABC', year: 2000 + i, value: i })));
 
@@ -155,14 +155,14 @@ describe('message trimming', () => {
     const secondCallArgs = mockComplete.mock.calls[3]; // index 3 = the finish_explanation-producing call
     const messagesArg = secondCallArgs[1] as { role: string; content?: string }[];
     const toolMessages = messagesArg.filter((m) => m.role === 'tool');
-    // Scoped to tool messages specifically — the system prompt and the
+    // Scoped to tool messages specifically. The system prompt and the
     // turn-2 "you already have data" reminder are legitimately long and are
     // not the trimming target; only completed turns' tool-result payloads are.
     const anyToolMessageHasFullRowDump = toolMessages.some(
       (m) => typeof m.content === 'string' && m.content.length > 500
     );
     expect(anyToolMessageHasFullRowDump).toBe(false);
-    expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted — a short marker remains
+    expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted. a short marker remains
     expect(toolMessages.some((m) => m.content?.includes('trimmed'))).toBe(true);
   });
 });

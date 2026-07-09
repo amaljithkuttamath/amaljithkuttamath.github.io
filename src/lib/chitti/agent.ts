@@ -1,4 +1,4 @@
-// agent.ts — the deep-agent loop, ported from the langchain-ai/deepagents
+// agent.ts: the deep-agent loop, ported from the langchain-ai/deepagents
 // pattern to browser JS. A single top agent calls tools until it calls
 // `finish`; a second LLM call then verifies the chart answers the question,
 // and if not we retry the pipeline once with the critique in context.
@@ -31,16 +31,16 @@ export interface TraceEvent {
   argSummary: string;
   status: 'running' | 'ok' | 'error';
   detail?: string;
-  // Wall-clock time the event was pushed (epoch ms) — drives the receipt's
+  // Wall-clock time the event was pushed (epoch ms). Drives the receipt's
   // per-line timestamp. Captured once, at push time, not re-derived later.
   ts: number;
   // Tokens consumed by the LLM turn that produced this tool call, when this
   // step is directly attributable to one. Pure data-fetch/file steps that
-  // aren't the result of a turn we're attributing usage to stay undefined —
+  // aren't the result of a turn we're attributing usage to stay undefined.
   // the UI omits the token figure rather than showing a fake zero.
   tokens?: number;
   // Set only on the synthetic 'verify' trace event, once the verifier call
-  // has returned a verdict. Drives the ink-stamped VERIFIED badge — the UI
+  // has returned a verdict. Drives the ink-stamped VERIFIED badge. The UI
   // must only stamp a step where this is true.
   pass?: boolean;
 }
@@ -368,7 +368,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
 
     // Trim this turn's tool-result messages down to a short marker. state.rows
     // (plain JS memory, not `messages`) remains the durable source of truth for
-    // chart data across turns — see the design doc's context retention policy.
+    // chart data across turns. See the design doc's context retention policy.
     // Only messages pushed during THIS turn are in range; earlier turns were
     // already trimmed when they completed.
     for (let i = turnStartIndex; i < messages.length; i++) {
@@ -411,7 +411,7 @@ function extractOneSentence(text: string): string {
   if (!t) return '';
   const sentences = t.split(/(?<=[.!?])\s+/);
   // Prefer the LAST numbery sentence, not the first: this text may be a
-  // model's raw reasoning (used as a fallback when `text` was empty — see
+  // model's raw reasoning (used as a fallback when `text` was empty. See
   // call site), which explores several numbers while working through the
   // problem before landing on its actual conclusion at the end. Taking the
   // first numbery sentence from reasoning tends to grab an exploratory
