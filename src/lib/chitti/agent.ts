@@ -128,6 +128,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     let totalCost = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
     let turnKind: 'chart' | 'explanation' = 'chart';
+    const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
       const withTs: TraceEvent = { ...e, ts: Date.now() };
@@ -364,6 +365,18 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     }
 
     cb.onStatus('Done', 'ok');
+
+    // Trim this turn's tool-result messages down to a short marker. state.rows
+    // (plain JS memory, not `messages`) remains the durable source of truth for
+    // chart data across turns — see the design doc's context retention policy.
+    // Only messages pushed during THIS turn are in range; earlier turns were
+    // already trimmed when they completed.
+    for (let i = turnStartIndex; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role === 'tool' && m.content.length > 200) {
+        messages[i] = { ...m, content: `(trimmed — ${m.content.length} chars, see current data summary next turn)` };
+      }
+    }
 
     const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
 

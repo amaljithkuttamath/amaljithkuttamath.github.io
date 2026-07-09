@@ -110,3 +110,59 @@ describe('explanation turns', () => {
     expect(second.chartSpec).not.toBeNull(); // carries forward turn 1's chart, unchanged
   });
 });
+
+describe('message trimming', () => {
+  it('replaces a completed turn\'s tool-result messages with a short marker', async () => {
+    const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+    mockComplete.mockReset();
+
+    // execute_js's result is JSON.stringify'd verbatim into the tool message
+    // (unlike fetch_worldbank, which goes through the compact summarizeRows()),
+    // so it's the faithful way to force a genuinely large tool-result payload
+    // in this test — a live fetch_worldbank_all call would also work but would
+    // need network mocking and is flakier than the deterministic code path here.
+    const bigRowJson = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ iso3: 'ABC', year: 2000 + i, value: i })));
+
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'e0', name: 'execute_js', arguments: { code: `return ${bigRowJson};` } }],
+      usage: { input: 10, output: 5 },
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'f1', name: 'finish', arguments: { one_line_finding: 'Done.' } }],
+      usage: { input: 10, output: 5 },
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: 'PASS: chart rendered.',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    await session.ask('Fetch data', cb);
+
+    // Second turn, to inspect what turn 1's tool messages look like by the time
+    // they're sent again.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'f2', name: 'finish_explanation', arguments: { explanation: 'ok' } }],
+      usage: { input: 10, output: 5 },
+    });
+    await session.ask('Explain', cb);
+
+    const secondCallArgs = mockComplete.mock.calls[3]; // index 3 = the finish_explanation-producing call
+    const messagesArg = secondCallArgs[1] as { role: string; content?: string }[];
+    const toolMessages = messagesArg.filter((m) => m.role === 'tool');
+    // Scoped to tool messages specifically — the system prompt and the
+    // turn-2 "you already have data" reminder are legitimately long and are
+    // not the trimming target; only completed turns' tool-result payloads are.
+    const anyToolMessageHasFullRowDump = toolMessages.some(
+      (m) => typeof m.content === 'string' && m.content.length > 500
+    );
+    expect(anyToolMessageHasFullRowDump).toBe(false);
+    expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted — a short marker remains
+    expect(toolMessages.some((m) => m.content?.includes('trimmed'))).toBe(true);
+  });
+});
