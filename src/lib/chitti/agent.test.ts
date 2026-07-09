@@ -100,7 +100,7 @@ describe('explanation turns', () => {
       toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Here is what the data shows.' } }],
       usage: { input: 8, output: 4 },
     });
-    // NOTE: no verifier-call mock is queued for turn 2 — if the implementation
+    // NOTE: no verifier-call mock is queued for turn 2. If the implementation
     // calls the verifier anyway, this test fails with "no more mocked values",
     // proving the skip actually happened rather than merely asserting the field.
 
