@@ -397,6 +397,17 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
   return { ask };
 }
 
+// Temporary one-shot compatibility wrapper for chitti.astro, which still calls
+// this directly. Removed once chitti.astro is updated to call createSession()
+// and manage its own session across turns (see the multi-turn UI plan).
+export async function runAgent(
+  cfg: ProviderConfig,
+  question: string,
+  cb: AgentCallbacks
+): Promise<AgentOutput> {
+  return createSession(cfg).ask(question, cb);
+}
+
 function indicatorName(id: string): string {
   // Enrich the raw indicator id with its friendly curated name when we have one.
   const hit = INDICATORS.find((i) => i.id === id);
