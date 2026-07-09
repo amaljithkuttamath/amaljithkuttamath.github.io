@@ -16,6 +16,8 @@ import {
   searchIndicators,
   listCountries,
   fetchWorldbank,
+  fetchWorldbankAll,
+  executeJs,
   rowsToCSV,
   INDICATORS,
   type ChartSpec,
@@ -29,6 +31,18 @@ export interface TraceEvent {
   argSummary: string;
   status: 'running' | 'ok' | 'error';
   detail?: string;
+  // Wall-clock time the event was pushed (epoch ms) — drives the receipt's
+  // per-line timestamp. Captured once, at push time, not re-derived later.
+  ts: number;
+  // Tokens consumed by the LLM turn that produced this tool call, when this
+  // step is directly attributable to one. Pure data-fetch/file steps that
+  // aren't the result of a turn we're attributing usage to stay undefined —
+  // the UI omits the token figure rather than showing a fake zero.
+  tokens?: number;
+  // Set only on the synthetic 'verify' trace event, once the verifier call
+  // has returned a verdict. Drives the ink-stamped VERIFIED badge — the UI
+  // must only stamp a step where this is true.
+  pass?: boolean;
 }
 
 export interface AgentCallbacks {
@@ -50,21 +64,22 @@ export interface AgentOutput {
   retried: boolean;
 }
 
-const SYSTEM_PROMPT = `You are Chitti, a data analyst agent that answers questions about the world using ONLY the World Bank Open Data API. You work by calling tools, one or a few at a time, writing intermediate artifacts to a virtual filesystem so your work is auditable.
+const SYSTEM_PROMPT = `You are Chitti, a data analyst agent that answers questions about the world using ONLY the World Bank Open Data API. Every tool call you make, and your reasoning before it, is shown live to the user as your work happens — that IS the audit trail. Do not write intermediate planning/shortlist/spec files to narrate a decision you can just state in your reasoning; each extra tool call is a real round-trip with real latency, so only call a tool when you need its actual result.
 
-Follow this pipeline:
-1. Call write_file("plan.md", ...) with a short numbered plan decomposing the question.
-2. Call search_indicators to pick the right indicator(s). Write the chosen shortlist to indicator_shortlist.json.
-3. Decide which countries/regions are needed. Use list_countries if you need ISO3 codes or a group. Write country_list.json.
-4. Write api_call.txt describing the exact fetch you will make (indicator, countries, year range).
-5. Call fetch_worldbank to get the data. Write a compact summary to raw_data.json (you do NOT need to copy every row; summarize counts and key numbers).
-6. Decide the best chart type: line for time series, bar for a single-year ranking, scatter for two indicators, grouped-bar for comparing a few countries. Write chart_spec.json.
-7. Call render_chart with the spec. For "which countries changed the most" style questions, compute the change per country and render a bar chart of the top ~15 by change.
-8. Call finish with a single tight sentence stating the top-line finding. NO methodology, NO caveats.
+Minimal pipeline — four tool calls, no more, unless a call fails or you genuinely need extra fetches:
+1. search_indicators — pick the right indicator. State which one and why in your reasoning, don't write it to a file.
+2. fetch_worldbank (a fixed, named list of countries you already know the ISO3 codes for) OR fetch_worldbank_all (every country — it resolves the full list and batches internally, so never call list_countries yourself just to build a country list for "all countries" questions).
+3. execute_js — compute whatever ranking/reduction/percentage-change/comparison the question needs by writing real JS against the fetched rows. Do NOT manually rank, diff, or compare more than a couple of countries in your own reasoning — that is slow and error-prone at scale; write code instead and read back the computed result.
+4. render_chart — pick the chart type (line for time series, bar for a single-year ranking, scatter for two indicators, grouped-bar for comparing a few countries) and pass the spec directly as this call's arguments, built from execute_js's result. There is no separate "write the spec, then render it" step — the call's arguments ARE the spec.
+Then call finish with a single tight sentence stating the top-line finding. NO methodology, NO caveats.
+
+list_countries, write_file, and read_file still exist for less common cases (a specific named region/group's ISO3 codes, or genuinely needing to stash something too large to hold across many turns) — but for a normal "which countries..." or "all countries" question, you should not need them at all.
 
 Rules:
 - Multi-country fetches use ISO3 codes in an array; the tool handles the API formatting.
-- Use aggregate ids (e.g. WLD=world, and region aggregate ids) when the question is about regions or the world.
+- Use aggregate ids (e.g. WLD=world, and region aggregate ids) when the question is about a single region or the world as a whole — use fetch_worldbank_all only for genuine "every country" questions.
+- fetch_worldbank's country_ids has NO wildcard or "all countries" value — an empty array
+  returns nothing; use fetch_worldbank_all for that case instead of trying to build the full list yourself.
 - Keep tool arguments minimal and valid. Years must be numbers.
 - You have a hard budget of ${MAX_TOOL_CALLS} tool calls. Be efficient. Do NOT re-fetch data you already have.
 - The finding must be ONE sentence and contain a concrete number or ranking when possible.`;
@@ -103,19 +118,23 @@ export async function runAgent(
     finding: string;
   } = { rows: [], chartSpec: null, indicators: new Map(), finding: '' };
 
-  function pushTrace(e: TraceEvent): TraceEvent {
-    trace.push(e);
+  function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
+    const withTs: TraceEvent = { ...e, ts: Date.now() };
+    trace.push(withTs);
     cb.onTrace([...trace]);
-    return e;
+    return withTs;
   }
   function updateTrace() {
     cb.onTrace([...trace]);
   }
 
   // Execute one tool call; returns the string result the model sees.
-  async function dispatch(tc: ToolCall): Promise<string> {
+  // `tokens`, when given, is the LLM turn's usage that produced this call —
+  // attributed to exactly one tool call per turn (the first), so a turn that
+  // requests several tool calls at once doesn't double-count its usage.
+  async function dispatch(tc: ToolCall, tokens?: number): Promise<string> {
     const a = tc.arguments;
-    const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running' });
+    const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens });
     try {
       let result = '';
       switch (tc.name) {
@@ -131,17 +150,47 @@ export async function runAgent(
         }
         case 'fetch_worldbank': {
           const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
-          const rows = await fetchWorldbank(
+          const { rows, truncatedFrom } = await fetchWorldbank(
             String(a.indicator_id),
             ids,
             Number(a.year_start),
             Number(a.year_end)
           );
-          state.rows = rows;
+          // Accumulate rather than overwrite: a question may need more than
+          // one fetch (e.g. a truncation follow-up call), and execute_js
+          // should see every row fetched so far, not just the last call's.
+          state.rows = state.rows.concat(rows);
           // Remember the indicator name for citations.
           state.indicators.set(String(a.indicator_id), String(a.indicator_id));
+          // Tell the model explicitly when its country list got truncated —
+          // otherwise it has no signal the data is incomplete and will
+          // report a finding as if every requested country were fetched.
           result = summarizeRows(rows);
-          ev.detail = `${rows.length} rows`;
+          if (truncatedFrom) {
+            result +=
+              `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
+              `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
+              `country_ids and merge results if you need full coverage.`;
+          }
+          ev.detail = `${rows.length} rows` + (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
+          break;
+        }
+        case 'fetch_worldbank_all': {
+          const { rows, countryCount, batchCount } = await fetchWorldbankAll(
+            String(a.indicator_id),
+            Number(a.year_start),
+            Number(a.year_end)
+          );
+          state.rows = state.rows.concat(rows);
+          state.indicators.set(String(a.indicator_id), String(a.indicator_id));
+          result = summarizeRows(rows);
+          ev.detail = `${rows.length} rows · ${countryCount} countries · ${batchCount} batch${batchCount === 1 ? '' : 'es'}`;
+          break;
+        }
+        case 'execute_js': {
+          const { ok, result: value, error } = executeJs(String(a.code ?? ''), state.rows);
+          result = ok ? JSON.stringify(value) : 'ERROR: ' + error;
+          ev.detail = ok ? 'ok' : 'error: ' + error;
           break;
         }
         case 'write_file': {
@@ -156,7 +205,6 @@ export async function runAgent(
         case 'render_chart': {
           const spec = normalizeSpec(a as unknown as ChartSpec);
           state.chartSpec = spec;
-          vfs.write('chart_spec.json', JSON.stringify(spec, null, 2));
           cb.onChart(spec);
           result = 'rendered';
           break;
@@ -198,12 +246,28 @@ export async function runAgent(
       const res = await complete(cfg, messages, TOOL_SCHEMAS);
       totalCost += estimateCost(cfg.model, res.usage);
 
+      // OpenRouter reasoning models only (cfg.requestReasoning gates the
+      // request itself in providers.ts) — a synthetic trace event, same
+      // pattern as the 'verify' step, so the receipt shows what the model
+      // was thinking right before the tool calls it made as a result.
+      if (res.reasoning) {
+        pushTrace({ tool: 'reasoning', argSummary: '', status: 'ok', detail: res.reasoning });
+      }
+
       if (!res.toolCalls.length) {
         noopTurns++;
         // If the model has produced a chart already and is now just talking,
         // extract a finding from its text rather than looping forever asking it to call finish.
-        if (state.chartSpec && state.rows.length && res.text.trim()) {
-          state.finding = extractOneSentence(res.text);
+        // Reasoning models sometimes put this "here's my summary" narration
+        // entirely in `reasoning` with an empty `text` (observed directly:
+        // a real run rendered a correct, verified chart, then had a no-tool
+        // turn whose `reasoning` field said "the chart has been rendered,
+        // let me summarize..." while `text` was blank — falling back to
+        // `text` alone produced "No finding produced." despite a real
+        // finding being sitting right there in `reasoning`).
+        const fallbackText = res.text.trim() || res.reasoning?.trim() || '';
+        if (state.chartSpec && state.rows.length && fallbackText) {
+          state.finding = extractOneSentence(fallbackText);
           return;
         }
         // If it keeps refusing to call tools, give up on nudging and bail to
@@ -225,9 +289,11 @@ export async function runAgent(
       messages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
 
       let finished = false;
-      for (const tc of res.toolCalls) {
+      const turnTokens = res.usage.input + res.usage.output;
+      for (const [idx, tc] of res.toolCalls.entries()) {
         calls++;
-        const out = await dispatch(tc);
+        // Attribute this turn's usage to the first tool call it produced only.
+        const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
         messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
         if (tc.name === 'finish') finished = true;
         if (calls >= MAX_TOOL_CALLS) break;
@@ -257,13 +323,27 @@ export async function runAgent(
     }
   }
 
+  // Runs the verifier LLM call wrapped in a trace event, so the receipt has
+  // a visible 'verify' line-item to ink-stamp (or cross out) — separate from
+  // `verify()` itself, which stays a pure judge call untouched by trace concerns.
+  async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
+    const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
+    const result = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
+    ev.status = result.pass ? 'ok' : 'error';
+    ev.pass = result.pass;
+    ev.detail = result.report;
+    ev.tokens = result.tokens;
+    updateTrace();
+    return result;
+  }
+
   // ── First pass ──
   cb.onStatus('Planning…', 'loading');
   await agentPass();
 
   // ── Verifier ──
   cb.onStatus('Verifying…', 'loading');
-  const verifierReport = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
+  const verifierReport = await runVerify();
   vfs.write('verifier_report.md', verifierReport.report);
 
   let retried = false;
@@ -274,7 +354,7 @@ export async function runAgent(
     retried = true;
     cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
     await agentPass(verifierReport.report);
-    const second = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
+    const second = await runVerify(verifierReport.report);
     vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
     if (!second.pass) confidence = 'low';
   }
@@ -308,10 +388,15 @@ function indicatorName(id: string): string {
 function extractOneSentence(text: string): string {
   const t = text.trim().replace(/\s+/g, ' ');
   if (!t) return '';
-  // Prefer a sentence that has a number or a ranking word.
   const sentences = t.split(/(?<=[.!?])\s+/);
-  const numbery = sentences.find((s) => /\d/.test(s));
-  return (numbery || sentences[0] || t).slice(0, 400);
+  // Prefer the LAST numbery sentence, not the first: this text may be a
+  // model's raw reasoning (used as a fallback when `text` was empty — see
+  // call site), which explores several numbers while working through the
+  // problem before landing on its actual conclusion at the end. Taking the
+  // first numbery sentence from reasoning tends to grab an exploratory
+  // aside, not the finding.
+  const numbery = [...sentences].reverse().find((s) => /\d/.test(s));
+  return (numbery || sentences[sentences.length - 1] || t).slice(0, 400);
 }
 
 // A short user-facing hint of where we are in the pipeline.
@@ -334,7 +419,7 @@ async function verify(
   spec: ChartSpec | null,
   finding: string,
   addCost: (c: number) => void
-): Promise<{ pass: boolean; report: string }> {
+): Promise<{ pass: boolean; report: string; tokens?: number }> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
   const messages: ChatMessage[] = [
     {
@@ -355,7 +440,11 @@ async function verify(
     addCost(estimateCost(cfg.model, res.usage));
     const text = res.text.trim();
     const pass = /^\s*PASS/i.test(text) || (!/^\s*FAIL/i.test(text) && !!spec && !!finding);
-    return { pass, report: text || (spec ? 'PASS: chart rendered.' : 'FAIL: no chart.') };
+    return {
+      pass,
+      report: text || (spec ? 'PASS: chart rendered.' : 'FAIL: no chart.'),
+      tokens: res.usage.input + res.usage.output,
+    };
   } catch (err: any) {
     // If the verifier call itself fails, don't block shipping.
     return { pass: !!spec && !!finding, report: 'Verifier unavailable: ' + (err?.message ?? err) };

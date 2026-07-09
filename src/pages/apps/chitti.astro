@@ -45,7 +45,7 @@ const PRESETS = [
     </header>
 
     <!-- Ask console: question first, connection tucked below -->
-    <section class="ch-console">
+    <section class="ch-console" id="ch-console">
       <form class="ch-ask" id="ch-ask" autocomplete="off">
         <textarea
           id="ch-q"
@@ -114,33 +114,43 @@ const PRESETS = [
       <span id="ch-status-msg">Planning…</span>
     </div>
 
-    <!-- The agent at work: live timeline + virtual workspace -->
+    <!-- The agent at work: receipt-style trace rail (left) + canvas (right) -->
     <section class="ch-panel" id="ch-panel" style="display:none">
-      <div class="ch-col ch-col-trace">
-        <div class="ch-col-head">
-          <span>Agent</span>
-          <span class="ch-col-sub">every tool call, live</span>
+      <!-- Left: the receipt. Torn top edge, perforated sections, terse trace. -->
+      <div class="ch-rail" id="ch-rail">
+        <div class="ch-rail-tear" aria-hidden="true"></div>
+        <div class="ch-rail-body">
+          <div class="ch-rail-head">
+            <span class="ch-rail-model" id="ch-rail-model">agent</span>
+            <span class="ch-rail-sub">every tool call, live</span>
+            <span class="ch-render-flag" id="ch-render-flag" style="display:none">Rendering…</span>
+          </div>
+          <div class="ch-trace" id="ch-trace"></div>
+          <div class="ch-rail-total" id="ch-rail-total" style="display:none"></div>
         </div>
-        <div class="ch-trace" id="ch-trace"></div>
       </div>
-      <div class="ch-col ch-col-files">
-        <div class="ch-col-head">
-          <span>Workspace</span>
-          <span class="ch-col-sub" id="ch-files-sub">files the agent writes</span>
-          <span class="ch-render-flag" id="ch-render-flag" style="display:none">Rendering…</span>
-        </div>
-        <div class="ch-files" id="ch-files"></div>
+
+      <!-- Right: the canvas. Chart builds here, live, full height. Starts
+           collapsed (ch-canvas-pending) until render_chart actually mounts a
+           chart — no point holding open a tall empty box while the agent is
+           still planning/fetching. -->
+      <div class="ch-canvas ch-canvas-pending" id="ch-canvas">
+        <p class="ch-canvas-wait" id="ch-canvas-wait">waiting for a chart…</p>
+        <figure class="ch-chart-card">
+          <figcaption class="ch-chart-title" id="ch-chart-title"></figcaption>
+          <div class="ch-chart" id="ch-chart"></div>
+        </figure>
       </div>
     </section>
 
-    <!-- Answer: finding first, then the chart, then the receipts -->
+    <!-- Answer: finding first, then the receipts -->
     <section class="ch-answer" id="ch-chart-wrap" style="display:none">
       <p class="ch-finding" id="ch-finding"></p>
+      <div class="ch-conf-legend" id="ch-conf-legend" style="display:none">
+        <span class="ch-conf-swatch ch-conf-swatch-hi"><i></i>confident</span>
+        <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
+      </div>
       <span class="ch-conf" id="ch-conf" style="display:none">confidence: low</span>
-      <figure class="ch-chart-card">
-        <figcaption class="ch-chart-title" id="ch-chart-title"></figcaption>
-        <div class="ch-chart" id="ch-chart"></div>
-      </figure>
 
       <details class="ch-data" id="ch-data" style="display:none">
         <summary>Raw data (<span id="ch-data-count">0</span> rows) · <button type="button" class="ch-csv" id="ch-csv">Download CSV</button></summary>
@@ -217,6 +227,7 @@ const PRESETS = [
   const byokState = $('ch-byok-state');
   const byokCta = $('ch-byok-cta');
 
+  const consoleEl = $('ch-console');
   const askForm = $('ch-ask') as HTMLFormElement;
   const qIn = $('ch-q') as HTMLTextAreaElement;
   const askBtn = $('ch-btn') as HTMLButtonElement;
@@ -227,15 +238,18 @@ const PRESETS = [
   const statusMsg = $('ch-status-msg');
 
   const panel = $('ch-panel');
+  const railModelEl = $('ch-rail-model');
   const traceEl = $('ch-trace');
-  const filesEl = $('ch-files');
   const renderFlag = $('ch-render-flag');
 
+  const canvasEl = $('ch-canvas');
   const chartWrap = $('ch-chart-wrap');
   const chartEl = $('ch-chart');
   const chartTitle = $('ch-chart-title');
   const findingEl = $('ch-finding');
   const confEl = $('ch-conf');
+  const confLegend = $('ch-conf-legend');
+  const railTotal = $('ch-rail-total');
 
   const dataDetails = $('ch-data') as HTMLDetailsElement;
   const dataCount = $('ch-data-count');
@@ -265,6 +279,7 @@ const PRESETS = [
       opt.value = m.id;
       opt.textContent = m.label;
       if (m.free) opt.classList.add('ch-free-opt');
+      if (m.reasoning) opt.dataset.reasoning = '1';
       modelSel.appendChild(opt);
     }
     if (selected && models.some((m) => m.id === selected)) {
@@ -430,28 +445,90 @@ const PRESETS = [
   function hideStatus() { statusRow.style.display = 'none'; }
 
   // ── Trace rendering: a live timeline of the agent's tool calls ────────
+  // Receipt-style: a real per-line timestamp (captured once, at the moment
+  // the event first arrived), a strike-through+fade once a step resolves
+  // ('ch-trace-ok'), an amber glow on whichever single step is in flight
+  // ('ch-trace-running'), and — only for the verify step, only on a pass —
+  // an ink-stamped VERIFIED badge.
   const startTimes: number[] = [];
+  // Latest trace snapshot, kept alongside the DOM render so the post-run
+  // running-total line can sum per-step tokens without re-deriving them
+  // from the DOM.
+  let currentTrace: TraceEvent[] = [];
+  // Latest VFS snapshot (path -> content), kept so a write_file trace row
+  // can inline-expand its own file content instead of duplicating it in a
+  // separate "workspace" list below the trace.
+  let currentFiles: Record<string, string> = {};
+
+  // HH:MM:SS.d, tenths precision, matching the spec's receipt timestamp style.
+  function formatTs(ts: number): string {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    const tenths = Math.floor(d.getMilliseconds() / 100);
+    return `${hh}:${mm}:${ss}.${tenths}`;
+  }
+
+  // Compact token count, receipt-style: "217" -> "217 tok", "1834" -> "1.8k tok".
+  function formatTokens(n: number): string {
+    const val = n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+    return val + ' tok';
+  }
+
   function renderTrace(events: TraceEvent[]) {
     panel.style.display = 'grid';
+    currentTrace = events;
     const stick =
       traceEl.scrollHeight - traceEl.scrollTop - traceEl.clientHeight < 40;
+    // Preserve open/closed state of any inline-expanded file across re-renders
+    // (renderTrace re-runs on every trace AND every file event).
+    const openPaths = new Set(
+      Array.from(traceEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
+        (d) => d.dataset.path || ''
+      )
+    );
     traceEl.innerHTML = '';
     events.forEach((e, i) => {
       if (startTimes[i] === undefined) startTimes[i] = performance.now();
+
+      // Reasoning is a synthetic, already-settled event (see agent.ts) — not
+      // a tool call, so no dot/glow/duration/token treatment implying one,
+      // and no label or toggle calling it out as a distinct internal
+      // artifact. It just reads as the agent's own words, in place, like the
+      // rest of the terse narration — a clamped line count keeps a long
+      // thinking block from dominating the trace.
+      if (e.tool === 'reasoning') {
+        const rrow = document.createElement('p');
+        rrow.className = 'ch-trace-thinking';
+        rrow.textContent = e.detail || '';
+        traceEl.appendChild(rrow);
+        return;
+      }
+
       const row = document.createElement('div');
       row.className = 'ch-trace-row ch-trace-' + e.status;
       const dot = document.createElement('span');
       dot.className = 'ch-trace-dot';
       const body = document.createElement('div');
       body.className = 'ch-trace-body';
-      // Head: tool_name · arg_summary on one line, wraps only if it must.
+      // Head: timestamp, then tool_name · arg_summary on one line.
       const head = document.createElement('div');
       head.className = 'ch-trace-head';
+      const stamp = document.createElement('span');
+      stamp.className = 'ch-trace-ts';
+      stamp.textContent = formatTs(e.ts);
+      head.appendChild(stamp);
       const name = document.createElement('span');
       name.className = 'ch-trace-name';
       name.textContent = e.tool;
       head.appendChild(name);
-      if (e.argSummary) {
+      // A write_file/read_file row whose path matches a real VFS entry
+      // becomes expandable in place — no separate "workspace" list
+      // duplicating the same content elsewhere on the page.
+      const filePath = (e.tool === 'write_file' || e.tool === 'read_file') ? e.argSummary : '';
+      const fileContent = filePath ? currentFiles[filePath] : undefined;
+      if (e.argSummary && fileContent === undefined) {
         const sep = document.createElement('span');
         sep.className = 'ch-trace-sep';
         sep.textContent = '·';
@@ -460,14 +537,55 @@ const PRESETS = [
         arg.className = 'ch-trace-arg';
         arg.textContent = e.argSummary;
         head.appendChild(arg);
+        body.appendChild(head);
+      } else if (fileContent !== undefined) {
+        const det = document.createElement('details');
+        det.className = 'ch-trace-file';
+        det.dataset.path = filePath;
+        if (openPaths.has(filePath)) det.open = true;
+        const sum = document.createElement('summary');
+        sum.appendChild(head);
+        const sep = document.createElement('span');
+        sep.className = 'ch-trace-sep';
+        sep.textContent = '·';
+        head.appendChild(sep);
+        const arg = document.createElement('span');
+        arg.className = 'ch-trace-arg';
+        arg.textContent = filePath;
+        head.appendChild(arg);
+        const ext = document.createElement('span');
+        ext.className = 'ch-file-ext ch-file-ext-' + fileExt(filePath);
+        ext.textContent = fileExt(filePath);
+        sum.appendChild(ext);
+        const pre = document.createElement('pre');
+        pre.className = 'ch-file-body';
+        pre.textContent = fileContent;
+        det.appendChild(sum);
+        det.appendChild(pre);
+        body.appendChild(det);
+      } else {
+        body.appendChild(head);
       }
-      body.appendChild(head);
-      if (e.detail) {
+      if (e.detail && e.tool !== 'verify') {
         const d = document.createElement('div');
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
         body.appendChild(d);
       }
+      // Ink-stamped VERIFIED badge — only the verify step, only on a genuine pass.
+      if (e.tool === 'verify' && e.pass === true) {
+        const stampEl = document.createElement('span');
+        stampEl.className = 'ch-stamp';
+        stampEl.textContent = 'verified';
+        body.appendChild(stampEl);
+      } else if (e.tool === 'verify' && e.status === 'error') {
+        const note = document.createElement('div');
+        note.className = 'ch-trace-detail';
+        note.textContent = 'not verified — retrying';
+        body.appendChild(note);
+      }
+      const metaCol = document.createElement('div');
+      metaCol.className = 'ch-trace-meta-col';
       const meta = document.createElement('span');
       meta.className = 'ch-trace-meta';
       if (e.status === 'ok') {
@@ -478,9 +596,18 @@ const PRESETS = [
       } else {
         meta.textContent = '…';
       }
+      metaCol.appendChild(meta);
+      // Per-step token count, right-aligned, receipt-style. Omitted entirely
+      // (not shown as 0) when this step has no attributable LLM usage.
+      if (typeof e.tokens === 'number' && e.tokens > 0) {
+        const tok = document.createElement('span');
+        tok.className = 'ch-trace-tokens';
+        tok.textContent = formatTokens(e.tokens);
+        metaCol.appendChild(tok);
+      }
       row.appendChild(dot);
       row.appendChild(body);
-      row.appendChild(meta);
+      row.appendChild(metaCol);
       traceEl.appendChild(row);
     });
     if (stick) traceEl.scrollTop = traceEl.scrollHeight;
@@ -492,44 +619,15 @@ const PRESETS = [
     return dot === -1 ? 'txt' : path.slice(dot + 1).toLowerCase();
   }
 
+  // No separate "workspace" list — a write_file trace row inline-expands its
+  // own content (see renderTrace) instead of duplicating the same file in a
+  // second section below the trace. This just keeps the latest VFS snapshot
+  // around for renderTrace to read from, and re-renders the trace so a file
+  // written moments after its trace row appeared becomes expandable.
   function renderFiles(files: Record<string, string>) {
     panel.style.display = 'grid';
-    // Preserve open/closed state of each file across re-renders.
-    const openSet = new Set(
-      Array.from(filesEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
-        (d) => d.dataset.path || ''
-      )
-    );
-    filesEl.innerHTML = '';
-    const paths = Object.keys(files);
-    if (!paths.length) {
-      const empty = document.createElement('div');
-      empty.className = 'ch-files-empty';
-      empty.textContent = 'Nothing yet. The agent writes its notes and data here as it works.';
-      filesEl.appendChild(empty);
-      return;
-    }
-    for (const path of paths) {
-      const det = document.createElement('details');
-      det.className = 'ch-file';
-      det.dataset.path = path;
-      if (openSet.has(path)) det.open = true;
-      const sum = document.createElement('summary');
-      sum.className = 'ch-file-name';
-      const label = document.createElement('span');
-      label.textContent = path;
-      const ext = document.createElement('span');
-      ext.className = 'ch-file-ext ch-file-ext-' + fileExt(path);
-      ext.textContent = fileExt(path);
-      sum.appendChild(label);
-      sum.appendChild(ext);
-      const pre = document.createElement('pre');
-      pre.className = 'ch-file-body';
-      pre.textContent = files[path];
-      det.appendChild(sum);
-      det.appendChild(pre);
-      filesEl.appendChild(det);
-    }
+    currentFiles = files;
+    renderTrace(currentTrace);
   }
 
   // ── ECharts (dynamic CDN import, dark-theme aware) ─────────────────────
@@ -560,18 +658,28 @@ const PRESETS = [
     const palette = [signal, muted, fg, '#6b8ab8', '#5fa97c', '#c0605a', '#9a7cc0', '#b8946b'];
 
     const baseText = { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
-    // Shared y-axis name styling. (main referenced this without defining it,
-    // which threw a ReferenceError and broke chart rendering; defined here.)
-    const yAxisName = { nameTextStyle: baseText };
-    const grid = { left: 52, right: 24, top: 28, bottom: 44, containLabel: true };
+    // Shared y-axis name styling. Positioned at the end (top) of the axis but
+    // pulled left so it doesn't sit directly under the legend row — the two
+    // were colliding when a scrollable multi-series legend and the default
+    // y-axis name label both rendered in the same top-left corner.
+    const yAxisName = { nameTextStyle: baseText, nameLocation: 'end' as const, nameGap: 16 };
+    // Extra top padding reserves a full row for the legend before the plot
+    // area starts, instead of the legend and y-axis name overlapping in the
+    // same ~28px band.
+    const grid = { left: 52, right: 24, top: 44, bottom: 44, containLabel: true };
     const axisLine = { lineStyle: { color: faint } };
     const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
 
     const legend = {
       textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
       top: 0,
+      left: 0,
       type: 'scroll' as const,
       icon: 'roundRect',
+      // Leave room on the right for the scroll arrows so they don't get
+      // clipped against the chart's edge.
+      pageIconColor: muted,
+      pageTextStyle: baseText,
     };
     const tooltip = {
       trigger: 'axis' as const,
@@ -631,6 +739,17 @@ const PRESETS = [
     }
 
     // Default: line time-series.
+    // x-axis is category-type (a fixed list of year labels), so series data
+    // must be plain y-values indexed positionally against that category
+    // list — NOT [x, y] coordinate pairs. Passing raw pairs here (the
+    // previous bug) makes ECharts read each pair as [categoryIndex, value],
+    // which almost never matches the literal year number, so every line
+    // silently renders with zero points and no error. Same fix already
+    // applied correctly in the bar/grouped-bar branch above: build the
+    // shared category list once, then map each series onto it by year.
+    const lineCats: (string | number)[] = [];
+    for (const s of spec.series) for (const [x] of s.data) if (!lineCats.includes(x)) lineCats.push(x);
+    lineCats.sort((a, b) => Number(a) - Number(b));
     return {
       color: palette,
       textStyle: baseText,
@@ -644,29 +763,37 @@ const PRESETS = [
         nameTextStyle: baseText,
         axisLine,
         axisLabel: baseText,
-        data: (() => {
-          const cats: (string | number)[] = [];
-          for (const s of spec.series) for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
-          cats.sort((a, b) => Number(a) - Number(b));
-          return cats;
-        })(),
+        data: lineCats,
       },
       yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
-      series: spec.series.map((s, i) => ({
-        name: s.name,
-        type: 'line',
-        smooth: false,
-        showSymbol: false,
-        lineStyle: { width: i === 0 ? 2 : 1.4 },
-        data: [...s.data].sort((a, b) => Number(a[0]) - Number(b[0])),
-      })),
+      series: spec.series.map((s, i) => {
+        const map = new Map(s.data.map(([x, y]) => [x, y]));
+        return {
+          name: s.name,
+          type: 'line',
+          smooth: false,
+          showSymbol: false,
+          lineStyle: { width: i === 0 ? 2 : 1.4 },
+          data: lineCats.map((c) => map.get(c) ?? null),
+        };
+      }),
     };
   }
 
   async function renderChart(spec: ChartSpec) {
     lastSpec = spec;
+    canvasEl.classList.remove('ch-canvas-pending');
+    panel.classList.remove('ch-panel-pending');
     renderFlag.style.display = 'inline';
-    chartWrap.style.display = 'block';
+    // NOTE: this used to also do `chartWrap.style.display = 'block'` — a
+    // leftover from before the chart moved into `.ch-canvas` (task 1), back
+    // when `#ch-chart-wrap` literally wrapped the chart itself. That id now
+    // belongs to the *answer* section (finding text, confidence badge, data
+    // table, citations) below the panel, so flipping it here was prematurely
+    // revealing an empty answer section mid-run, every time the chart
+    // rendered. The canvas panel's own visibility is handled by `panel`
+    // (`.ch-panel`, set to display:grid when the run starts) — the chart
+    // itself needs no separate reveal.
     const echarts = await loadECharts();
     if (chartInstance) chartInstance.dispose();
     chartInstance = echarts.init(chartEl, null, { renderer: 'canvas' });
@@ -729,6 +856,60 @@ const PRESETS = [
     return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
   }
 
+  // ── Confidence-tinted finding text ─────────────────────────────────────
+  // Per-word log-probability, when known. `null`/undefined means "no signal
+  // for this word" — rendered as plain default-color text, no tint, no
+  // underline, no title. Real logprobs are provider-dependent (OpenAI only,
+  // today — see the design spec's "Logprob availability is provider-
+  // dependent" section) and agent.ts/providers.ts do not plumb them through
+  // yet; wiring that up is explicitly a stretch goal/follow-up, not part of
+  // this pass. `runAgent()` never returns logprobs today, so in the live app
+  // this always takes the "no data" branch below and renders plain text —
+  // real graceful degradation, not a fallback that merely looks like one.
+  interface WordLogprob { word: string; logprob: number }
+
+  // Below this logprob, a word is tinted "uncertain". Roughly -1.5 nats is a
+  // reasonable rule of thumb for "the model wasn't very sure of this token."
+  const LOW_CONFIDENCE_THRESHOLD = -1.5;
+
+  function renderFinding(text: string, logprobs?: WordLogprob[]) {
+    findingEl.textContent = '';
+    if (!text) return;
+    if (!logprobs || !logprobs.length) {
+      // No confidence signal available for this run — plain text, no legend.
+      findingEl.textContent = text;
+      confLegend.style.display = 'none';
+      return;
+    }
+    // Confidence data is present: render word-by-word so low-confidence
+    // words get the dotted-underline tint and a hover title with the exact
+    // logprob value, per spec.
+    logprobs.forEach((wl, i) => {
+      const span = document.createElement('span');
+      span.textContent = wl.word + (i < logprobs.length - 1 ? ' ' : '');
+      if (wl.logprob < LOW_CONFIDENCE_THRESHOLD) {
+        span.className = 'ch-conf-word ch-conf-word-lo';
+        span.title = `logprob ${wl.logprob.toFixed(2)}`;
+      }
+      findingEl.appendChild(span);
+    });
+    confLegend.style.display = 'flex';
+  }
+
+  // ── Running token + cost total ──────────────────────────────────────────
+  // Per spec: a dashed-rule totals line near the bottom of the rail,
+  // combining the run's total token count (summed from each trace event's
+  // own per-step `tokens`, which agent.ts already attributes one turn's
+  // usage to) with the run-level `estimateCost` dollar figure computed by
+  // agent.ts and returned once as `out.cost`.
+  function renderRunningTotal(trace: TraceEvent[], cost: number) {
+    const totalTokens = trace.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
+    if (!totalTokens && !cost) { railTotal.style.display = 'none'; return; }
+    railTotal.style.display = 'block';
+    const costTxt = cost > 0 ? `$${cost.toFixed(4)}` : 'free';
+    railTotal.textContent = `${formatTokens(totalTokens)} · ${costTxt}`;
+  }
+
   // ── Citations ──────────────────────────────────────────────────────────
   function renderCitations(indicators: { id: string; name: string }[]) {
     if (!indicators.length) { citeEl.style.display = 'none'; return; }
@@ -770,6 +951,7 @@ const PRESETS = [
       provider: currentProvider(),
       model: modelSel.value,
       apiKey,
+      requestReasoning: modelSel.selectedOptions[0]?.dataset.reasoning === '1',
     };
 
     // Reset UI.
@@ -777,18 +959,33 @@ const PRESETS = [
     askBtn.disabled = true;
     askBtn.textContent = 'Working…';
     startTimes.length = 0;
+    currentTrace = [];
+    currentFiles = {};
     traceEl.innerHTML = '';
-    filesEl.innerHTML = '';
     chartWrap.style.display = 'none';
     dataDetails.style.display = 'none';
     citeEl.style.display = 'none';
     confEl.style.display = 'none';
+    confLegend.style.display = 'none';
+    railTotal.style.display = 'none';
     findingEl.textContent = '';
+    findingEl.classList.remove('ch-finding-empty');
     byokDetails.open = false;
     if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
+    canvasEl.classList.add('ch-canvas-pending');
+    panel.classList.add('ch-panel-pending');
     setStatus('loading', 'Planning…');
     panel.style.display = 'grid';
+    consoleEl.classList.add('ch-console-compact');
     renderFiles({});
+
+    // Header line: real model + provider, taken from the live picker state
+    // at the moment this run starts — not a hardcoded placeholder. Prefer
+    // the option's rendered label (reflects the dynamically fetched model
+    // list) and fall back to the raw model id if the dropdown has no
+    // matching option for some reason.
+    const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
+    railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
 
     try {
       const out = await runAgent(cfg, question, {
@@ -801,10 +998,46 @@ const PRESETS = [
       // Chart may not have been rendered via callback if spec came late.
       if (out.chartSpec && !chartInstance) await renderChart(out.chartSpec);
 
-      findingEl.textContent = out.finding || 'No finding produced.';
+      // Reveal the answer section (finding, confidence, table, citations)
+      // now that the run has actually finished — this used to happen as an
+      // (incorrect, mid-run) side effect of renderChart(); see the note there.
+      chartWrap.style.display = 'block';
+
+      // Zero-result: a real code path in agent.ts's bailout logic — the
+      // model hit MAX_TOOL_CALLS (or kept refusing tools) without ever
+      // calling render_chart, so `out.chartSpec` stays null and `out.finding`
+      // may be empty or just the forced-summary fallback text. Per spec, the
+      // receipt still closes out (timestamped, no fabricated VERIFIED stamp
+      // — already guaranteed, since the verifier only stamps on a genuine
+      // pass and a null chartSpec always fails verification above), with a
+      // plain-language line explaining nothing was found, styled as part of
+      // the same trace rather than a separate error component. We reuse the
+      // existing `.ch-finding` slot (still literally the last line of the
+      // receipt) rather than inventing a new element/modal for this.
+      if (!out.chartSpec) {
+        findingEl.classList.add('ch-finding-empty');
+        renderFinding(
+          out.finding || 'No chart could be built for this question — try rephrasing or narrowing it to a specific indicator.'
+        );
+        renderTable([], '');
+        renderCitations([]);
+        renderRunningTotal(currentTrace, out.cost);
+        setStatus('error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
+        chartWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
+
+      // No real per-token logprob pipeline exists yet (see providers.ts —
+      // OpenRouter/OpenAI/Anthropic support differs per model/provider and
+      // isn't wired end to end). Render plain text rather than fabricate a
+      // confidence signal — a made-up distribution can look arbitrarily
+      // broken (e.g. tinting most of a short sentence by coincidence) and a
+      // fake "uncertain" marker is actively misleading about a real answer.
+      renderFinding(out.finding || 'No finding produced.');
       if (out.confidence === 'low') confEl.style.display = 'inline-block';
       renderTable(out.rows, out.csv);
       renderCitations(out.indicators);
+      renderRunningTotal(currentTrace, out.cost);
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus('ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
@@ -821,8 +1054,13 @@ const PRESETS = [
 </script>
 
 <style>
-  /* Break out of the 700px container so charts + two-column panel have room. */
-  :global(main.container:has(.ch)) { max-width: 960px !important; }
+  /* Break out of the 700px article container — the working state is a live
+     split-view canvas, not prose, so it should use most of the viewport on
+     wide screens rather than stay capped near article-reading width. The
+     site's shared layout wraps every page in `div.container` (max-width:
+     700px); `<main>` and `.ch` itself have no width cap of their own, so the
+     div is the actual constraint to override. */
+  :global(div.container:has(.ch)) { max-width: min(1440px, 92vw) !important; }
   .ch { width: 100%; margin: 0 auto; }
 
   /* ── Header ── */
@@ -866,17 +1104,37 @@ const PRESETS = [
     border-radius: var(--radius-full);
   }
 
-  /* ── Ask console ── */
+  /* ── Ask console ──────────────────────────────────────────────────────
+     Restyled to match the receipt system introduced below: same near-black
+     elevated surface, 8px radius, dashed internal perforation instead of a
+     solid divider. Copy, chips, and behavior are unchanged from the prior
+     console — visual restyle only. */
   .ch-console {
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     margin-bottom: var(--space-md);
     transition: border-color var(--duration) var(--ease);
     overflow: hidden;
   }
   .ch-console:focus-within {
     border-color: color-mix(in srgb, var(--fg) 22%, transparent);
+  }
+  /* Once a run starts, the console settles into a compact "asked" header
+     instead of staying full-size with now-irrelevant example chips and the
+     BYOK form sitting between the question and the live trace below it. */
+  .ch-console.ch-console-compact .ch-q {
+    min-height: 0;
+    padding: var(--space-sm) var(--space-md);
+    font-size: var(--text-body);
+    opacity: 0.75;
+  }
+  .ch-console.ch-console-compact .ch-chips,
+  .ch-console.ch-console-compact .ch-byok {
+    display: none;
+  }
+  .ch-console.ch-console-compact .ch-ask-foot {
+    padding-top: 0;
   }
 
   .ch-q {
@@ -909,7 +1167,7 @@ const PRESETS = [
     font-size: var(--text-tag);
     background: transparent;
     color: var(--fg-muted);
-    border: 1px solid var(--fg-faint);
+    border: 1px dashed var(--fg-faint);
     border-radius: var(--radius-full);
     padding: 3px 10px;
     cursor: pointer;
@@ -935,7 +1193,7 @@ const PRESETS = [
   .ch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* ── Connection strip (BYOK) ── */
-  .ch-byok { border-top: 1px solid var(--fg-faint); }
+  .ch-byok { border-top: 1px dashed var(--fg-faint); }
   .ch-byok-sum {
     display: flex;
     align-items: center;
@@ -1035,57 +1293,98 @@ const PRESETS = [
   .ch-status-ok { background: var(--success); }
   .ch-status-error { background: var(--danger); }
 
-  /* ── Agent panel: timeline + workspace ── */
-  /* Trace gets more room than files so long tool-arg summaries
-     (like 'SH.DYN.MORT · IND;CHN;BRA · 2000–2020') stay on one line. */
+  /* ── Agent-canvas split view ──────────────────────────────────────────
+     Left: the receipt (trace rail, ~35%). Right: the canvas (chart, ~65%).
+     Task 2 (live-trace rendering) and task 3 (final-answer/zero-result
+     states) build on top of this shell — this pass only lays out the
+     structure, tokens, and receipt paper styling. */
   .ch-panel {
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    gap: 12px;
+    grid-template-columns: minmax(280px, 38%) minmax(0, 1fr);
+    gap: var(--space-md);
     margin-bottom: var(--space-lg);
+    align-items: start;
     animation: fadeIn 0.3s var(--ease);
   }
-  .ch-col {
+  /* While there's no chart yet, give the rail the full width instead of
+     leaving the collapsed canvas box's freed-up space idle next to it — the
+     rail is where the actual activity (reasoning, tool calls) is happening.
+     Once render_chart mounts something, back to the normal split. */
+  .ch-panel.ch-panel-pending {
+    grid-template-columns: 1fr;
+  }
+  .ch-panel.ch-panel-pending .ch-canvas {
+    display: none;
+  }
+
+  /* ── Receipt rail (left) ──────────────────────────────────────────── */
+  .ch-rail {
+    position: relative;
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: 12px;
-    padding: var(--space-sm) var(--space-md);
-    min-height: 140px;
+    border-radius: var(--radius-md);
     min-width: 0;
+    overflow: hidden;
   }
-  .ch-col-head {
+  /* Torn/perforated top edge, as if torn from a receipt roll. Built with a
+     repeating triangular gradient mask rather than an SVG import, so it's
+     one CSS rule to maintain and it recolors for free with the bg token. */
+  .ch-rail-tear {
+    height: 10px;
+    background: var(--bg);
+    -webkit-mask-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0 4px,
+      #000 4px 8px
+    );
+    mask-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0 4px,
+      #000 4px 8px
+    );
+  }
+  .ch-rail-body {
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+  }
+  .ch-rail-head {
     display: flex;
     align-items: baseline;
     gap: 8px;
+    flex-wrap: wrap;
     font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
     padding-bottom: 8px;
     margin-bottom: 10px;
-    border-bottom: 1px solid var(--fg-faint);
+    border-bottom: 1px dashed var(--fg-faint);
   }
-  .ch-col-sub {
-    color: var(--fg-muted);
-    text-transform: none;
+  .ch-rail-model {
+    color: var(--fg);
     letter-spacing: 0.02em;
+  }
+  .ch-rail-sub {
+    color: var(--fg-muted);
     font-size: var(--text-tag);
+    letter-spacing: 0.02em;
   }
   .ch-render-flag {
     margin-left: auto;
     color: var(--signal);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
     text-transform: none;
     letter-spacing: 0.02em;
     animation: pulse 1.4s ease-in-out infinite;
   }
 
-  /* Trace timeline: a rail with one dot per tool call */
+  /* Trace timeline: a rail with one dot per tool call, receipt line-items.
+     Live-event rendering logic lands in a follow-up pass; this pass only
+     supplies the container + row/dot/meta styling it will populate. */
   .ch-trace {
     position: relative;
     display: flex;
     flex-direction: column;
-    max-height: 340px;
+    max-height: 420px;
     overflow-y: auto;
     padding-left: 2px;
   }
@@ -1098,15 +1397,28 @@ const PRESETS = [
     width: 1px;
     background: var(--fg-faint);
   }
-  .ch-trace-row {
+  /* NOTE on :global() below: every element in this trace timeline (rows,
+     dots, name/arg spans, the stamp, …) is created at runtime via
+     document.createElement inside renderTrace()/renderFiles(), not written
+     in this component's template. Astro's scoped CSS only tags elements
+     that exist in the static template with the component's data-astro-cid
+     attribute; JS-created nodes never get it. An un-global()'d selector like
+     `.ch-trace-dot { ... }` compiles to `.ch-trace-dot[data-astro-cid-xxx]`,
+     which then never matches these nodes — the dot silently renders at 0×0
+     with no color. All selectors for elements populated by renderTrace() /
+     renderFiles() must stay wrapped in :global() for this reason. */
+  :global(.ch-trace-row) {
     position: relative;
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 8px;
-    align-items: baseline;
-    padding: 6px 0 6px 18px;
+    align-items: start;
+    padding: 10px 0 10px 18px;
   }
-  .ch-trace-dot {
+  :global(.ch-trace-row + .ch-trace-row) {
+    border-top: 1px dashed var(--fg-faint);
+  }
+  :global(.ch-trace-dot) {
     position: absolute;
     left: 0;
     top: 11px;
@@ -1114,66 +1426,151 @@ const PRESETS = [
     height: 7px;
     border-radius: 50%;
     background: var(--fg-muted);
-    box-shadow: 0 0 0 3px var(--bg);
+    box-shadow: 0 0 0 3px var(--bg-elevated);
   }
-  .ch-trace-ok .ch-trace-dot { background: var(--success); }
-  .ch-trace-error .ch-trace-dot { background: var(--danger); }
-  .ch-trace-running .ch-trace-dot { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
-  .ch-trace-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .ch-trace-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
-  .ch-trace-sep { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); opacity: 0.5; }
-  .ch-trace-name {
+  :global(.ch-trace-ok .ch-trace-dot) { background: var(--success); }
+  :global(.ch-trace-error .ch-trace-dot) { background: var(--danger); }
+  :global(.ch-trace-running .ch-trace-dot) {
+    background: var(--signal);
+    box-shadow: 0 0 0 3px var(--bg-elevated), 0 0 6px 1px var(--signal);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  :global(.ch-trace-body) { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  :global(.ch-trace-head) { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  /* Real per-line timestamp, captured at the moment the event arrived. */
+  :global(.ch-trace-ts) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.55;
+    flex-shrink: 0;
+  }
+  :global(.ch-trace-sep) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); opacity: 0.5; }
+  :global(.ch-trace-name) {
     font-family: var(--font-mono);
     font-size: var(--text-label);
     font-weight: 500;
     color: var(--fg);
   }
-  .ch-trace-running .ch-trace-name { color: var(--signal); }
-  .ch-trace-arg {
+  :global(.ch-trace-running .ch-trace-name) { color: var(--signal); }
+  :global(.ch-trace-arg) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
-    word-break: break-word;
+    overflow-wrap: break-word;
   }
-  .ch-trace-detail {
+  :global(.ch-trace-detail) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     opacity: 0.8;
   }
-  .ch-trace-error .ch-trace-detail { color: var(--danger); }
-  .ch-trace-meta {
+  :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+  /* Completed steps strike through and fade, per the receipt spec. */
+  :global(.ch-trace-ok .ch-trace-name),
+  :global(.ch-trace-ok .ch-trace-arg) {
+    text-decoration: line-through;
+    text-decoration-color: var(--fg-faint);
+    opacity: 0.4;
+  }
+  /* Error/retry line-items: restyled to read as a torn/crossed-out receipt
+     entry — a void line-item — rather than a generic red banner. The
+     underlying retry behavior (agent.ts's single automatic retry, driven by
+     `runVerify`'s critique) is unchanged; this is presentation only. A
+     failed step gets a harder, danger-colored strike-through (vs. the softer
+     faint one on a normal completed step) plus a jagged left notch cut into
+     the row, echoing the receipt's torn-edge motif used at the top of the
+     rail. The "not verified — retrying" note (added as a `.ch-trace-detail`
+     for the verify step above) is what carries the automatic-retry message —
+     no separate banner element. */
+  :global(.ch-trace-error) {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0 3px,
+      color-mix(in srgb, var(--danger) 10%, transparent) 3px 6px
+    );
+    background-position: 0 0;
+    background-size: 10px 100%;
+    background-repeat: no-repeat;
+  }
+  :global(.ch-trace-error .ch-trace-name),
+  :global(.ch-trace-error .ch-trace-arg) {
+    text-decoration: line-through;
+    text-decoration-color: var(--danger);
+    text-decoration-thickness: 1.5px;
+    color: var(--danger);
+    opacity: 0.75;
+  }
+  :global(.ch-trace-meta-col) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+  }
+  :global(.ch-trace-meta) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     white-space: nowrap;
   }
-
-  /* Workspace: the agent's virtual files */
-  .ch-files { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; }
-  .ch-files-empty {
+  /* Per-step token count, receipt-style, right-aligned under the duration. */
+  :global(.ch-trace-tokens) {
     font-family: var(--font-mono);
-    font-size: var(--text-label);
+    font-size: var(--text-tag);
     color: var(--fg-muted);
-    padding: 8px 0;
+    opacity: 0.6;
+    white-space: nowrap;
   }
-  .ch-file { border-bottom: 1px solid var(--fg-faint); }
-  .ch-file:last-child { border-bottom: none; }
-  .ch-file-name {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+
+  /* Ink-stamped VERIFIED badge — the single most distinctive beat in the
+     receipt design. Amber, rotated like a rubber stamp, only ever rendered
+     on a genuine verifier pass (never on a failed attempt before retry). */
+  :global(.ch-stamp) {
+    display: inline-block;
+    align-self: flex-start;
+    margin-top: 4px;
     font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg);
+    font-size: var(--text-tag);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--signal);
+    border: 2px solid var(--signal);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    transform: rotate(-8deg);
+    opacity: 0.9;
+  }
+
+  /* A write_file/read_file trace row inline-expands its own file content —
+     no separate "workspace" list duplicating the same file elsewhere on the
+     page. `.ch-trace-file` wraps the row's existing `.ch-trace-head` inside
+     a native <details>/<summary> so the whole head becomes the toggle. */
+  :global(.ch-trace-file) { list-style: none; }
+  :global(.ch-trace-file > summary) {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
     cursor: pointer;
-    padding: 6px 0;
     list-style: none;
   }
-  .ch-file-name::-webkit-details-marker { display: none; }
-  .ch-file-name::before { content: '▸'; color: var(--fg-muted); }
-  .ch-file[open] .ch-file-name::before { content: '▾'; }
-  .ch-file-ext {
+  :global(.ch-trace-file > summary)::-webkit-details-marker { display: none; }
+  :global(.ch-trace-file > summary)::before { content: '▸'; color: var(--fg-muted); flex-shrink: 0; }
+  :global(.ch-trace-file[open] > summary)::before { content: '▾'; }
+
+  /* Reasoning (OpenRouter reasoning models only): just the model's own
+     words, in place, no label or toggle marking it as a distinct internal
+     thing — it reads as part of the same terse narration as everything
+     else in the receipt. */
+  :global(.ch-trace-thinking) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    padding: 6px 0 6px 18px;
+    margin: 0;
+  }
+  :global(.ch-file-ext) {
     margin-left: auto;
     font-size: var(--text-tag);
     text-transform: uppercase;
@@ -1183,10 +1580,10 @@ const PRESETS = [
     border-radius: var(--radius-full);
     padding: 0 7px;
   }
-  .ch-file-ext-json { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
-  .ch-file-ext-csv { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
-  .ch-file-ext-md { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 40%, transparent); }
-  .ch-file-body {
+  :global(.ch-file-ext-json) { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
+  :global(.ch-file-ext-csv) { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+  :global(.ch-file-ext-md) { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 40%, transparent); }
+  :global(.ch-file-body) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
@@ -1202,6 +1599,58 @@ const PRESETS = [
     line-height: 1.5;
   }
 
+  /* Running token + cost total — the receipt's own totals line, a dashed
+     rule above it per the perforation motif, right-aligned like a real
+     receipt subtotal. Rendered by renderRunningTotal() once the run ends. */
+  .ch-rail-total {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--fg-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg);
+    text-align: right;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Canvas (right) ───────────────────────────────────────────────────
+     The chart mounts here — same #ch-chart element the existing ECharts
+     logic already targets, just relocated so it builds live beside the
+     rail instead of appearing only after the run completes. Collapsed
+     (ch-canvas-pending) until render_chart actually mounts something —
+     otherwise the panel holds open a tall empty box for the whole
+     plan/fetch phase, which reads as broken/dead space next to the rail. */
+  .ch-canvas {
+    min-width: 0;
+    min-height: 340px;
+  }
+  .ch-canvas-wait {
+    display: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    text-align: center;
+    padding: var(--space-lg) 0;
+  }
+  .ch-canvas.ch-canvas-pending {
+    min-height: 0;
+    background: var(--bg-elevated);
+    border: 1px dashed var(--fg-faint);
+    border-radius: var(--radius-md);
+  }
+  .ch-canvas.ch-canvas-pending .ch-canvas-wait { display: block; }
+  .ch-canvas.ch-canvas-pending .ch-chart-card { display: none; }
+  .ch-canvas .ch-chart-card {
+    height: 100%;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .ch-canvas .ch-chart {
+    flex: 1;
+    min-height: 340px;
+  }
+
   /* ── Answer ── */
   .ch-answer { margin-bottom: var(--space-lg); animation: fadeIn 0.3s var(--ease); }
   .ch-finding {
@@ -1214,6 +1663,44 @@ const PRESETS = [
     max-width: 780px;
   }
   .ch-finding:empty { display: none; }
+  /* Zero-result closing line: same slot/typography as a normal finding, but
+     muted and non-italic — reads as a plain-language explanation rather than
+     an authoritative answer. No separate error component. */
+  .ch-finding-empty {
+    font-style: normal;
+    color: var(--fg-muted);
+  }
+  /* Low-confidence word tint (confidence-tinting stretch goal). Seeded from
+     --confidence-low (aliased to --danger — see global.css), per the design
+     spec's token mapping. Only ever applied by renderFinding() when a
+     logprobs array is actually passed in; see that function's comment for
+     why the live app currently always takes the plain-text branch instead. */
+  :global(.ch-conf-word-lo) {
+    color: var(--confidence-low);
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+  /* Small two-swatch legend under the answer, shown only when confidence
+     data was present for that run. */
+  .ch-conf-legend {
+    display: none;
+    gap: 14px;
+    align-items: center;
+    margin: 0 0 var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  .ch-conf-swatch { display: inline-flex; align-items: center; gap: 5px; }
+  .ch-conf-swatch i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--fg);
+  }
+  .ch-conf-swatch-lo i { background: var(--confidence-low); }
   .ch-conf {
     display: inline-block;
     margin-bottom: var(--space-sm);
@@ -1231,7 +1718,7 @@ const PRESETS = [
     margin: var(--space-sm) 0 0;
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     padding: 10px 12px 12px;
   }
   .ch-chart-title {

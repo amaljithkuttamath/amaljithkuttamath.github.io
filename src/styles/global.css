@@ -53,6 +53,11 @@
   --danger: #c0605a;
   --info: #6b8ab8;
 
+  /* Confidence tinting (Chitti receipt system): low-confidence tokens in a
+     rendered answer, seeded from the existing --danger hue rather than an
+     arbitrary new color. */
+  --confidence-low: var(--danger);
+
   /* Card/experiment title size (between subsection and section) */
   --text-title: 1.125rem;
 
@@ -77,6 +82,7 @@
   --success: #2e7a4f;
   --danger: #a8463f;
   --info: #44639c;
+  --confidence-low: var(--danger);
   color-scheme: light;
 }
 
