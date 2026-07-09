@@ -127,6 +127,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     });
     let totalCost = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
+    let turnKind: 'chart' | 'explanation' = 'chart';
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
       const withTs: TraceEvent = { ...e, ts: Date.now() };
@@ -210,6 +211,13 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
           }
           case 'finish': {
             state.finding = String(a.one_line_finding ?? '').trim();
+            turnKind = 'chart';
+            result = 'done';
+            break;
+          }
+          case 'finish_explanation': {
+            state.finding = String(a.explanation ?? '').trim();
+            turnKind = 'explanation';
             result = 'done';
             break;
           }
@@ -228,7 +236,28 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     }
 
     async function agentPass(critique?: string): Promise<void> {
-      messages.push({ role: 'user', content: question + (critique ? '' : '') });
+      if (turnCount > 1) {
+        const chartSummary = state.chartSpec
+          ? `${state.chartSpec.type} chart "${state.chartSpec.title}" with series: ${state.chartSpec.series.map((s) => s.name).join(', ')}`
+          : 'none';
+        messages.push({
+          role: 'user',
+          content:
+            `You already have data from earlier in this conversation:\n${summarizeRows(state.rows)}\n\n` +
+            `Current chart: ${chartSummary}.\n\n` +
+            'Do NOT call search_indicators or fetch tools again unless this question needs data ' +
+            "you don't have (a new country, indicator, or year range not already fetched).\n" +
+            'If this question needs a different chart from the SAME data (a new chart type, a ' +
+            're-ranked/filtered/re-aggregated view), you MUST call execute_js again against the ' +
+            'existing rows to (re-)derive the exact values before calling render_chart — the ' +
+            'summary above is a compressed preview (first year, last year, count) for your own ' +
+            'orientation only, never a source of chart data. Never call render_chart from the ' +
+            'summary directly.\n' +
+            'If this question just asks you to explain, describe, or interpret the data in words, ' +
+            'call finish_explanation with your answer — do not call render_chart at all.',
+        });
+      }
+      messages.push({ role: 'user', content: question });
       if (critique) {
         messages.push({
           role: 'user',
@@ -278,7 +307,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
           calls++;
           const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
-          if (tc.name === 'finish') finished = true;
+          if (tc.name === 'finish' || tc.name === 'finish_explanation') finished = true;
           if (calls >= MAX_TOOL_CALLS) break;
         }
         if (finished) return;
@@ -315,20 +344,23 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     cb.onStatus('Planning…', 'loading');
     await agentPass();
 
-    cb.onStatus('Verifying…', 'loading');
-    const verifierReport = await runVerify();
-    vfs.write('verifier_report.md', verifierReport.report);
-
+    let verifierReport = { pass: true, report: '' };
     let retried = false;
     let confidence: 'ok' | 'low' = 'ok';
 
-    if (!verifierReport.pass) {
-      retried = true;
-      cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
-      await agentPass(verifierReport.report);
-      const second = await runVerify(verifierReport.report);
-      vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
-      if (!second.pass) confidence = 'low';
+    if (turnKind === 'chart') {
+      cb.onStatus('Verifying…', 'loading');
+      verifierReport = await runVerify();
+      vfs.write('verifier_report.md', verifierReport.report);
+
+      if (!verifierReport.pass) {
+        retried = true;
+        cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
+        await agentPass(verifierReport.report);
+        const second = await runVerify(verifierReport.report);
+        vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
+        if (!second.pass) confidence = 'low';
+      }
     }
 
     cb.onStatus('Done', 'ok');
@@ -345,7 +377,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
       verifierReport: verifierReport.report,
       cost: totalCost,
       retried,
-      kind: 'chart',
+      kind: turnKind,
     };
   }
 
