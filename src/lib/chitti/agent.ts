@@ -62,6 +62,7 @@ export interface AgentOutput {
   verifierReport: string;
   cost: number;
   retried: boolean;
+  kind: 'chart' | 'explanation';
 }
 
 const SYSTEM_PROMPT = `You are Chitti, a data analyst agent that answers questions about the world using ONLY the World Bank Open Data API. Every tool call you make, and your reasoning before it, is shown live to the user as your work happens — that IS the audit trail. Do not write intermediate planning/shortlist/spec files to narrate a decision you can just state in your reasoning; each extra tool call is a real round-trip with real latency, so only call a tool when you need its actual result.
@@ -101,16 +102,13 @@ function summarizeRows(rows: DataRow[]): string {
   return `rows=${rows.length}, countries=${Object.keys(byCountry).length}\n` + lines.join('\n');
 }
 
-export async function runAgent(
-  cfg: ProviderConfig,
-  question: string,
-  cb: AgentCallbacks
-): Promise<AgentOutput> {
-  const trace: TraceEvent[] = [];
-  const vfs = new VFS((files) => cb.onFiles(files));
-  let totalCost = 0;
+export interface ChittiSession {
+  ask(question: string, cb: AgentCallbacks): Promise<AgentOutput>;
+}
 
-  // Shared state captured from tool executions.
+export function createSession(cfg: ProviderConfig): ChittiSession {
+  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+  const vfsFiles: Record<string, string> = {};
   const state: {
     rows: DataRow[];
     chartSpec: ChartSpec | null;
@@ -118,262 +116,240 @@ export async function runAgent(
     finding: string;
   } = { rows: [], chartSpec: null, indicators: new Map(), finding: '' };
 
-  function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
-    const withTs: TraceEvent = { ...e, ts: Date.now() };
-    trace.push(withTs);
-    cb.onTrace([...trace]);
-    return withTs;
-  }
-  function updateTrace() {
-    cb.onTrace([...trace]);
-  }
+  let turnCount = 0;
 
-  // Execute one tool call; returns the string result the model sees.
-  // `tokens`, when given, is the LLM turn's usage that produced this call —
-  // attributed to exactly one tool call per turn (the first), so a turn that
-  // requests several tool calls at once doesn't double-count its usage.
-  async function dispatch(tc: ToolCall, tokens?: number): Promise<string> {
-    const a = tc.arguments;
-    const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens });
-    try {
-      let result = '';
-      switch (tc.name) {
-        case 'search_indicators': {
-          const hits = await searchIndicators(String(a.query ?? ''), a.topic ? String(a.topic) : undefined);
-          result = JSON.stringify(hits.map((h) => ({ id: h.id, name: h.name })));
-          break;
-        }
-        case 'list_countries': {
-          const list = listCountries(a.filter ? String(a.filter) : 'all');
-          result = JSON.stringify(list.map((c) => ({ id: c.id, name: c.name, region: c.region })));
-          break;
-        }
-        case 'fetch_worldbank': {
-          const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
-          const { rows, truncatedFrom } = await fetchWorldbank(
-            String(a.indicator_id),
-            ids,
-            Number(a.year_start),
-            Number(a.year_end)
-          );
-          // Accumulate rather than overwrite: a question may need more than
-          // one fetch (e.g. a truncation follow-up call), and execute_js
-          // should see every row fetched so far, not just the last call's.
-          state.rows = state.rows.concat(rows);
-          // Remember the indicator name for citations.
-          state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-          // Tell the model explicitly when its country list got truncated —
-          // otherwise it has no signal the data is incomplete and will
-          // report a finding as if every requested country were fetched.
-          result = summarizeRows(rows);
-          if (truncatedFrom) {
-            result +=
-              `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
-              `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
-              `country_ids and merge results if you need full coverage.`;
-          }
-          ev.detail = `${rows.length} rows` + (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
-          break;
-        }
-        case 'fetch_worldbank_all': {
-          const { rows, countryCount, batchCount } = await fetchWorldbankAll(
-            String(a.indicator_id),
-            Number(a.year_start),
-            Number(a.year_end)
-          );
-          state.rows = state.rows.concat(rows);
-          state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-          result = summarizeRows(rows);
-          ev.detail = `${rows.length} rows · ${countryCount} countries · ${batchCount} batch${batchCount === 1 ? '' : 'es'}`;
-          break;
-        }
-        case 'execute_js': {
-          const { ok, result: value, error } = executeJs(String(a.code ?? ''), state.rows);
-          result = ok ? JSON.stringify(value) : 'ERROR: ' + error;
-          ev.detail = ok ? 'ok' : 'error: ' + error;
-          break;
-        }
-        case 'write_file': {
-          vfs.write(String(a.path), String(a.content ?? ''));
-          result = 'written';
-          break;
-        }
-        case 'read_file': {
-          result = vfs.read(String(a.path)) || '(empty)';
-          break;
-        }
-        case 'render_chart': {
-          const spec = normalizeSpec(a as unknown as ChartSpec);
-          state.chartSpec = spec;
-          cb.onChart(spec);
-          result = 'rendered';
-          break;
-        }
-        case 'finish': {
-          state.finding = String(a.one_line_finding ?? '').trim();
-          result = 'done';
-          break;
-        }
-        default:
-          result = 'unknown tool';
-      }
-      ev.status = 'ok';
-      updateTrace();
-      return result;
-    } catch (err: any) {
-      ev.status = 'error';
-      ev.detail = err?.message ?? String(err);
-      updateTrace();
-      return 'ERROR: ' + (err?.message ?? String(err));
+  async function ask(question: string, cb: AgentCallbacks): Promise<AgentOutput> {
+    turnCount++;
+    const trace: TraceEvent[] = [];
+    const vfs = new VFS((files) => {
+      Object.assign(vfsFiles, files);
+      cb.onFiles({ ...vfsFiles });
+    });
+    let totalCost = 0;
+    state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
+
+    function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
+      const withTs: TraceEvent = { ...e, ts: Date.now() };
+      trace.push(withTs);
+      cb.onTrace([...trace]);
+      return withTs;
     }
-  }
+    function updateTrace() {
+      cb.onTrace([...trace]);
+    }
 
-  // One full agent pass (planner + tool loop up to the cap). Optionally seeded
-  // with a verifier critique to steer a retry.
-  async function agentPass(critique?: string): Promise<void> {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT + (critique ? '\n\nA previous attempt was judged insufficient. Fix this: ' + critique : '') },
-      { role: 'user', content: question },
-    ];
-
-    let calls = 0;
-    let noopTurns = 0;  // model kept talking without calling tools
-    while (calls < MAX_TOOL_CALLS) {
-      // Give a more informative status hint based on where we are in the pipeline.
-      const status = pipelineStatus(state, calls);
-      cb.onStatus(status, 'loading');
-
-      const res = await complete(cfg, messages, TOOL_SCHEMAS);
-      totalCost += estimateCost(cfg.model, res.usage);
-
-      // OpenRouter reasoning models only (cfg.requestReasoning gates the
-      // request itself in providers.ts) — a synthetic trace event, same
-      // pattern as the 'verify' step, so the receipt shows what the model
-      // was thinking right before the tool calls it made as a result.
-      if (res.reasoning) {
-        pushTrace({ tool: 'reasoning', argSummary: '', status: 'ok', detail: res.reasoning });
-      }
-
-      if (!res.toolCalls.length) {
-        noopTurns++;
-        // If the model has produced a chart already and is now just talking,
-        // extract a finding from its text rather than looping forever asking it to call finish.
-        // Reasoning models sometimes put this "here's my summary" narration
-        // entirely in `reasoning` with an empty `text` (observed directly:
-        // a real run rendered a correct, verified chart, then had a no-tool
-        // turn whose `reasoning` field said "the chart has been rendered,
-        // let me summarize..." while `text` was blank — falling back to
-        // `text` alone produced "No finding produced." despite a real
-        // finding being sitting right there in `reasoning`).
-        const fallbackText = res.text.trim() || res.reasoning?.trim() || '';
-        if (state.chartSpec && state.rows.length && fallbackText) {
-          state.finding = extractOneSentence(fallbackText);
-          return;
+    async function dispatch(tc: ToolCall, tokens?: number): Promise<string> {
+      const a = tc.arguments;
+      const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens });
+      try {
+        let result = '';
+        switch (tc.name) {
+          case 'search_indicators': {
+            const hits = await searchIndicators(String(a.query ?? ''), a.topic ? String(a.topic) : undefined);
+            result = JSON.stringify(hits.map((h) => ({ id: h.id, name: h.name })));
+            break;
+          }
+          case 'list_countries': {
+            const list = listCountries(a.filter ? String(a.filter) : 'all');
+            result = JSON.stringify(list.map((c) => ({ id: c.id, name: c.name, region: c.region })));
+            break;
+          }
+          case 'fetch_worldbank': {
+            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
+            const { rows, truncatedFrom } = await fetchWorldbank(
+              String(a.indicator_id),
+              ids,
+              Number(a.year_start),
+              Number(a.year_end)
+            );
+            state.rows = state.rows.concat(rows);
+            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
+            result = summarizeRows(rows);
+            if (truncatedFrom) {
+              result +=
+                `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
+                `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
+                `country_ids and merge results if you need full coverage.`;
+            }
+            ev.detail = `${rows.length} rows` + (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
+            break;
+          }
+          case 'fetch_worldbank_all': {
+            const { rows, countryCount, batchCount } = await fetchWorldbankAll(
+              String(a.indicator_id),
+              Number(a.year_start),
+              Number(a.year_end)
+            );
+            state.rows = state.rows.concat(rows);
+            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
+            result = summarizeRows(rows);
+            ev.detail = `${rows.length} rows · ${countryCount} countries · ${batchCount} batch${batchCount === 1 ? '' : 'es'}`;
+            break;
+          }
+          case 'execute_js': {
+            const { ok, result: value, error } = executeJs(String(a.code ?? ''), state.rows);
+            result = ok ? JSON.stringify(value) : 'ERROR: ' + error;
+            ev.detail = ok ? 'ok' : 'error: ' + error;
+            break;
+          }
+          case 'write_file': {
+            vfs.write(String(a.path), String(a.content ?? ''));
+            result = 'written';
+            break;
+          }
+          case 'read_file': {
+            result = vfs.read(String(a.path)) || '(empty)';
+            break;
+          }
+          case 'render_chart': {
+            const spec = normalizeSpec(a as unknown as ChartSpec);
+            state.chartSpec = spec;
+            cb.onChart(spec);
+            result = 'rendered';
+            break;
+          }
+          case 'finish': {
+            state.finding = String(a.one_line_finding ?? '').trim();
+            result = 'done';
+            break;
+          }
+          default:
+            result = 'unknown tool';
         }
-        // If it keeps refusing to call tools, give up on nudging and bail to
-        // the post-loop summarizer.
-        if (noopTurns >= 2) return;
-        messages.push({ role: 'assistant', content: res.text });
+        ev.status = 'ok';
+        updateTrace();
+        return result;
+      } catch (err: any) {
+        ev.status = 'error';
+        ev.detail = err?.message ?? String(err);
+        updateTrace();
+        return 'ERROR: ' + (err?.message ?? String(err));
+      }
+    }
+
+    async function agentPass(critique?: string): Promise<void> {
+      messages.push({ role: 'user', content: question + (critique ? '' : '') });
+      if (critique) {
         messages.push({
           role: 'user',
-          content:
-            'Continue by calling a tool. ' +
-            (state.chartSpec
-              ? 'The chart is already rendered — call finish now with a one-line finding.'
-              : 'Pick the next tool in the pipeline.'),
+          content: 'A previous attempt was judged insufficient. Fix this: ' + critique,
         });
-        calls++;
-        continue;
       }
 
-      messages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
+      let calls = 0;
+      let noopTurns = 0;
+      while (calls < MAX_TOOL_CALLS) {
+        const status = pipelineStatus(state, calls);
+        cb.onStatus(status, 'loading');
 
-      let finished = false;
-      const turnTokens = res.usage.input + res.usage.output;
-      for (const [idx, tc] of res.toolCalls.entries()) {
-        calls++;
-        // Attribute this turn's usage to the first tool call it produced only.
-        const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
-        messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
-        if (tc.name === 'finish') finished = true;
-        if (calls >= MAX_TOOL_CALLS) break;
+        const res = await complete(cfg, messages, TOOL_SCHEMAS);
+        totalCost += estimateCost(cfg.model, res.usage);
+
+        if (res.reasoning) {
+          pushTrace({ tool: 'reasoning', argSummary: '', status: 'ok', detail: res.reasoning });
+        }
+
+        if (!res.toolCalls.length) {
+          noopTurns++;
+          const fallbackText = res.text.trim() || res.reasoning?.trim() || '';
+          if (state.chartSpec && state.rows.length && fallbackText) {
+            state.finding = extractOneSentence(fallbackText);
+            return;
+          }
+          if (noopTurns >= 2) return;
+          messages.push({ role: 'assistant', content: res.text });
+          messages.push({
+            role: 'user',
+            content:
+              'Continue by calling a tool. ' +
+              (state.chartSpec
+                ? 'The chart is already rendered — call finish now with a one-line finding.'
+                : 'Pick the next tool in the pipeline.'),
+          });
+          calls++;
+          continue;
+        }
+
+        messages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
+
+        let finished = false;
+        const turnTokens = res.usage.input + res.usage.output;
+        for (const [idx, tc] of res.toolCalls.entries()) {
+          calls++;
+          const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
+          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
+          if (tc.name === 'finish') finished = true;
+          if (calls >= MAX_TOOL_CALLS) break;
+        }
+        if (finished) return;
+
+        if (state.chartSpec && state.rows.length && calls >= 6) return;
       }
-      if (finished) return;
 
-      // Early-exit heuristic: if we've rendered a chart with real data and
-      // used at least 6 calls, don't wait for the model to explicitly finish
-      // — synthesize the finding from the data. Prevents the free auto-router
-      // from burning tool-call budget on redundant write_file spam.
-      if (state.chartSpec && state.rows.length && calls >= 6) return;
+      if (!state.finding) {
+        cb.onStatus('Budget reached — summarizing…', 'loading');
+        const res = await complete(
+          cfg,
+          [
+            { role: 'system', content: 'Summarize the analysis so far in ONE sentence with a concrete finding. No caveats.' },
+            { role: 'user', content: question + '\n\nData summary:\n' + summarizeRows(state.rows) },
+          ],
+          []
+        );
+        totalCost += estimateCost(cfg.model, res.usage);
+        state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
+      }
     }
 
-    // Hit the cap without finishing: force a summary from what we have.
-    if (!state.finding) {
-      cb.onStatus('Budget reached — summarizing…', 'loading');
-      const res = await complete(
-        cfg,
-        [
-          { role: 'system', content: 'Summarize the analysis so far in ONE sentence with a concrete finding. No caveats.' },
-          { role: 'user', content: question + '\n\nData summary:\n' + summarizeRows(state.rows) },
-        ],
-        []
-      );
-      totalCost += estimateCost(cfg.model, res.usage);
-      state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
+    async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
+      const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
+      const result = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
+      ev.status = result.pass ? 'ok' : 'error';
+      ev.pass = result.pass;
+      ev.detail = result.report;
+      ev.tokens = result.tokens;
+      updateTrace();
+      return result;
     }
+
+    cb.onStatus('Planning…', 'loading');
+    await agentPass();
+
+    cb.onStatus('Verifying…', 'loading');
+    const verifierReport = await runVerify();
+    vfs.write('verifier_report.md', verifierReport.report);
+
+    let retried = false;
+    let confidence: 'ok' | 'low' = 'ok';
+
+    if (!verifierReport.pass) {
+      retried = true;
+      cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
+      await agentPass(verifierReport.report);
+      const second = await runVerify(verifierReport.report);
+      vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
+      if (!second.pass) confidence = 'low';
+    }
+
+    cb.onStatus('Done', 'ok');
+
+    const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
+
+    return {
+      finding: state.finding,
+      chartSpec: state.chartSpec,
+      rows: state.rows,
+      csv: rowsToCSV(state.rows),
+      indicators,
+      confidence,
+      verifierReport: verifierReport.report,
+      cost: totalCost,
+      retried,
+      kind: 'chart',
+    };
   }
 
-  // Runs the verifier LLM call wrapped in a trace event, so the receipt has
-  // a visible 'verify' line-item to ink-stamp (or cross out) — separate from
-  // `verify()` itself, which stays a pure judge call untouched by trace concerns.
-  async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
-    const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
-    const result = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
-    ev.status = result.pass ? 'ok' : 'error';
-    ev.pass = result.pass;
-    ev.detail = result.report;
-    ev.tokens = result.tokens;
-    updateTrace();
-    return result;
-  }
-
-  // ── First pass ──
-  cb.onStatus('Planning…', 'loading');
-  await agentPass();
-
-  // ── Verifier ──
-  cb.onStatus('Verifying…', 'loading');
-  const verifierReport = await runVerify();
-  vfs.write('verifier_report.md', verifierReport.report);
-
-  let retried = false;
-  let confidence: 'ok' | 'low' = 'ok';
-
-  if (!verifierReport.pass) {
-    // One retry with the critique in the system prompt.
-    retried = true;
-    cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
-    await agentPass(verifierReport.report);
-    const second = await runVerify(verifierReport.report);
-    vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
-    if (!second.pass) confidence = 'low';
-  }
-
-  cb.onStatus('Done', 'ok');
-
-  const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
-
-  return {
-    finding: state.finding,
-    chartSpec: state.chartSpec,
-    rows: state.rows,
-    csv: rowsToCSV(state.rows),
-    indicators,
-    confidence,
-    verifierReport: verifierReport.report,
-    cost: totalCost,
-    retried,
-  };
+  return { ask };
 }
 
 function indicatorName(id: string): string {
