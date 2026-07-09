@@ -451,4 +451,19 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       required: ['one_line_finding'],
     },
   },
+  {
+    name: 'finish_explanation',
+    description:
+      'End this turn with a prose explanation only, no chart. Use this when the user asked you ' +
+      'to explain, describe, interpret, or summarize data you already have in words, rather than ' +
+      'asking for a new or different chart. Do not call render_chart in a turn that ends with ' +
+      'this tool.',
+    parameters: {
+      type: 'object',
+      properties: {
+        explanation: { type: 'string', description: 'The prose answer to the user\'s question.' },
+      },
+      required: ['explanation'],
+    },
+  },
 ];
