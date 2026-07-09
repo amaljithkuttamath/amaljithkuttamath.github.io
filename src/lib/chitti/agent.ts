@@ -36,7 +36,7 @@ export interface TraceEvent {
   ts: number;
   // Tokens consumed by the LLM turn that produced this tool call, when this
   // step is directly attributable to one. Pure data-fetch/file steps that
-  // aren't the result of a turn we're attributing usage to stay undefined.
+  // aren't the result of a turn we're attributing usage to stay undefined;
   // the UI omits the token figure rather than showing a fake zero.
   tokens?: number;
   // Set only on the synthetic 'verify' trace event, once the verifier call
@@ -411,7 +411,7 @@ function extractOneSentence(text: string): string {
   if (!t) return '';
   const sentences = t.split(/(?<=[.!?])\s+/);
   // Prefer the LAST numbery sentence, not the first: this text may be a
-  // model's raw reasoning (used as a fallback when `text` was empty. See
+  // model's raw reasoning (used as a fallback when `text` was empty, see
   // call site), which explores several numbers while working through the
   // problem before landing on its actual conclusion at the end. Taking the
   // first numbery sentence from reasoning tends to grab an exploratory

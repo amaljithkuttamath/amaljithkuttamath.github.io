@@ -162,7 +162,7 @@ describe('message trimming', () => {
       (m) => typeof m.content === 'string' && m.content.length > 500
     );
     expect(anyToolMessageHasFullRowDump).toBe(false);
-    expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted. a short marker remains
+    expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted. A short marker remains
     expect(toolMessages.some((m) => m.content?.includes('trimmed'))).toBe(true);
   });
 });
