@@ -102,59 +102,65 @@ const PRESETS = [
       </details>
     </section>
 
-    <!-- Status line -->
-    <div class="ch-status" id="ch-status" style="display:none">
-      <span class="ch-status-dot" id="ch-status-dot"></span>
-      <span id="ch-status-msg">Planning…</span>
-    </div>
+    <template id="ch-turn-template">
+      <div class="ch-turn">
+        <!-- Status line -->
+        <div class="ch-status" style="display:none">
+          <span class="ch-status-dot"></span>
+          <span class="ch-status-msg">Planning…</span>
+        </div>
 
-    <!-- The agent at work: receipt-style trace rail (left) + canvas (right) -->
-    <section class="ch-panel" id="ch-panel" style="display:none">
-      <!-- Left: the receipt. Torn top edge, perforated sections, terse trace. -->
-      <div class="ch-rail" id="ch-rail">
-        <div class="ch-rail-tear" aria-hidden="true"></div>
-        <div class="ch-rail-body">
-          <div class="ch-rail-head">
-            <span class="ch-rail-model" id="ch-rail-model">agent</span>
-            <span class="ch-rail-sub">every tool call, live</span>
-            <span class="ch-render-flag" id="ch-render-flag" style="display:none">Rendering…</span>
+        <!-- The agent at work: receipt-style trace rail (left) + canvas (right) -->
+        <section class="ch-panel" style="display:none">
+          <!-- Left: the receipt. Torn top edge, perforated sections, terse trace. -->
+          <div class="ch-rail">
+            <div class="ch-rail-tear" aria-hidden="true"></div>
+            <div class="ch-rail-body">
+              <div class="ch-rail-head">
+                <span class="ch-rail-model">agent</span>
+                <span class="ch-rail-sub">every tool call, live</span>
+                <span class="ch-render-flag" style="display:none">Rendering…</span>
+              </div>
+              <div class="ch-trace"></div>
+              <div class="ch-rail-total" style="display:none"></div>
+            </div>
           </div>
-          <div class="ch-trace" id="ch-trace"></div>
-          <div class="ch-rail-total" id="ch-rail-total" style="display:none"></div>
-        </div>
+
+          <!-- Right: the canvas. Chart builds here, live, full height. Starts
+               collapsed (ch-canvas-pending) until render_chart actually mounts a
+               chart — no point holding open a tall empty box while the agent is
+               still planning/fetching. -->
+          <div class="ch-canvas ch-canvas-pending">
+            <p class="ch-canvas-wait">waiting for a chart…</p>
+            <figure class="ch-chart-card">
+              <figcaption class="ch-chart-title"></figcaption>
+              <div class="ch-chart"></div>
+            </figure>
+          </div>
+        </section>
+
+        <!-- Answer: finding first, then the receipts -->
+        <section class="ch-answer" style="display:none">
+          <p class="ch-finding"></p>
+          <div class="ch-conf-legend" style="display:none">
+            <span class="ch-conf-swatch ch-conf-swatch-hi"><i></i>confident</span>
+            <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
+          </div>
+          <span class="ch-conf" style="display:none">confidence: low</span>
+
+          <details class="ch-data" style="display:none">
+            <summary>Raw data (<span class="ch-data-count">0</span> rows) · <button type="button" class="ch-csv">Download CSV</button></summary>
+            <div class="ch-table-scroll">
+              <table class="ch-table"></table>
+            </div>
+          </details>
+
+          <div class="ch-cite" style="display:none"></div>
+        </section>
       </div>
+    </template>
 
-      <!-- Right: the canvas. Chart builds here, live, full height. Starts
-           collapsed (ch-canvas-pending) until render_chart actually mounts a
-           chart — no point holding open a tall empty box while the agent is
-           still planning/fetching. -->
-      <div class="ch-canvas ch-canvas-pending" id="ch-canvas">
-        <p class="ch-canvas-wait" id="ch-canvas-wait">waiting for a chart…</p>
-        <figure class="ch-chart-card">
-          <figcaption class="ch-chart-title" id="ch-chart-title"></figcaption>
-          <div class="ch-chart" id="ch-chart"></div>
-        </figure>
-      </div>
-    </section>
-
-    <!-- Answer: finding first, then the receipts -->
-    <section class="ch-answer" id="ch-chart-wrap" style="display:none">
-      <p class="ch-finding" id="ch-finding"></p>
-      <div class="ch-conf-legend" id="ch-conf-legend" style="display:none">
-        <span class="ch-conf-swatch ch-conf-swatch-hi"><i></i>confident</span>
-        <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
-      </div>
-      <span class="ch-conf" id="ch-conf" style="display:none">confidence: low</span>
-
-      <details class="ch-data" id="ch-data" style="display:none">
-        <summary>Raw data (<span id="ch-data-count">0</span> rows) · <button type="button" class="ch-csv" id="ch-csv">Download CSV</button></summary>
-        <div class="ch-table-scroll">
-          <table class="ch-table" id="ch-table"></table>
-        </div>
-      </details>
-
-      <div class="ch-cite" id="ch-cite" style="display:none"></div>
-    </section>
+    <div class="ch-thread" id="ch-thread"></div>
 
   </div>
 
