@@ -73,26 +73,66 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
   > You already have data from earlier in this conversation:
   > `{summarizeRows(state.rows)}`
   > Current chart: `{type/title/series-names summary, or "none"}`.
-  > If this question can be answered from what you already have — a
-  > different chart type, a slice/filter/re-rank of the same rows, or a
-  > prose explanation — do NOT call search_indicators or fetch tools again.
-  > Only fetch new data if the question needs something you don't have
-  > (a new country, indicator, or year range not already fetched).
+  > Do NOT call search_indicators or fetch tools again unless this question
+  > needs data you don't have (a new country, indicator, or year range not
+  > already fetched).
+  > If this question needs a different chart from the SAME data (a new
+  > chart type, a re-ranked/filtered/re-aggregated view), you MUST call
+  > execute_js again against the existing rows to (re-)derive the exact
+  > values before calling render_chart — `summarizeRows` above is a
+  > compressed preview (first year, last year, count) for your own
+  > orientation only, never a source of chart data. Never call render_chart
+  > from the summary directly.
+  > If this question just asks you to explain, describe, or interpret the
+  > data in words, call `finish_explanation` with your answer — do not call
+  > render_chart at all.
 
   This addendum is what makes "explain this data" resolve with zero tool
-  calls (pure reasoning + a `finish`-equivalent text response) and "plot it
-  as a line chart" resolve with just one `render_chart` call.
+  calls beyond `finish_explanation`, and "plot it as a line chart" resolve
+  with an `execute_js` re-derivation + one `render_chart` call — never a
+  render straight from the lossy summary.
 
-- A turn that produces no chart at all (pure explanation) is a valid
-  `AgentOutput` with `chartSpec: null` and a `finding` containing the
-  explanation — reuses the existing zero-result rendering path in the UI
-  (`ch-finding-empty` already exists, but here it's not an error state, just
-  "no chart this turn"; see UI section for the distinction).
+- New tool: `finish_explanation` (schema: single string arg, the prose
+  answer). This is distinct from `finish` (which requires a rendered chart
+  in today's pipeline) so the two intents aren't overloaded onto one tool
+  the model has to reason about differently depending on hidden state.
+
+### Two turn kinds: chart turns vs. explanation turns
+
+The Turn 1 pipeline (verify against a rendered chart, `!spec` = fail =
+retry) is correct for chart-producing turns and must not change. But it is
+**only valid when the turn actually attempted a chart.** Applying it
+unconditionally to explanation turns is a real bug in the original draft
+of this design: `verify()`'s pass condition requires `!!spec`, and the
+verifier prompt is handed `NO CHART RENDERED` for any null spec — so an
+explanation turn would fail verification by construction, trigger the
+existing retry-with-critique path, and coerce the model into rendering a
+chart the user never asked for. Confirmed against `agent.ts`'s `verify()`
+(the `pass` expression) and its retry branch.
+
+Fix: branch on which tool ended the turn.
+
+- **Chart turn** (`finish` called, or a chart was rendered): today's
+  `runVerify()` / retry-once behavior, unchanged.
+- **Explanation turn** (`finish_explanation` called, no `render_chart` this
+  turn): skip `runVerify()` entirely. There is no chart to check, and
+  forcing the model to produce one just to satisfy a verifier built for a
+  different kind of turn is the bug, not a case for a "prose-aware
+  verifier." `AgentOutput.chartSpec` stays whatever it already was
+  (`state.chartSpec` from the last chart turn, unchanged) so the canvas
+  keeps showing the last real chart; `finding` carries the explanation
+  text; a new `AgentOutput.kind: 'chart' | 'explanation'` field tells the
+  UI which rendering path to use (see UI section — an explanation turn is
+  a normal answer, not the zero-result/error state).
 
 ### AgentOutput per turn
 
-Unchanged shape. Each `ask()` returns one `AgentOutput`, same as today's
-single `runAgent()` call.
+Same shape as today plus one new field: `kind: 'chart' | 'explanation'`,
+set by which tool ended the turn. `chartSpec: null` no longer means
+"nothing to show" by itself — the UI must check `kind` before deciding
+whether to render the zero-result/error state (only for a chart turn that
+genuinely produced no chart) or the explanation state (a deliberate
+`finish_explanation` turn, always a normal answer).
 
 ## UI layer (`src/pages/apps/chitti.astro`)
 
@@ -113,6 +153,24 @@ single `runAgent()` call.
     (Implementation detail to confirm in the plan: cheapest is disposing the
     live instance and re-rendering once into a static canvas snapshot at the
     moment it's superseded.)
+
+### Rendering by `AgentOutput.kind`
+
+The submit handler must branch on `out.kind` before falling into today's
+`!out.chartSpec` zero-result/error path:
+
+- `kind: 'explanation'` → always a normal answer turn. Render `out.finding`
+  in the turn's answer section as prose, no confidence badge, no data
+  table/citations (nothing new was fetched), no error status. The turn's
+  canvas area shows the same chart as the previous turn (unchanged,
+  `state.chartSpec` carries forward) or stays empty if no chart exists yet
+  — never routes through `ch-finding-empty` / `setStatus('error', ...)`.
+- `kind: 'chart'` with `chartSpec` present → today's normal success path,
+  unchanged.
+- `kind: 'chart'` with `chartSpec: null` → today's existing zero-result
+  path (`ch-finding-empty`, error status) — this is now correctly scoped to
+  only the case it was meant for: a chart was attempted and genuinely
+  failed to materialize, not "no chart was attempted this turn."
 
 ### Entry point vs. sticky composer
 
@@ -138,18 +196,58 @@ single `runAgent()` call.
   active input. Does not clear the saved API key from sessionStorage (BYOK
   key persistence is unrelated and already session-scoped).
 
-## Prompt caching (`src/lib/chitti/providers.ts`)
+## Context retention policy (`messages` growth across turns)
 
-### Why this belongs in this design
+Multi-turn means `messages` no longer resets per call — it accumulates for
+the life of the session. Three things are coupled to this and must be
+decided together rather than independently, per the design review:
 
-Today `runAgent()` is one-shot, so the messages array is short-lived and
-caching barely matters. Multi-turn changes that: `messages` now persists and
-grows across `ask()` calls, with the system prompt and every prior turn's
-history re-sent verbatim on each new call. Without caching, every follow-up
-re-bills and re-latencies the entire conversation-so-far from scratch, which
-directly undercuts the "reuse fetched data, don't redo work" goal above —
-the tool-call savings would be real, but the token cost/latency savings
-would be left on the table for no reason.
+- **Re-plot fidelity** (System prompt section above) requires the full
+  `execute_js` JSON result for a prior fetch to still be reasoned over, or
+  requires re-deriving it. This design already commits to re-deriving via
+  `execute_js` against `state.rows` (kept in JS memory, not re-sent through
+  `messages` every turn) rather than depending on old tool-result JSON
+  still sitting in the message history. That decision is what makes the
+  next point possible.
+- **Trimming is safe** because of the above: `state.rows` (plain JS state,
+  outside `messages`) is the durable source of truth for chart data across
+  turns. The `messages` array itself — old `tool` role messages carrying
+  large fetched-row JSON — can be trimmed/summarized once a turn is
+  complete, since nothing downstream depends on re-reading that raw JSON
+  back out of history. Concretely: after a turn ends, collapse that turn's
+  `tool` messages down to a short marker (e.g. "fetched N rows for
+  indicator X, see current data") instead of keeping the full JSON blob in
+  history forever. `state.rows` itself is never trimmed (it's the answer to
+  "what data do we have"); only the `messages` copies of it are.
+- **A free model's context window is finite.** A couple of `fetch_worldbank_all`
+  calls (hundreds of rows each) left untrimmed in `messages` will crowd a
+  smaller model's window within a handful of turns. Trimming per the point
+  above is what keeps a long conversation viable, independent of whether
+  caching ever gets built.
+
+This is a plain context-size correctness concern (a long conversation must
+keep working), not an optimization — it belongs in the multi-turn
+implementation itself, unlike caching below.
+
+## Prompt caching (`src/lib/chitti/providers.ts`) — deferred, separate phase
+
+### Why this is being scoped out of the multi-turn implementation
+
+The original draft of this section led with Anthropic `cache_control`
+plumbing on the strength of "growing history gets expensive." That's true
+in general, but Chitti's actual default is `nemotron-3-ultra-550b (free)`
+on OpenRouter — on that path, cost savings from caching are $0 (the model
+is free), and latency savings are unconfirmed (free-tier OpenRouter routing
+doesn't guarantee cache hits land on the same backend instance). Leading
+implementation effort with Anthropic-specific request shaping optimizes a
+path most users of this page never take. Real, but not yet worth the
+column-inches original given it here.
+
+Caching is being split out as its own follow-up, gated on: (1) shipping
+multi-turn first and confirming with real usage whether history growth
+actually causes a noticeable cost/latency problem on the models people
+pick, and (2) if so, which provider path that shows up on. Until then this
+section stays as a record of the mechanism, not a committed phase.
 
 ### Current state (confirmed by reading providers.ts)
 
