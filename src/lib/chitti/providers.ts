@@ -105,6 +105,7 @@ export const PROVIDERS: ProviderMeta[] = [
       // Populated dynamically from openrouter.ai/api/v1/models on page load.
       // Fallback slugs kept intentionally short.
       { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'nemotron-3-ultra-550b (free)', free: true },
+      { id: 'deepseek/deepseek-v4-flash', label: 'deepseek-v4-flash', reasoning: true },
       { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'nemotron-3-super-120b (free)', free: true },
       { id: 'openrouter/free', label: 'openrouter/free (auto-router)', free: true },
     ],
@@ -161,6 +162,25 @@ export const PROVIDERS: ProviderMeta[] = [
 export function providerMeta(id: ProviderId): ProviderMeta {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
+
+// Models verified (by hand, running this app's actual tool-calling pipeline
+// — not a general benchmark) to be reliable at multi-step tool use. Small
+// free models vary a lot here even when general benchmarks look similar,
+// so this list exists to save a user from re-discovering that the hard way.
+// Update it as models are tested; remove one the moment it stops holding up.
+//
+//  - nvidia/nemotron-3-ultra-550b-a55b:free — default. Completed every test
+//    question correctly, first pass, at a fraction of the token cost of
+//    smaller free models on the same pipeline.
+//  - deepseek/deepseek-v4-flash — cheap paid ($0.09/$0.18 per M tokens), also
+//    reasoning-capable AND one of the few OpenRouter models that returns
+//    real per-token logprobs (supported_parameters includes 'logprobs'/
+//    'top_logprobs') — worth knowing about if real confidence-tinting ever
+//    gets wired up, not just the visual treatment.
+export const RECOMMENDED_OPENROUTER_MODELS = new Set([
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'deepseek/deepseek-v4-flash',
+]);
 
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
   openai: 'gpt-5-mini',

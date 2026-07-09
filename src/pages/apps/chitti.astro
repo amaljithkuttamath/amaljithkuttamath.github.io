@@ -206,6 +206,7 @@ const PRESETS = [
     PROVIDERS,
     providerMeta,
     fetchModels,
+    RECOMMENDED_OPENROUTER_MODELS,
     type ProviderId,
     type ProviderConfig,
     type ModelOption,
@@ -272,19 +273,38 @@ const PRESETS = [
   }
 
   // Renders a list of {id,label,free} options into the model <select>.
-  function renderModelOptions(models: ModelOption[], selected?: string, defaultModel?: string) {
+  // OpenRouter's catalog is large enough that a flat alphabetical list
+  // buries the models actually verified to work well on this app's own
+  // tool-calling pipeline — split into a "Recommended" optgroup (from
+  // RECOMMENDED_OPENROUTER_MODELS) plus everything else, rather than a
+  // single "· recommended" suffix a user could easily scroll past.
+  function renderModelOptions(models: ModelOption[], selected?: string, defaultModel?: string, pid?: ProviderId) {
     modelSel.innerHTML = '';
-    for (const m of models) {
+    const buildOpt = (m: ModelOption) => {
       const opt = document.createElement('option');
       opt.value = m.id;
-      // The live OpenRouter fetch builds its own labels from scratch (no
-      // "recommended" hint baked in like the fallback list has) — mark our
-      // pinned default explicitly so the guidance survives once the dynamic
-      // fetch replaces the fallback options a moment after page load.
-      opt.textContent = m.label + (m.id === defaultModel ? '  · recommended' : '');
+      opt.textContent = m.label;
       if (m.free) opt.classList.add('ch-free-opt');
       if (m.reasoning) opt.dataset.reasoning = '1';
-      modelSel.appendChild(opt);
+      return opt;
+    };
+    if (pid === 'openrouter') {
+      const recommended = models.filter((m) => RECOMMENDED_OPENROUTER_MODELS.has(m.id));
+      const rest = models.filter((m) => !RECOMMENDED_OPENROUTER_MODELS.has(m.id));
+      if (recommended.length) {
+        const group = document.createElement('optgroup');
+        group.label = 'Recommended — reliable on this app\'s tool-calling pipeline';
+        for (const m of recommended) group.appendChild(buildOpt(m));
+        modelSel.appendChild(group);
+      }
+      if (rest.length) {
+        const group = document.createElement('optgroup');
+        group.label = recommended.length ? 'All models' : 'Models';
+        for (const m of rest) group.appendChild(buildOpt(m));
+        modelSel.appendChild(group);
+      }
+    } else {
+      for (const m of models) modelSel.appendChild(buildOpt(m));
     }
     if (selected && models.some((m) => m.id === selected)) {
       modelSel.value = selected;
@@ -301,7 +321,7 @@ const PRESETS = [
   async function populateModels(pid: ProviderId, selected?: string) {
     const meta = providerMeta(pid);
     // 1. Instant paint using the fallback list so the UI is never empty.
-    renderModelOptions(meta.models, selected, meta.defaultModel);
+    renderModelOptions(meta.models, selected, meta.defaultModel, pid);
 
     // 2. Dynamic refresh from the provider's /models endpoint.
     const key = keyIn.value.trim();
@@ -327,14 +347,14 @@ const PRESETS = [
       // Guard: user may have switched providers while we were fetching.
       if (currentProvider() !== pid) return;
       if (live.length) {
-        renderModelOptions(live, modelSel.value, meta.defaultModel);
+        renderModelOptions(live, modelSel.value, meta.defaultModel, pid);
       } else {
         // Fall back cleanly.
-        renderModelOptions(meta.models, modelSel.value, meta.defaultModel);
+        renderModelOptions(meta.models, modelSel.value, meta.defaultModel, pid);
       }
     } catch (err) {
       console.warn('populateModels dynamic fetch failed', err);
-      renderModelOptions(meta.models, modelSel.value, meta.defaultModel);
+      renderModelOptions(meta.models, modelSel.value, meta.defaultModel, pid);
     }
   }
 
