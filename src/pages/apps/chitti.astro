@@ -104,6 +104,16 @@ const PRESETS = [
 
     <template id="ch-turn-template">
       <div class="ch-turn">
+        <!-- Collapsed summary: hidden until this turn is superseded by a
+             later one. Once shown, it is the only visible content for this
+             turn (see collapseTurn()). -->
+        <details class="ch-turn-summary" style="display:none">
+          <summary>
+            <span class="ch-turn-q"></span>
+            <span class="ch-turn-finding"></span>
+          </summary>
+        </details>
+
         <!-- Status line -->
         <div class="ch-status" style="display:none">
           <span class="ch-status-dot"></span>
@@ -220,6 +230,9 @@ const PRESETS = [
   // start times) to that one turn.
   interface TurnBlock {
     root: HTMLElement;
+    turnSummary: HTMLDetailsElement;
+    turnSummaryQ: HTMLElement;
+    turnSummaryFinding: HTMLElement;
     statusRow: HTMLElement;
     statusDot: HTMLElement;
     statusMsg: HTMLElement;
@@ -263,6 +276,9 @@ const PRESETS = [
 
     const tb: TurnBlock = {
       root,
+      turnSummary: q<HTMLDetailsElement>(root, '.ch-turn-summary'),
+      turnSummaryQ: q(root, '.ch-turn-q'),
+      turnSummaryFinding: q(root, '.ch-turn-finding'),
       statusRow: q(root, '.ch-status'),
       statusDot: q(root, '.ch-status-dot'),
       statusMsg: q(root, '.ch-status-msg'),
@@ -891,6 +907,41 @@ const PRESETS = [
     for (const tb of liveChartTurns) tb.chartInstance?.resize();
   });
 
+  // Every turn block created so far, regardless of whether it has a chart.
+  // Separate from liveChartTurns (which only tracks turns with a live
+  // chart) because an explanation-only turn with no chart still needs to
+  // collapse when superseded.
+  const allTurns: TurnBlock[] = [];
+
+  // Called on a turn block that is no longer the latest turn. Freezes its
+  // chart as a static PNG snapshot (taken via ECharts's own getDataURL()
+  // before disposing, dispose()'s effect on the underlying canvas bitmap
+  // is undocumented/unverified, so this does not rely on it leaving anything
+  // visible behind) and swaps its full receipt/panel/answer display for a
+  // one-line collapsed summary. state.rows/chartSpec in agent.ts is
+  // unaffected by this, this is presentation only, the underlying session
+  // data is untouched.
+  function collapseTurn(tb: TurnBlock) {
+    const idx = liveChartTurns.indexOf(tb);
+    if (idx !== -1) liveChartTurns.splice(idx, 1);
+    if (tb.chartInstance) {
+      const dataUrl = tb.chartInstance.getDataURL({ type: 'png', backgroundColor: 'transparent' });
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.className = 'ch-turn-chart-snapshot';
+      img.alt = tb.chartTitle.textContent || 'Chart';
+      tb.turnSummary.appendChild(img);
+      tb.chartInstance.dispose();
+      tb.chartInstance = null;
+    }
+    tb.statusRow.style.display = 'none';
+    tb.panel.style.display = 'none';
+    tb.answerSection.style.display = 'none';
+    tb.turnSummary.style.display = 'block';
+    tb.turnSummaryQ.textContent = tb.question;
+    tb.turnSummaryFinding.textContent = tb.findingEl.textContent || '';
+  }
+
   // ── Data table + CSV ───────────────────────────────────────────────────
   function renderTable(tb: TurnBlock, rows: DataRow[], csv: string) {
     tb.lastRows = rows;
@@ -1021,7 +1072,11 @@ const PRESETS = [
     byokDetails.open = false;
     qIn.value = '';
 
+    for (const prev of allTurns) collapseTurn(prev);
+
     const tb = createTurnBlock();
+    tb.question = question;
+    allTurns.push(tb);
     liveChartTurns.push(tb);
     tb.canvasEl.classList.add('ch-canvas-pending');
     tb.panel.classList.add('ch-panel-pending');
