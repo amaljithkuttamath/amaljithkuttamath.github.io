@@ -163,7 +163,7 @@ const PRESETS = [
 </Base>
 
 <script>
-  import { runAgent } from '../../lib/chitti/agent';
+  import { createSession, type ChittiSession } from '../../lib/chitti/agent';
   import {
     PROVIDERS,
     providerMeta,
@@ -228,6 +228,11 @@ const PRESETS = [
 
   const SESSION_KEY = 'chitti:key';
   const SESSION_PROVIDER = 'chitti:provider';
+
+  // The multi-turn agent session. Created on the first ask() call and reused
+  // for every subsequent one on this page load, so follow-up questions share
+  // conversation history and fetched data. Cleared by "new conversation".
+  let session: ChittiSession | null = null;
 
   // ── Provider / model dropdown wiring ───────────────────────────────────
   function currentProvider(): ProviderId {
@@ -974,7 +979,8 @@ const PRESETS = [
     railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
 
     try {
-      const out = await runAgent(cfg, question, {
+      if (!session) session = createSession(cfg);
+      const out = await session.ask(question, {
         onTrace: (events) => renderTrace(events),
         onFiles: (files) => renderFiles(files),
         onChart: (spec) => { void renderChart(spec); },
