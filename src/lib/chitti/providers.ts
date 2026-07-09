@@ -44,12 +44,25 @@ export interface CompletionResult {
   toolCalls: ToolCall[];
   // Rough token accounting for cost display.
   usage: { input: number; output: number };
+  // OpenRouter reasoning-model output only (see ModelOption.reasoning) — the
+  // model's own reasoning trace for this turn, when the provider actually
+  // returns it. Undefined for every other case (non-reasoning model, or a
+  // reasoning-capable model whose provider doesn't expose the text — the
+  // docs call out OpenAI's o-series as generating but never exposing it,
+  // even when routed through OpenRouter).
+  reasoning?: string;
 }
 
 export interface ProviderConfig {
   provider: ProviderId;
   model: string;
   apiKey: string;
+  // Set by the UI from the selected ModelOption.reasoning (OpenRouter only —
+  // see ModelOption.reasoning). Gates whether complete() asks for reasoning
+  // at all; requesting it on a model that doesn't support the param is a
+  // request error, so this must reflect the *specific selected model*, not
+  // just "provider is OpenRouter".
+  requestReasoning?: boolean;
 }
 
 // ── Provider metadata for the UI dropdowns ─────────────────────────────
@@ -57,6 +70,13 @@ export interface ModelOption {
   id: string;
   label: string;
   free?: boolean;
+  // OpenRouter-only: true when the model's `supported_parameters` includes
+  // 'reasoning' (per OpenRouter's own docs, not every provider that flags
+  // this actually returns visible reasoning text — notably OpenAI's o-series
+  // generates but never exposes it, even via OpenRouter — but requesting
+  // reasoning on a model that doesn't support the param at all is a request
+  // error, so this flag gates whether we ask in the first place).
+  reasoning?: boolean;
 }
 
 export interface ProviderMeta {
@@ -192,10 +212,12 @@ async function fetchOpenRouterModels(): Promise<ModelOption[]> {
     const isFree = String(pricing.prompt ?? '0') === '0' && String(pricing.completion ?? '0') === '0';
     // Skip preview/deprecated models (prefixed with ~ on OpenRouter).
     if (id.startsWith('~')) continue;
+    const isReasoning = params.includes('reasoning');
     opts.push({
       id,
-      label: id + (isFree ? '  · free' : ''),
+      label: id + (isFree ? '  · free' : '') + (isReasoning ? '  · reasoning' : ''),
       free: isFree,
+      reasoning: isReasoning,
     });
     // Cache pricing so estimateCost is accurate for the current catalog.
     const inPrice = parseFloat(pricing.prompt ?? '0') * 1e6;
@@ -317,6 +339,13 @@ async function callOpenAICompatible(
     }));
     body.tool_choice = 'auto';
   }
+  // OpenRouter reasoning models only — see ProviderConfig.requestReasoning.
+  // Requesting this param on a model that doesn't support it is a request
+  // error, so this must only be set when the UI resolved the *selected*
+  // model as reasoning-capable (OpenRouter's supported_parameters).
+  if (isRouter && cfg.requestReasoning) {
+    body.reasoning = { enabled: true };
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -348,6 +377,14 @@ async function callOpenAICompatible(
     arguments: safeParse(tc.function?.arguments ?? '{}'),
   }));
 
+  // Per OpenRouter's docs, reasoning text appears under one of two
+  // interchangeable string fields: `reasoning` or `reasoning_content`.
+  // Absent entirely for non-reasoning models, and — per the same docs —
+  // sometimes absent even for a reasoning-capable model whose underlying
+  // provider generates but doesn't expose it (OpenAI's o-series via
+  // OpenRouter is the documented example).
+  const reasoning: string | undefined = choice.reasoning || choice.reasoning_content || undefined;
+
   return {
     text: choice.content ?? '',
     toolCalls,
@@ -355,6 +392,7 @@ async function callOpenAICompatible(
       input: data.usage?.prompt_tokens ?? 0,
       output: data.usage?.completion_tokens ?? 0,
     },
+    reasoning,
   };
 }
 

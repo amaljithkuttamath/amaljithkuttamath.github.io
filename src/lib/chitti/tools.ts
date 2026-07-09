@@ -145,18 +145,27 @@ export function listCountries(filter?: CountryFilter): Country[] {
 
 // fetch_worldbank: the actual API call. Multi-country uses ';' separator
 // (the WB API rejects comma-separated ISO3 lists). Cap at ~60 countries
-// per call, matching the API's practical multi-country limit.
+// per call, matching the API's practical multi-country limit. Truncation
+// is reported back (`truncatedFrom`) rather than silently dropped — the
+// model has no other way to know its country_ids list was cut, and would
+// otherwise report findings over an incomplete country set with no signal
+// anything was missing.
+export interface FetchWorldbankResult {
+  rows: DataRow[];
+  // Original requested country count, only set when it exceeded the 60-per-
+  // call cap and was truncated. Undefined when no truncation occurred.
+  truncatedFrom?: number;
+}
+
 export async function fetchWorldbank(
   indicatorId: string,
   countryIds: string[],
   yearStart: number,
   yearEnd: number
-): Promise<DataRow[]> {
-  const codes = countryIds
-    .map((c) => c.trim().toUpperCase())
-    .filter(Boolean)
-    .slice(0, 60)
-    .join(';');
+): Promise<FetchWorldbankResult> {
+  const cleanIds = countryIds.map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const truncatedFrom = cleanIds.length > 60 ? cleanIds.length : undefined;
+  const codes = cleanIds.slice(0, 60).join(';');
   // Semicolons must stay literal in the path segment; only the indicator id
   // needs escaping (WB ids are dot-delimited alnum, so this is a no-op in
   // practice, but keeps us safe).
@@ -178,7 +187,88 @@ export async function fetchWorldbank(
   }));
   // Sort by country then year ascending for stable downstream use.
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return rows;
+  return { rows, truncatedFrom };
+}
+
+// fetch_worldbank_all: every real country for one indicator, batched and
+// merged internally — no LLM reasoning about country counts, batch math, or
+// "did I already fetch this" required. Exists specifically because letting
+// the model own list_countries + manual 60-per-call batching burned a huge
+// reasoning turn re-deriving batch counts and re-verifying its own country
+// list mid-run (observed directly: an 18k+ token turn spent second-guessing
+// whether it had already fetched all ~195 countries). This tool answers
+// "give me every country for this indicator" as one deterministic call.
+export interface FetchWorldbankAllResult {
+  rows: DataRow[];
+  countryCount: number;
+  batchCount: number;
+}
+
+export async function fetchWorldbankAll(
+  indicatorId: string,
+  yearStart: number,
+  yearEnd: number
+): Promise<FetchWorldbankAllResult> {
+  const countries = listCountries('all');
+  const ids = countries.map((c) => c.id);
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 60) batches.push(ids.slice(i, i + 60));
+
+  // Sequential, not parallel — a burst of ~4 simultaneous requests to the
+  // World Bank's public API is an unnecessary way to invite rate-limiting
+  // for a request that isn't latency-critical (this whole call already
+  // replaces what used to be several separate LLM-driven round-trips).
+  const allRows: DataRow[] = [];
+  for (const batch of batches) {
+    const { rows } = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
+    allRows.push(...rows);
+  }
+  allRows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
+  return { rows: allRows, countryCount: ids.length, batchCount: batches.length };
+}
+
+// execute_js: the model writes real JS to rank/diff/filter/aggregate the
+// fetched rows, instead of doing that arithmetic by reasoning through
+// numbers in natural language turns (observed directly: manually comparing
+// ~190 countries' reduction values in reasoning text is slow, expensive, and
+// error-prone). No fixed menu of operations — the model expresses whatever
+// computation the question actually needs as code.
+//
+// Sandboxing note: this uses `new Function`, not a real VM (no
+// quickjs-emscripten/WASM) — deliberately, to avoid a ~1.3MB dependency in a
+// browser-only static site. The executed code's only argument is `rows`; it
+// has no reference to anything else in this module's scope (Function bodies
+// close over nothing but their own global scope, not the enclosing
+// function's locals), so it cannot reach the VFS, the API key, or other
+// module state. It CAN reach `window`/`fetch`/etc. like any other page
+// script, so this is not a security boundary against malicious code — it's
+// proportionate here because the executed code is written by the same
+// model the user is already trusting to answer their question, operating on
+// public World Bank data it just fetched, in the user's own tab. There is
+// no execution timeout: a synchronous `new Function` call cannot be
+// interrupted from the same thread. An infinite loop would hang this run
+// the same way a broken tool-calling loop already could; a hard timeout
+// would require moving execution to a Worker, which is more machinery than
+// this risk currently justifies.
+export interface ExecuteJsResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export function executeJs(code: string, rows: DataRow[]): ExecuteJsResult {
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('rows', code);
+    const result = fn(rows);
+    // Force through JSON so the result is always plain, serializable data —
+    // matches every other tool's result shape and guards against the code
+    // accidentally returning something (a DOM node, a class instance) that
+    // can't be shown back to the model as a string.
+    return { ok: true, result: JSON.parse(JSON.stringify(result ?? null)) };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
 }
 
 // Build CSV from data rows for the download button.
@@ -225,8 +315,12 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   {
     name: 'fetch_worldbank',
     description:
-      'Fetch time-series data for one indicator across one or more countries (by ISO3 code). ' +
-      'Returns rows of {country, iso3, year, value}. Use for actual data retrieval.',
+      'Fetch time-series data for one indicator across specific countries (by ISO3 code) or one ' +
+      'aggregate (e.g. "WLD" for world, a region aggregate id). Returns rows of ' +
+      '{country, iso3, year, value}. country_ids MUST be an explicit, non-empty list — there is ' +
+      'no wildcard, an empty array returns no data. Max 60 country_ids per call. ' +
+      'Do NOT use this for "every country" questions — call fetch_worldbank_all instead, which ' +
+      'handles the full country list and batching internally in one call.',
     parameters: {
       type: 'object',
       properties: {
@@ -234,12 +328,35 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         country_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'ISO3 codes, e.g. ["IND","CHN","BRA"]. Use aggregate ids like "WLD" for world.',
+          minItems: 1,
+          description:
+            'Non-empty array of specific ISO3 codes, e.g. ["IND","CHN","BRA"], or one aggregate ' +
+            'id like ["WLD"] for world. Max 60 per call. For "all countries", use ' +
+            'fetch_worldbank_all instead of building this list yourself.',
         },
         year_start: { type: 'number' },
         year_end: { type: 'number' },
       },
       required: ['indicator_id', 'country_ids', 'year_start', 'year_end'],
+    },
+  },
+  {
+    name: 'fetch_worldbank_all',
+    description:
+      'Fetch time-series data for one indicator across EVERY real country in one call. Use this ' +
+      'instead of list_countries + fetch_worldbank whenever the question is about "all countries", ' +
+      '"which countries...", "every country", or similar — it resolves the full country list and ' +
+      'batches the underlying requests internally, so you never need to reason about country ' +
+      'counts, batch sizes, or merging results yourself. Returns rows of ' +
+      '{country, iso3, year, value} for every country with data.',
+    parameters: {
+      type: 'object',
+      properties: {
+        indicator_id: { type: 'string', description: 'World Bank indicator id, e.g. SH.DYN.MORT' },
+        year_start: { type: 'number' },
+        year_end: { type: 'number' },
+      },
+      required: ['indicator_id', 'year_start', 'year_end'],
     },
   },
   {
@@ -261,6 +378,32 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
+    },
+  },
+  {
+    name: 'execute_js',
+    description:
+      'Run JavaScript against the data you already fetched, to compute a ranking/reduction/' +
+      'comparison/aggregate — instead of reasoning through the numbers by hand. Your code ' +
+      'receives one argument, `rows`, an array of {country, iso3, year, value} objects (the ' +
+      'combined result of every fetch_worldbank/fetch_worldbank_all call so far). Whatever your ' +
+      'code returns is sent back to you as the result — return the exact ranked/computed array ' +
+      'or object you need for the chart or the finding, not intermediate steps. Use this for ' +
+      'anything that requires comparing across many rows: top-N by change, percentage change, ' +
+      'filtering to the latest year per country, grouping by region, etc. Do not manually rank ' +
+      'or diff more than a couple of countries in your own reasoning — write code instead.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description:
+            'A JS function body (no wrapping function declaration) that uses `rows` and ends ' +
+            'with a return statement, e.g. "const byCountry = {}; for (const r of rows) {...}; ' +
+            'return Object.values(byCountry).sort(...).slice(0, 15);"',
+        },
+      },
+      required: ['code'],
     },
   },
   {
