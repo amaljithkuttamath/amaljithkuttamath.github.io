@@ -277,7 +277,11 @@ const PRESETS = [
     for (const m of models) {
       const opt = document.createElement('option');
       opt.value = m.id;
-      opt.textContent = m.label;
+      // The live OpenRouter fetch builds its own labels from scratch (no
+      // "recommended" hint baked in like the fallback list has) — mark our
+      // pinned default explicitly so the guidance survives once the dynamic
+      // fetch replaces the fallback options a moment after page load.
+      opt.textContent = m.label + (m.id === defaultModel ? '  · recommended' : '');
       if (m.free) opt.classList.add('ch-free-opt');
       if (m.reasoning) opt.dataset.reasoning = '1';
       modelSel.appendChild(opt);

@@ -104,6 +104,7 @@ export const PROVIDERS: ProviderMeta[] = [
     models: [
       // Populated dynamically from openrouter.ai/api/v1/models on page load.
       // Fallback slugs kept intentionally short.
+      { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'nemotron-3-ultra-550b (free)', free: true },
       { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'nemotron-3-super-120b (free)', free: true },
       { id: 'openrouter/free', label: 'openrouter/free (auto-router)', free: true },
     ],
@@ -111,10 +112,20 @@ export const PROVIDERS: ProviderMeta[] = [
     // *different* models between turns, which confuses multi-step tool loops:
     // each turn gets a different model with a different sense of the schema.
     // A specific free model with good tool support behaves consistently.
-    defaultModel: 'nvidia/nemotron-3-super-120b-a12b:free',
+    //
+    // ultra-550b over super-120b specifically: side-by-side testing on this
+    // app's actual tool-calling pipeline (not a general benchmark) showed
+    // super-120b unreliable — empty-array/tool-schema confusion, occasional
+    // hallucinated tool names, and multi-retry runs burning 80k+ tokens on
+    // reasoning alone. ultra-550b completed the same questions correctly on
+    // the first pass, at a fraction of the token cost. Small free models
+    // vary a lot on tool-use reliability specifically, even when their
+    // general benchmarks look similar — worth re-checking this pin
+    // periodically as OpenRouter's free-tier catalog changes.
+    defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b:free',
     keyUrl: 'https://openrouter.ai/keys',
     keyLabel: 'Get a free OpenRouter key',
-    note: 'Free models load dynamically. Tip: pick one specific model — the auto-router shuffles between turns.',
+    note: 'Free models load dynamically. nemotron-3-ultra-550b is the most reliable free model we’ve tested for this tool-calling pipeline — smaller free models can be unpredictable at multi-step tool use.',
     freeNote: true,
   },
   {
@@ -154,7 +165,7 @@ export function providerMeta(id: ProviderId): ProviderMeta {
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
   openai: 'gpt-5-mini',
   anthropic: 'claude-haiku-latest',
-  openrouter: 'nvidia/nemotron-3-super-120b-a12b:free',
+  openrouter: 'nvidia/nemotron-3-ultra-550b-a55b:free',
 };
 
 // ── Dynamic model discovery ────────────────────────────────────────────
