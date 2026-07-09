@@ -1002,11 +1002,9 @@ const PRESETS = [
     if (!apiKey) {
       byokDetails.open = true;
       byokDetails.classList.remove('ch-byok-nudge');
-      // Restart the nudge animation on repeat attempts.
       void byokDetails.offsetWidth;
       byokDetails.classList.add('ch-byok-nudge');
       keyIn.focus();
-      setStatus('error', 'Add an API key below. The OpenRouter link has free models.');
       return;
     }
 
@@ -1017,98 +1015,71 @@ const PRESETS = [
       requestReasoning: modelSel.selectedOptions[0]?.dataset.reasoning === '1',
     };
 
-    // Reset UI.
     running = true;
     askBtn.disabled = true;
     askBtn.textContent = 'Working…';
-    startTimes.length = 0;
-    currentTrace = [];
-    currentFiles = {};
-    traceEl.innerHTML = '';
-    chartWrap.style.display = 'none';
-    dataDetails.style.display = 'none';
-    citeEl.style.display = 'none';
-    confEl.style.display = 'none';
-    confLegend.style.display = 'none';
-    railTotal.style.display = 'none';
-    findingEl.textContent = '';
-    findingEl.classList.remove('ch-finding-empty');
     byokDetails.open = false;
-    if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
-    canvasEl.classList.add('ch-canvas-pending');
-    panel.classList.add('ch-panel-pending');
-    setStatus('loading', 'Planning…');
-    panel.style.display = 'grid';
-    consoleEl.classList.add('ch-console-compact');
-    renderFiles({});
+    qIn.value = '';
 
-    // Header line: real model + provider, taken from the live picker state
-    // at the moment this run starts — not a hardcoded placeholder. Prefer
-    // the option's rendered label (reflects the dynamically fetched model
-    // list) and fall back to the raw model id if the dropdown has no
-    // matching option for some reason.
+    const tb = createTurnBlock();
+    liveChartTurns.push(tb);
+    tb.canvasEl.classList.add('ch-canvas-pending');
+    tb.panel.classList.add('ch-panel-pending');
+    setStatus(tb, 'loading', 'Planning…');
+    tb.panel.style.display = 'grid';
+    consoleEl.classList.add('ch-console-compact');
+    renderFiles(tb, {});
+
     const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
-    railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
+    tb.railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
 
     try {
       if (!session) session = createSession(cfg);
       const out = await session.ask(question, {
-        onTrace: (events) => renderTrace(events),
-        onFiles: (files) => renderFiles(files),
-        onChart: (spec) => { void renderChart(spec); },
-        onStatus: (msg, kind) => setStatus(kind, msg),
+        onTrace: (events) => renderTrace(tb, events),
+        onFiles: (files) => renderFiles(tb, files),
+        onChart: (spec) => { void renderChart(tb, spec); },
+        onStatus: (msg, kind) => setStatus(tb, kind, msg),
       });
 
-      // Chart may not have been rendered via callback if spec came late.
-      if (out.chartSpec && !chartInstance) await renderChart(out.chartSpec);
+      if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
 
-      // Reveal the answer section (finding, confidence, table, citations)
-      // now that the run has actually finished — this used to happen as an
-      // (incorrect, mid-run) side effect of renderChart(); see the note there.
-      chartWrap.style.display = 'block';
+      tb.answerSection.style.display = 'block';
 
-      // Zero-result: a real code path in agent.ts's bailout logic — the
-      // model hit MAX_TOOL_CALLS (or kept refusing tools) without ever
-      // calling render_chart, so `out.chartSpec` stays null and `out.finding`
-      // may be empty or just the forced-summary fallback text. Per spec, the
-      // receipt still closes out (timestamped, no fabricated VERIFIED stamp
-      // — already guaranteed, since the verifier only stamps on a genuine
-      // pass and a null chartSpec always fails verification above), with a
-      // plain-language line explaining nothing was found, styled as part of
-      // the same trace rather than a separate error component. We reuse the
-      // existing `.ch-finding` slot (still literally the last line of the
-      // receipt) rather than inventing a new element/modal for this.
-      if (!out.chartSpec) {
-        findingEl.classList.add('ch-finding-empty');
+      if (out.kind === 'chart' && !out.chartSpec) {
+        tb.findingEl.classList.add('ch-finding-empty');
         renderFinding(
+          tb,
           out.finding || 'No chart could be built for this question — try rephrasing or narrowing it to a specific indicator.'
         );
-        renderTable([], '');
-        renderCitations([]);
-        renderRunningTotal(currentTrace, out.cost);
-        setStatus('error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
-        chartWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        renderTable(tb, [], '');
+        renderCitations(tb, []);
+        renderRunningTotal(tb, tb.trace, out.cost);
+        setStatus(tb, 'error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
+        tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
 
-      // No real per-token logprob pipeline exists yet (see providers.ts —
-      // OpenRouter/OpenAI/Anthropic support differs per model/provider and
-      // isn't wired end to end). Render plain text rather than fabricate a
-      // confidence signal — a made-up distribution can look arbitrarily
-      // broken (e.g. tinting most of a short sentence by coincidence) and a
-      // fake "uncertain" marker is actively misleading about a real answer.
-      renderFinding(out.finding || 'No finding produced.');
-      if (out.confidence === 'low') confEl.style.display = 'inline-block';
-      renderTable(out.rows, out.csv);
-      renderCitations(out.indicators);
-      renderRunningTotal(currentTrace, out.cost);
+      if (out.kind === 'explanation') {
+        renderFinding(tb, out.finding || 'No explanation produced.');
+        renderRunningTotal(tb, tb.trace, out.cost);
+        setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
+        tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
+
+      renderFinding(tb, out.finding || 'No finding produced.');
+      if (out.confidence === 'low') tb.confEl.style.display = 'inline-block';
+      renderTable(tb, out.rows, out.csv);
+      renderCitations(tb, out.indicators);
+      renderRunningTotal(tb, tb.trace, out.cost);
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
-      setStatus('ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
-      chartWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
+      tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err: any) {
       console.error(err);
-      setStatus('error', 'Run failed: ' + (err?.message ?? String(err)));
+      setStatus(tb, 'error', 'Run failed: ' + (err?.message ?? String(err)));
     } finally {
       running = false;
       askBtn.disabled = false;
