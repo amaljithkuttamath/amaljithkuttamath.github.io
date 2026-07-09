@@ -202,35 +202,111 @@ const PRESETS = [
   const askBtn = $('ch-btn') as HTMLButtonElement;
   const chips = $('ch-chips');
 
-  const statusRow = $('ch-status');
-  const statusDot = $('ch-status-dot');
-  const statusMsg = $('ch-status-msg');
-
-  const panel = $('ch-panel');
-  const railModelEl = $('ch-rail-model');
-  const traceEl = $('ch-trace');
-  const renderFlag = $('ch-render-flag');
-
-  const canvasEl = $('ch-canvas');
-  const chartWrap = $('ch-chart-wrap');
-  const chartEl = $('ch-chart');
-  const chartTitle = $('ch-chart-title');
-  const findingEl = $('ch-finding');
-  const confEl = $('ch-conf');
-  const confLegend = $('ch-conf-legend');
-  const railTotal = $('ch-rail-total');
-
-  const dataDetails = $('ch-data') as HTMLDetailsElement;
-  const dataCount = $('ch-data-count');
-  const csvBtn = $('ch-csv') as HTMLButtonElement;
-  const tableEl = $('ch-table') as HTMLTableElement;
-
-  const citeEl = $('ch-cite');
+  const threadEl = $('ch-thread');
+  const turnTemplate = $('ch-turn-template') as HTMLTemplateElement;
 
   // Curated indicator id → friendly name, for citations.
   const INDICATOR_MAP: Record<string, string> = JSON.parse(
     ($('ch-indicator-map') as HTMLScriptElement).textContent || '{}'
   );
+
+  // ── Turn blocks ──────────────────────────────────────────────────────
+  // Every render function and its mutable state used to be a module-level
+  // singleton (one trace, one chart, one table for the whole page). To
+  // support a multi-turn thread, all of that becomes per-turn: each call to
+  // createTurnBlock() clones the turn template, appends it to the thread,
+  // and hands back a TurnBlock scoping every element and every piece of
+  // mutable state (chart instance, last spec, rows, csv, trace, files,
+  // start times) to that one turn.
+  interface TurnBlock {
+    root: HTMLElement;
+    statusRow: HTMLElement;
+    statusDot: HTMLElement;
+    statusMsg: HTMLElement;
+    panel: HTMLElement;
+    railModelEl: HTMLElement;
+    traceEl: HTMLElement;
+    renderFlag: HTMLElement;
+    railTotal: HTMLElement;
+    canvasEl: HTMLElement;
+    chartEl: HTMLElement;
+    chartTitle: HTMLElement;
+    answerSection: HTMLElement;
+    findingEl: HTMLElement;
+    confEl: HTMLElement;
+    confLegend: HTMLElement;
+    dataDetails: HTMLDetailsElement;
+    dataCount: HTMLElement;
+    csvBtn: HTMLButtonElement;
+    tableEl: HTMLTableElement;
+    citeEl: HTMLElement;
+    chartInstance: any | null;
+    lastSpec: ChartSpec | null;
+    lastRows: DataRow[];
+    lastCSV: string;
+    trace: TraceEvent[];
+    files: Record<string, string>;
+    startTimes: number[];
+    question: string;
+  }
+
+  function q<T extends HTMLElement = HTMLElement>(root: HTMLElement, selector: string): T {
+    const el = root.querySelector(selector);
+    if (!el) throw new Error('Turn block missing expected element: ' + selector);
+    return el as T;
+  }
+
+  function createTurnBlock(): TurnBlock {
+    const fragment = turnTemplate.content.cloneNode(true) as DocumentFragment;
+    const root = fragment.querySelector('.ch-turn') as HTMLElement;
+    threadEl.appendChild(fragment);
+
+    const tb: TurnBlock = {
+      root,
+      statusRow: q(root, '.ch-status'),
+      statusDot: q(root, '.ch-status-dot'),
+      statusMsg: q(root, '.ch-status-msg'),
+      panel: q(root, '.ch-panel'),
+      railModelEl: q(root, '.ch-rail-model'),
+      traceEl: q(root, '.ch-trace'),
+      renderFlag: q(root, '.ch-render-flag'),
+      railTotal: q(root, '.ch-rail-total'),
+      canvasEl: q(root, '.ch-canvas'),
+      chartEl: q(root, '.ch-chart'),
+      chartTitle: q(root, '.ch-chart-title'),
+      answerSection: q(root, '.ch-answer'),
+      findingEl: q(root, '.ch-finding'),
+      confEl: q(root, '.ch-conf'),
+      confLegend: q(root, '.ch-conf-legend'),
+      dataDetails: q<HTMLDetailsElement>(root, '.ch-data'),
+      dataCount: q(root, '.ch-data-count'),
+      csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
+      tableEl: q<HTMLTableElement>(root, '.ch-table'),
+      citeEl: q(root, '.ch-cite'),
+      chartInstance: null,
+      lastSpec: null,
+      lastRows: [],
+      lastCSV: '',
+      trace: [],
+      files: {},
+      startTimes: [],
+      question: '',
+    };
+
+    tb.csvBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const blob = new Blob([tb.lastCSV], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'chitti-data.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    return tb;
+  }
 
   const SESSION_KEY = 'chitti:key';
   const SESSION_PROVIDER = 'chitti:provider';
@@ -434,12 +510,11 @@ const PRESETS = [
   });
 
   // ── Status helpers ─────────────────────────────────────────────────────
-  function setStatus(kind: 'loading' | 'ok' | 'error', msg: string) {
-    statusRow.style.display = 'flex';
-    statusDot.className = 'ch-status-dot ch-status-' + kind;
-    statusMsg.textContent = msg;
+  function setStatus(tb: TurnBlock, kind: 'loading' | 'ok' | 'error', msg: string) {
+    tb.statusRow.style.display = 'flex';
+    tb.statusDot.className = 'ch-status-dot ch-status-' + kind;
+    tb.statusMsg.textContent = msg;
   }
-  function hideStatus() { statusRow.style.display = 'none'; }
 
   // ── Trace rendering: a live timeline of the agent's tool calls ────────
   // Receipt-style: a real per-line timestamp (captured once, at the moment
@@ -447,15 +522,10 @@ const PRESETS = [
   // ('ch-trace-ok'), an amber glow on whichever single step is in flight
   // ('ch-trace-running'), and — only for the verify step, only on a pass —
   // an ink-stamped VERIFIED badge.
-  const startTimes: number[] = [];
-  // Latest trace snapshot, kept alongside the DOM render so the post-run
-  // running-total line can sum per-step tokens without re-deriving them
-  // from the DOM.
-  let currentTrace: TraceEvent[] = [];
-  // Latest VFS snapshot (path -> content), kept so a write_file trace row
-  // can inline-expand its own file content instead of duplicating it in a
-  // separate "workspace" list below the trace.
-  let currentFiles: Record<string, string> = {};
+  //
+  // startTimes and the latest trace/files snapshot used to be module-level
+  // singletons; they now live on the TurnBlock passed in (tb.startTimes,
+  // tb.trace, tb.files) so each turn keeps its own.
 
   // HH:MM:SS.d, tenths precision, matching the spec's receipt timestamp style.
   function formatTs(ts: number): string {
@@ -473,21 +543,21 @@ const PRESETS = [
     return val + ' tok';
   }
 
-  function renderTrace(events: TraceEvent[]) {
-    panel.style.display = 'grid';
-    currentTrace = events;
+  function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
+    tb.panel.style.display = 'grid';
+    tb.trace = events;
     const stick =
-      traceEl.scrollHeight - traceEl.scrollTop - traceEl.clientHeight < 40;
+      tb.traceEl.scrollHeight - tb.traceEl.scrollTop - tb.traceEl.clientHeight < 40;
     // Preserve open/closed state of any inline-expanded file across re-renders
     // (renderTrace re-runs on every trace AND every file event).
     const openPaths = new Set(
-      Array.from(traceEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
+      Array.from(tb.traceEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
         (d) => d.dataset.path || ''
       )
     );
-    traceEl.innerHTML = '';
+    tb.traceEl.innerHTML = '';
     events.forEach((e, i) => {
-      if (startTimes[i] === undefined) startTimes[i] = performance.now();
+      if (tb.startTimes[i] === undefined) tb.startTimes[i] = performance.now();
 
       // Reasoning is a synthetic, already-settled event (see agent.ts) — not
       // a tool call, so no dot/glow/duration/token treatment implying one,
@@ -499,7 +569,7 @@ const PRESETS = [
         const rrow = document.createElement('p');
         rrow.className = 'ch-trace-thinking';
         rrow.textContent = e.detail || '';
-        traceEl.appendChild(rrow);
+        tb.traceEl.appendChild(rrow);
         return;
       }
 
@@ -524,7 +594,7 @@ const PRESETS = [
       // becomes expandable in place — no separate "workspace" list
       // duplicating the same content elsewhere on the page.
       const filePath = (e.tool === 'write_file' || e.tool === 'read_file') ? e.argSummary : '';
-      const fileContent = filePath ? currentFiles[filePath] : undefined;
+      const fileContent = filePath ? tb.files[filePath] : undefined;
       if (e.argSummary && fileContent === undefined) {
         const sep = document.createElement('span');
         sep.className = 'ch-trace-sep';
@@ -586,7 +656,7 @@ const PRESETS = [
       const meta = document.createElement('span');
       meta.className = 'ch-trace-meta';
       if (e.status === 'ok') {
-        const ms = Math.round(performance.now() - startTimes[i]);
+        const ms = Math.round(performance.now() - tb.startTimes[i]);
         meta.textContent = ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's';
       } else if (e.status === 'error') {
         meta.textContent = 'error';
@@ -605,9 +675,9 @@ const PRESETS = [
       row.appendChild(dot);
       row.appendChild(body);
       row.appendChild(metaCol);
-      traceEl.appendChild(row);
+      tb.traceEl.appendChild(row);
     });
-    if (stick) traceEl.scrollTop = traceEl.scrollHeight;
+    if (stick) tb.traceEl.scrollTop = tb.traceEl.scrollHeight;
   }
 
   // ── Virtual-FS rendering ───────────────────────────────────────────────
@@ -621,16 +691,18 @@ const PRESETS = [
   // second section below the trace. This just keeps the latest VFS snapshot
   // around for renderTrace to read from, and re-renders the trace so a file
   // written moments after its trace row appeared becomes expandable.
-  function renderFiles(files: Record<string, string>) {
-    panel.style.display = 'grid';
-    currentFiles = files;
-    renderTrace(currentTrace);
+  function renderFiles(tb: TurnBlock, files: Record<string, string>) {
+    tb.panel.style.display = 'grid';
+    tb.files = files;
+    renderTrace(tb, tb.trace);
   }
 
   // ── ECharts (dynamic CDN import, dark-theme aware) ─────────────────────
+  // The loaded module itself stays a true module-level singleton; it's a
+  // shared CDN import cache, not per-turn state. Each turn's own chart
+  // instance and its last-rendered spec live on the TurnBlock instead
+  // (tb.chartInstance, tb.lastSpec).
   let echartsMod: any = null;
-  let chartInstance: any = null;
-  let lastSpec: ChartSpec | null = null;
 
   async function loadECharts() {
     if (echartsMod) return echartsMod;
@@ -777,11 +849,11 @@ const PRESETS = [
     };
   }
 
-  async function renderChart(spec: ChartSpec) {
-    lastSpec = spec;
-    canvasEl.classList.remove('ch-canvas-pending');
-    panel.classList.remove('ch-panel-pending');
-    renderFlag.style.display = 'inline';
+  async function renderChart(tb: TurnBlock, spec: ChartSpec) {
+    tb.lastSpec = spec;
+    tb.canvasEl.classList.remove('ch-canvas-pending');
+    tb.panel.classList.remove('ch-panel-pending');
+    tb.renderFlag.style.display = 'inline';
     // NOTE: this used to also do `chartWrap.style.display = 'block'` — a
     // leftover from before the chart moved into `.ch-canvas` (task 1), back
     // when `#ch-chart-wrap` literally wrapped the chart itself. That id now
@@ -792,34 +864,40 @@ const PRESETS = [
     // (`.ch-panel`, set to display:grid when the run starts) — the chart
     // itself needs no separate reveal.
     const echarts = await loadECharts();
-    if (chartInstance) chartInstance.dispose();
-    chartInstance = echarts.init(chartEl, null, { renderer: 'canvas' });
-    chartInstance.setOption(buildOption(spec));
-    chartTitle.textContent = spec.title;
-    renderFlag.style.display = 'none';
+    if (tb.chartInstance) tb.chartInstance.dispose();
+    tb.chartInstance = echarts.init(tb.chartEl, null, { renderer: 'canvas' });
+    tb.chartInstance.setOption(buildOption(spec));
+    tb.chartTitle.textContent = spec.title;
+    tb.renderFlag.style.display = 'none';
   }
 
-  // Re-theme the chart if the site theme toggles.
+  // Turn blocks whose chart is still "live" (wired to theme/resize), i.e.
+  // not yet superseded by a later turn. Task 5 removes an entry from this
+  // array when that turn's chart is frozen.
+  const liveChartTurns: TurnBlock[] = [];
+
+  // Re-theme every live turn's chart if the site theme toggles.
   const themeObserver = new MutationObserver(() => {
-    if (chartInstance && lastSpec) {
-      chartInstance.dispose();
-      chartInstance = echartsMod.init(chartEl, null, { renderer: 'canvas' });
-      chartInstance.setOption(buildOption(lastSpec));
+    for (const tb of liveChartTurns) {
+      if (tb.chartInstance && tb.lastSpec) {
+        tb.chartInstance.dispose();
+        tb.chartInstance = echartsMod.init(tb.chartEl, null, { renderer: 'canvas' });
+        tb.chartInstance.setOption(buildOption(tb.lastSpec));
+      }
     }
   });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+  window.addEventListener('resize', () => {
+    for (const tb of liveChartTurns) tb.chartInstance?.resize();
+  });
 
   // ── Data table + CSV ───────────────────────────────────────────────────
-  let lastRows: DataRow[] = [];
-  let lastCSV = '';
-
-  function renderTable(rows: DataRow[], csv: string) {
-    lastRows = rows;
-    lastCSV = csv;
-    if (!rows.length) { dataDetails.style.display = 'none'; return; }
-    dataDetails.style.display = 'block';
-    dataCount.textContent = String(rows.length);
+  function renderTable(tb: TurnBlock, rows: DataRow[], csv: string) {
+    tb.lastRows = rows;
+    tb.lastCSV = csv;
+    if (!rows.length) { tb.dataDetails.style.display = 'none'; return; }
+    tb.dataDetails.style.display = 'block';
+    tb.dataCount.textContent = String(rows.length);
     const head = '<thead><tr><th>Country</th><th>ISO3</th><th>Year</th><th>Value</th></tr></thead>';
     const shown = rows.slice(0, 500);
     const body =
@@ -834,20 +912,8 @@ const PRESETS = [
         .join('') +
       (rows.length > 500 ? `<tr><td colspan="4" class="ch-table-more">… ${rows.length - 500} more rows (in CSV)</td></tr>` : '') +
       '</tbody>';
-    tableEl.innerHTML = head + body;
+    tb.tableEl.innerHTML = head + body;
   }
-
-  csvBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const blob = new Blob([lastCSV], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'chitti-data.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  });
 
   function esc(s: string): string {
     return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
@@ -869,13 +935,13 @@ const PRESETS = [
   // reasonable rule of thumb for "the model wasn't very sure of this token."
   const LOW_CONFIDENCE_THRESHOLD = -1.5;
 
-  function renderFinding(text: string, logprobs?: WordLogprob[]) {
-    findingEl.textContent = '';
+  function renderFinding(tb: TurnBlock, text: string, logprobs?: WordLogprob[]) {
+    tb.findingEl.textContent = '';
     if (!text) return;
     if (!logprobs || !logprobs.length) {
       // No confidence signal available for this run — plain text, no legend.
-      findingEl.textContent = text;
-      confLegend.style.display = 'none';
+      tb.findingEl.textContent = text;
+      tb.confLegend.style.display = 'none';
       return;
     }
     // Confidence data is present: render word-by-word so low-confidence
@@ -888,9 +954,9 @@ const PRESETS = [
         span.className = 'ch-conf-word ch-conf-word-lo';
         span.title = `logprob ${wl.logprob.toFixed(2)}`;
       }
-      findingEl.appendChild(span);
+      tb.findingEl.appendChild(span);
     });
-    confLegend.style.display = 'flex';
+    tb.confLegend.style.display = 'flex';
   }
 
   // ── Running token + cost total ──────────────────────────────────────────
@@ -899,25 +965,25 @@ const PRESETS = [
   // own per-step `tokens`, which agent.ts already attributes one turn's
   // usage to) with the run-level `estimateCost` dollar figure computed by
   // agent.ts and returned once as `out.cost`.
-  function renderRunningTotal(trace: TraceEvent[], cost: number) {
+  function renderRunningTotal(tb: TurnBlock, trace: TraceEvent[], cost: number) {
     const totalTokens = trace.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
-    if (!totalTokens && !cost) { railTotal.style.display = 'none'; return; }
-    railTotal.style.display = 'block';
+    if (!totalTokens && !cost) { tb.railTotal.style.display = 'none'; return; }
+    tb.railTotal.style.display = 'block';
     const costTxt = cost > 0 ? `$${cost.toFixed(4)}` : 'free';
-    railTotal.textContent = `${formatTokens(totalTokens)} · ${costTxt}`;
+    tb.railTotal.textContent = `${formatTokens(totalTokens)} · ${costTxt}`;
   }
 
   // ── Citations ──────────────────────────────────────────────────────────
-  function renderCitations(indicators: { id: string; name: string }[]) {
-    if (!indicators.length) { citeEl.style.display = 'none'; return; }
-    citeEl.style.display = 'block';
+  function renderCitations(tb: TurnBlock, indicators: { id: string; name: string }[]) {
+    if (!indicators.length) { tb.citeEl.style.display = 'none'; return; }
+    tb.citeEl.style.display = 'block';
     const iso = new Date().toISOString().slice(0, 10);
     const parts = indicators.map((ind) => {
       const name = INDICATOR_MAP[ind.id] || ind.name || ind.id;
       const url = 'https://data.worldbank.org/indicator/' + encodeURIComponent(ind.id);
       return `<a href="${url}" target="_blank" rel="noopener noreferrer">${esc(ind.id)} — ${esc(name)}</a>`;
     });
-    citeEl.innerHTML =
+    tb.citeEl.innerHTML =
       'Data from <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data</a> · Indicator: ' +
       parts.join(' · ') +
       ' · Retrieved ' + iso;
