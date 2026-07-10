@@ -75,42 +75,13 @@ const PRESETS = [
         <!-- The user's question, shown chat-style at the top of the turn. -->
         <p class="ch-turn-q" style="display:none"></p>
 
-        <!-- Status line -->
+        <!-- Status line (loading/error only; success reads from the answer) -->
         <div class="ch-status" style="display:none">
           <span class="ch-status-dot"></span>
           <span class="ch-status-msg">Planning…</span>
         </div>
 
-        <!-- The agent at work: receipt-style trace rail (left) + canvas (right) -->
-        <section class="ch-panel" style="display:none">
-          <!-- Left: the receipt. Torn top edge, perforated sections, terse trace. -->
-          <div class="ch-rail">
-            <div class="ch-rail-tear" aria-hidden="true"></div>
-            <div class="ch-rail-body">
-              <div class="ch-rail-head">
-                <span class="ch-rail-model">agent</span>
-                <span class="ch-rail-sub">every tool call, live</span>
-                <span class="ch-render-flag" style="display:none">Rendering…</span>
-              </div>
-              <div class="ch-trace"></div>
-              <div class="ch-rail-total" style="display:none"></div>
-            </div>
-          </div>
-
-          <!-- Right: the canvas. Chart builds here, live, full height. Starts
-               collapsed (ch-canvas-pending) until render_chart actually mounts a
-               chart — no point holding open a tall empty box while the agent is
-               still planning/fetching. -->
-          <div class="ch-canvas ch-canvas-pending">
-            <p class="ch-canvas-wait">waiting for a chart…</p>
-            <figure class="ch-chart-card">
-              <figcaption class="ch-chart-title"></figcaption>
-              <div class="ch-chart"></div>
-            </figure>
-          </div>
-        </section>
-
-        <!-- Answer: finding first, then the receipts -->
+        <!-- Answer first: the one-line finding is the headline of the turn. -->
         <section class="ch-answer" style="display:none">
           <p class="ch-finding"></p>
           <div class="ch-conf-legend" style="display:none">
@@ -118,7 +89,22 @@ const PRESETS = [
             <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
           </div>
           <span class="ch-conf" style="display:none">confidence: low</span>
+        </section>
 
+        <!-- Chart: full width, mounts live while the agent works. Hidden
+             (ch-canvas-pending) until render_chart actually produces one. -->
+        <div class="ch-canvas ch-canvas-pending">
+          <figure class="ch-chart-card">
+            <figcaption class="ch-chart-head">
+              <span class="ch-chart-title"></span>
+              <span class="ch-chart-unit"></span>
+            </figcaption>
+            <div class="ch-chart"></div>
+          </figure>
+        </div>
+
+        <!-- Supporting evidence: raw data + citations, below the chart. -->
+        <section class="ch-meta" style="display:none">
           <details class="ch-data" style="display:none">
             <summary>Raw data (<span class="ch-data-count">0</span> rows) · <button type="button" class="ch-csv">Download CSV</button></summary>
             <div class="ch-table-scroll">
@@ -128,6 +114,24 @@ const PRESETS = [
 
           <div class="ch-cite" style="display:none"></div>
         </section>
+
+        <!-- The agent's work, collapsed to a single line. The summary shows
+             the live step while running, then the step/token/cost totals;
+             expanding reveals the full receipt-style trace. -->
+        <details class="ch-panel" style="display:none">
+          <summary class="ch-panel-sum">
+            <span class="ch-panel-dot"></span>
+            <span class="ch-panel-label">Working…</span>
+            <span class="ch-render-flag" style="display:none">rendering…</span>
+            <span class="ch-panel-meta">
+              <span class="ch-rail-total" style="display:none"></span>
+              <span class="ch-rail-model"></span>
+            </span>
+          </summary>
+          <div class="ch-rail-body">
+            <div class="ch-trace"></div>
+          </div>
+        </details>
       </div>
     </template>
 
@@ -288,7 +292,9 @@ const PRESETS = [
     statusRow: HTMLElement;
     statusDot: HTMLElement;
     statusMsg: HTMLElement;
-    panel: HTMLElement;
+    panel: HTMLDetailsElement;
+    panelDot: HTMLElement;
+    panelLabel: HTMLElement;
     railModelEl: HTMLElement;
     traceEl: HTMLElement;
     renderFlag: HTMLElement;
@@ -296,6 +302,8 @@ const PRESETS = [
     canvasEl: HTMLElement;
     chartEl: HTMLElement;
     chartTitle: HTMLElement;
+    chartUnit: HTMLElement;
+    metaSection: HTMLElement;
     answerSection: HTMLElement;
     findingEl: HTMLElement;
     confEl: HTMLElement;
@@ -332,7 +340,9 @@ const PRESETS = [
       statusRow: q(root, '.ch-status'),
       statusDot: q(root, '.ch-status-dot'),
       statusMsg: q(root, '.ch-status-msg'),
-      panel: q(root, '.ch-panel'),
+      panel: q<HTMLDetailsElement>(root, '.ch-panel'),
+      panelDot: q(root, '.ch-panel-dot'),
+      panelLabel: q(root, '.ch-panel-label'),
       railModelEl: q(root, '.ch-rail-model'),
       traceEl: q(root, '.ch-trace'),
       renderFlag: q(root, '.ch-render-flag'),
@@ -340,6 +350,8 @@ const PRESETS = [
       canvasEl: q(root, '.ch-canvas'),
       chartEl: q(root, '.ch-chart'),
       chartTitle: q(root, '.ch-chart-title'),
+      chartUnit: q(root, '.ch-chart-unit'),
+      metaSection: q(root, '.ch-meta'),
       answerSection: q(root, '.ch-answer'),
       findingEl: q(root, '.ch-finding'),
       confEl: q(root, '.ch-conf'),
@@ -579,8 +591,11 @@ const PRESETS = [
   });
 
   // ── Status helpers ─────────────────────────────────────────────────────
+  // A successful run reads from the answer itself; the status line only
+  // carries in-flight and error states, so it hides on 'ok' instead of
+  // leaving a redundant "Done" chip above the finding.
   function setStatus(tb: TurnBlock, kind: 'loading' | 'ok' | 'error', msg: string) {
-    tb.statusRow.style.display = 'flex';
+    tb.statusRow.style.display = kind === 'ok' ? 'none' : 'flex';
     tb.statusDot.className = 'ch-status-dot ch-status-' + kind;
     tb.statusMsg.textContent = msg;
   }
@@ -612,8 +627,30 @@ const PRESETS = [
     return val + ' tok';
   }
 
+  // Keep the collapsed <details> summary honest: while a step is in flight it
+  // names that step; once the run settles it becomes a terse step count. The
+  // token/cost totals land separately via renderRunningTotal().
+  function updatePanelSummary(tb: TurnBlock, events: TraceEvent[]) {
+    const steps = events.filter((e) => e.tool !== 'reasoning');
+    const runningEv = steps.find((e) => e.status === 'running');
+    const hasError = steps.some((e) => e.status === 'error');
+    if (!steps.length) {
+      // Run just started, nothing traced yet.
+      tb.panelLabel.textContent = 'Working…';
+      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-running';
+    } else if (runningEv) {
+      tb.panelLabel.textContent = runningEv.tool + '…';
+      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-running';
+    } else {
+      tb.panelLabel.textContent =
+        'How it got this · ' + steps.length + (steps.length === 1 ? ' step' : ' steps');
+      tb.panelDot.className = 'ch-panel-dot' + (hasError ? ' ch-panel-dot-error' : ' ch-panel-dot-ok');
+    }
+  }
+
   function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
-    tb.panel.style.display = 'grid';
+    tb.panel.style.display = 'block';
+    updatePanelSummary(tb, events);
     tb.trace = events;
     const stick =
       tb.traceEl.scrollHeight - tb.traceEl.scrollTop - tb.traceEl.clientHeight < 40;
@@ -761,7 +798,7 @@ const PRESETS = [
   // around for renderTrace to read from, and re-renders the trace so a file
   // written moments after its trace row appeared becomes expandable.
   function renderFiles(tb: TurnBlock, files: Record<string, string>) {
-    tb.panel.style.display = 'grid';
+    tb.panel.style.display = 'block';
     tb.files = files;
     renderTrace(tb, tb.trace);
   }
@@ -796,15 +833,13 @@ const PRESETS = [
     const palette = [signal, muted, fg, '#6b8ab8', '#5fa97c', '#c0605a', '#9a7cc0', '#b8946b'];
 
     const baseText = { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
-    // Shared y-axis name styling. Positioned at the end (top) of the axis but
-    // pulled left so it doesn't sit directly under the legend row — the two
-    // were colliding when a scrollable multi-series legend and the default
-    // y-axis name label both rendered in the same top-left corner.
-    const yAxisName = { nameTextStyle: baseText, nameLocation: 'end' as const, nameGap: 16 };
-    // Extra top padding reserves a full row for the legend before the plot
-    // area starts, instead of the legend and y-axis name overlapping in the
-    // same ~28px band.
-    const grid = { left: 52, right: 24, top: 44, bottom: 44, containLabel: true };
+    // No y-axis `name` inside the canvas at all: long unit strings ("deaths
+    // per 1,000 live births") clipped against the container edges no matter
+    // where ECharts anchored them. The unit renders in the chart card's
+    // header instead (see renderChart / .ch-chart-unit).
+    // containLabel keeps rotated category labels and axis ticks inside the
+    // grid instead of spilling past the right/bottom edges.
+    const grid = { left: 12, right: 18, top: 40, bottom: 8, containLabel: true };
     const axisLine = { lineStyle: { color: faint } };
     const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
 
@@ -833,8 +868,8 @@ const PRESETS = [
         grid,
         legend,
         tooltip: { ...tooltip, trigger: 'item' as const },
-        xAxis: { type: 'value', name: spec.x_axis, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
-        yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
+        xAxis: { type: 'value', name: spec.x_axis, nameLocation: 'middle' as const, nameGap: 28, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
         series: spec.series.map((s) => ({
           name: s.name,
           type: 'scatter',
@@ -857,12 +892,13 @@ const PRESETS = [
         xAxis: {
           type: 'category',
           data: cats,
-          name: spec.x_axis,
-          nameTextStyle: baseText,
+          // No axis `name` for category bars — the categories are
+          // self-describing and the trailing name label was clipping at the
+          // container's right edge.
           axisLine,
           axisLabel: { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
         },
-        yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
         series: spec.series.map((s) => {
           const map = new Map(s.data.map(([x, y]) => [x, y]));
           return {
@@ -897,13 +933,11 @@ const PRESETS = [
       xAxis: {
         type: 'category',
         boundaryGap: false,
-        name: spec.x_axis,
-        nameTextStyle: baseText,
         axisLine,
         axisLabel: baseText,
         data: lineCats,
       },
-      yAxis: { type: 'value', name: spec.y_axis, ...yAxisName, axisLine, splitLine, axisLabel: baseText },
+      yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
       series: spec.series.map((s, i) => {
         const map = new Map(s.data.map(([x, y]) => [x, y]));
         return {
@@ -921,7 +955,6 @@ const PRESETS = [
   async function renderChart(tb: TurnBlock, spec: ChartSpec) {
     tb.lastSpec = spec;
     tb.canvasEl.classList.remove('ch-canvas-pending');
-    tb.panel.classList.remove('ch-panel-pending');
     tb.renderFlag.style.display = 'inline';
     // NOTE: this used to also do `chartWrap.style.display = 'block'` — a
     // leftover from before the chart moved into `.ch-canvas` (task 1), back
@@ -937,6 +970,11 @@ const PRESETS = [
     tb.chartInstance = echarts.init(tb.chartEl, null, { renderer: 'canvas' });
     tb.chartInstance.setOption(buildOption(spec));
     tb.chartTitle.textContent = spec.title;
+    // Unit/axis description lives in the card header, not as an ECharts
+    // y-axis `name` — long unit strings ("deaths per 1,000 live births")
+    // were clipping against the container's left edge when rendered inside
+    // the canvas.
+    tb.chartUnit.textContent = spec.y_axis || '';
     tb.renderFlag.style.display = 'none';
   }
 
@@ -1048,7 +1086,7 @@ const PRESETS = [
   function renderRunningTotal(tb: TurnBlock, trace: TraceEvent[], cost: number) {
     const totalTokens = trace.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
     if (!totalTokens && !cost) { tb.railTotal.style.display = 'none'; return; }
-    tb.railTotal.style.display = 'block';
+    tb.railTotal.style.display = 'inline';
     const costTxt = cost > 0 ? `$${cost.toFixed(4)}` : 'free';
     tb.railTotal.textContent = `${formatTokens(totalTokens)} · ${costTxt}`;
   }
@@ -1110,9 +1148,8 @@ const PRESETS = [
     allTurns.push(tb);
     liveChartTurns.push(tb);
     tb.canvasEl.classList.add('ch-canvas-pending');
-    tb.panel.classList.add('ch-panel-pending');
     setStatus(tb, 'loading', 'Planning…');
-    tb.panel.style.display = 'grid';
+    tb.panel.style.display = 'block';
     // The conversation has started: hide the setup panel (chips + BYOK) and
     // reveal the "+ new conversation" control. The bottom composer is always
     // present and is the sole input.
@@ -1140,6 +1177,7 @@ const PRESETS = [
       if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
 
       tb.answerSection.style.display = 'block';
+      tb.metaSection.style.display = 'block';
 
       if (out.kind === 'chart' && !out.chartSpec) {
         tb.findingEl.classList.add('ch-finding-empty');
@@ -1218,13 +1256,14 @@ const PRESETS = [
 </script>
 
 <style>
-  /* Break out of the 700px article container — the working state is a live
-     split-view canvas, not prose, so it should use most of the viewport on
-     wide screens rather than stay capped near article-reading width. The
+  /* Break out of the 700px article container, but only as far as a readable
+     single-column app needs — with the trace collapsed there is no
+     side-by-side split anymore, so ~1000px keeps the finding line readable
+     and the chart generous without stranding content in a huge void. The
      site's shared layout wraps every page in `div.container` (max-width:
      700px); `<main>` and `.ch` itself have no width cap of their own, so the
      div is the actual constraint to override. */
-  :global(div.container:has(.ch)) { max-width: min(1440px, 92vw) !important; }
+  :global(div.container:has(.ch)) { max-width: min(1000px, 94vw) !important; }
   /* This is a full-height app view, not an article. Suppress the site footer
      here so its social links don't float mid-page above the composer, and let
      the container use the full viewport height. */
@@ -1243,12 +1282,13 @@ const PRESETS = [
     flex-direction: column;
     min-height: 0;
   }
-  /* One font for the whole app: JetBrains Mono. Chitti reads as a single
-     consistent monospaced surface (terminal/receipt feel), no serif/sans mix.
-     !important so it wins over every per-element serif/sans rule regardless of
-     source order; :global so it also reaches JS-created trace/chart nodes that
-     never get Astro's scope attribute. */
-  .ch, .ch :global(*) { font-family: var(--font-mono) !important; }
+  /* Two-register type system, matching the rest of the site: prose (the
+     question, the finding, the welcome copy) in the site's sans/serif so
+     answers read like writing, and machinery (trace, badges, tables, axis
+     labels, citations) in mono so the instrument-panel feel survives where
+     it belongs. The old blanket `* { mono !important }` rule made the
+     headline answer as hard to read as a log line — removed; every element
+     below declares its own family. */
   .ch-thread { display: flex; flex-direction: column; gap: var(--space-lg); }
   /* The thread takes the space between the header and the composer, and scrolls
      within itself so the composer stays put and the header stays visible. */
@@ -1607,88 +1647,74 @@ const PRESETS = [
   .ch-status-ok { background: var(--success); }
   .ch-status-error { background: var(--danger); }
 
-  /* ── Agent-canvas split view ──────────────────────────────────────────
-     Left: the receipt (trace rail, ~35%). Right: the canvas (chart, ~65%).
-     Task 2 (live-trace rendering) and task 3 (final-answer/zero-result
-     states) build on top of this shell — this pass only lays out the
-     structure, tokens, and receipt paper styling. */
+  /* ── Agent trace: one collapsed line, expandable ──────────────────────
+     The trace no longer competes with the answer for space. Collapsed, it
+     is a single quiet row: status dot, live step name (or step count once
+     done), and model/token/cost metadata right-aligned. Open, it reveals
+     the full receipt-style timeline below. */
   .ch-panel {
-    display: grid;
-    grid-template-columns: minmax(280px, 38%) minmax(0, 1fr);
-    gap: var(--space-md);
     margin-bottom: var(--space-lg);
-    align-items: start;
-    animation: fadeIn 0.3s var(--ease);
-  }
-  /* While there's no chart yet, give the rail the full width instead of
-     leaving the collapsed canvas box's freed-up space idle next to it — the
-     rail is where the actual activity (reasoning, tool calls) is happening.
-     Once render_chart mounts something, back to the normal split. */
-  .ch-panel.ch-panel-pending {
-    grid-template-columns: 1fr;
-  }
-  .ch-panel.ch-panel-pending .ch-canvas {
-    display: none;
-  }
-
-  /* ── Receipt rail (left) ──────────────────────────────────────────── */
-  .ch-rail {
-    position: relative;
-    background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-md);
-    min-width: 0;
-    overflow: hidden;
+    background: var(--bg-elevated);
+    animation: fadeIn 0.3s var(--ease);
   }
-  /* Torn/perforated top edge, as if torn from a receipt roll. Built with a
-     repeating triangular gradient mask rather than an SVG import, so it's
-     one CSS rule to maintain and it recolors for free with the bg token. */
-  .ch-rail-tear {
-    height: 10px;
-    background: var(--bg);
-    -webkit-mask-image: repeating-linear-gradient(
-      -45deg,
-      transparent 0 4px,
-      #000 4px 8px
-    );
-    mask-image: repeating-linear-gradient(
-      -45deg,
-      transparent 0 4px,
-      #000 4px 8px
-    );
-  }
-  .ch-rail-body {
-    padding: var(--space-sm) var(--space-md) var(--space-md);
-  }
-  .ch-rail-head {
+  .ch-panel-sum {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 9px var(--space-md);
+    cursor: pointer;
+    list-style: none;
     font-family: var(--font-mono);
     font-size: var(--text-label);
     color: var(--fg-muted);
-    padding-bottom: 8px;
-    margin-bottom: 10px;
-    border-bottom: 1px dashed var(--fg-faint);
+    min-width: 0;
   }
-  .ch-rail-model {
+  .ch-panel-sum::-webkit-details-marker { display: none; }
+  .ch-panel-sum::before { content: '▸'; color: var(--fg-muted); font-size: 0.85em; flex-shrink: 0; }
+  .ch-panel[open] .ch-panel-sum::before { content: '▾'; }
+  .ch-panel-sum:hover { color: var(--fg); }
+  .ch-panel-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .ch-panel-dot-running { background: var(--signal); animation: pulse 1.2s ease-in-out infinite; }
+  .ch-panel-dot-ok { background: var(--success); }
+  .ch-panel-dot-error { background: var(--danger); }
+  .ch-panel-label {
     color: var(--fg);
-    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
-  .ch-rail-sub {
-    color: var(--fg-muted);
+  .ch-panel-meta {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
     font-size: var(--text-tag);
-    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ch-rail-model { letter-spacing: 0.02em; }
+  .ch-rail-body {
+    padding: var(--space-sm) var(--space-md) var(--space-md);
+    border-top: 1px dashed var(--fg-faint);
   }
   .ch-render-flag {
-    margin-left: auto;
     color: var(--signal);
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    text-transform: none;
     letter-spacing: 0.02em;
     animation: pulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
   }
 
   /* Trace timeline: a rail with one dot per tool call, receipt line-items.
@@ -1780,12 +1806,12 @@ const PRESETS = [
     opacity: 0.8;
   }
   :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
-  /* Completed steps strike through and fade, per the receipt spec. */
+  /* Completed steps settle quietly — dimmed, not struck through. The old
+     strike-through made every finished line read as an error/cancellation
+     and left the whole rail illegible once a run completed. */
   :global(.ch-trace-ok .ch-trace-name),
   :global(.ch-trace-ok .ch-trace-arg) {
-    text-decoration: line-through;
-    text-decoration-color: var(--fg-faint);
-    opacity: 0.4;
+    opacity: 0.65;
   }
   /* Error/retry line-items: restyled to read as a torn/crossed-out receipt
      entry — a void line-item — rather than a generic red banner. The
@@ -1913,67 +1939,32 @@ const PRESETS = [
     line-height: 1.5;
   }
 
-  /* Running token + cost total — the receipt's own totals line, a dashed
-     rule above it per the perforation motif, right-aligned like a real
-     receipt subtotal. Rendered by renderRunningTotal() once the run ends. */
+  /* Token + cost total, inline in the collapsed summary's metadata slot. */
   .ch-rail-total {
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px dashed var(--fg-faint);
     font-family: var(--font-mono);
-    font-size: var(--text-label);
+    font-size: var(--text-tag);
     color: var(--fg);
-    text-align: right;
     letter-spacing: 0.02em;
   }
 
-  /* ── Canvas (right) ───────────────────────────────────────────────────
-     The chart mounts here — same #ch-chart element the existing ECharts
-     logic already targets, just relocated so it builds live beside the
-     rail instead of appearing only after the run completes. Collapsed
-     (ch-canvas-pending) until render_chart actually mounts something —
-     otherwise the panel holds open a tall empty box for the whole
-     plan/fetch phase, which reads as broken/dead space next to the rail. */
-  .ch-canvas {
-    min-width: 0;
-    min-height: 340px;
-  }
-  .ch-canvas-wait {
-    display: none;
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    text-align: center;
-    padding: var(--space-lg) 0;
-  }
-  .ch-canvas.ch-canvas-pending {
-    min-height: 0;
-    background: var(--bg-elevated);
-    border: 1px dashed var(--fg-faint);
-    border-radius: var(--radius-md);
-  }
-  .ch-canvas.ch-canvas-pending .ch-canvas-wait { display: block; }
-  .ch-canvas.ch-canvas-pending .ch-chart-card { display: none; }
-  .ch-canvas .ch-chart-card {
-    height: 100%;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .ch-canvas .ch-chart {
-    flex: 1;
-    min-height: 340px;
-  }
+  /* ── Chart canvas ─────────────────────────────────────────────────────
+     Full width of the column, above the raw data and citations. Hidden
+     entirely until render_chart mounts something — no placeholder box. */
+  .ch-canvas { min-width: 0; margin-bottom: var(--space-md); }
+  .ch-canvas.ch-canvas-pending { display: none; }
+  .ch-canvas .ch-chart-card { margin: 0; }
 
   /* ── Answer ── */
-  .ch-answer { margin-bottom: var(--space-lg); animation: fadeIn 0.3s var(--ease); }
+  .ch-answer { margin-bottom: var(--space-md); animation: fadeIn 0.3s var(--ease); }
+  .ch-meta { margin-bottom: var(--space-md); animation: fadeIn 0.3s var(--ease); }
   .ch-finding {
     font-family: var(--font-sans);
-    font-size: var(--text-section);
+    font-size: var(--text-body-lg);
+    font-weight: 450;
     color: var(--fg);
-    line-height: 1.45;
+    line-height: 1.6;
     margin: 0 0 6px;
-    max-width: 780px;
+    max-width: 68ch;
   }
   .ch-finding:empty { display: none; }
   /* Zero-result closing line: same slot/typography as a normal finding, but
@@ -2032,17 +2023,33 @@ const PRESETS = [
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-md);
-    padding: 10px 12px 12px;
+    padding: 12px 14px 14px;
+  }
+  /* Card header: title on the left, unit/axis description right-aligned.
+     The unit used to be an ECharts y-axis name that clipped off-canvas —
+     it lives here now, always fully visible. */
+  .ch-chart-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 2px 4px 10px;
   }
   .ch-chart-title {
     font-family: var(--font-mono);
-    font-size: var(--text-tag);
+    font-size: var(--text-label);
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-    padding: 2px 4px 8px;
+    color: var(--fg);
   }
-  .ch-chart { width: 100%; height: 400px; }
+  .ch-chart-unit {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  .ch-chart-unit:empty { display: none; }
+  .ch-chart { width: 100%; height: 380px; }
 
   /* ── Data table ── */
   .ch-data {
@@ -2113,7 +2120,7 @@ const PRESETS = [
 
   /* ── Responsive ── */
   @media (max-width: 700px) {
-    .ch-panel { grid-template-columns: 1fr; }
+    .ch-panel-meta { display: none; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
     .ch-field { min-width: 0; }
     .ch-byok-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
