@@ -237,33 +237,39 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     }
 
     async function agentPass(critique?: string): Promise<void> {
-      if (turnCount > 1) {
-        const chartSummary = state.chartSpec
-          ? `${state.chartSpec.type} chart "${state.chartSpec.title}" with series: ${state.chartSpec.series.map((s) => s.name).join(', ')}`
-          : 'none';
-        messages.push({
-          role: 'user',
-          content:
-            `You already have data from earlier in this conversation:\n${summarizeRows(state.rows)}\n\n` +
-            `Current chart: ${chartSummary}.\n\n` +
-            'Do NOT call search_indicators or fetch tools again unless this question needs data ' +
-            "you don't have (a new country, indicator, or year range not already fetched).\n" +
-            'If this question needs a different chart from the SAME data (a new chart type, a ' +
-            're-ranked/filtered/re-aggregated view), you MUST call execute_js again against the ' +
-            'existing rows to (re-)derive the exact values before calling render_chart — the ' +
-            'summary above is a compressed preview (first year, last year, count) for your own ' +
-            'orientation only, never a source of chart data. Never call render_chart from the ' +
-            'summary directly.\n' +
-            'If this question just asks you to explain, describe, or interpret the data in words, ' +
-            'call finish_explanation with your answer — do not call render_chart at all.',
-        });
-      }
-      messages.push({ role: 'user', content: question });
+      // On a verifier-FAIL retry (critique set), the first pass already pushed
+      // the turn addendum and the question onto the shared messages array, so
+      // append only the critique. Re-pushing them would duplicate the question
+      // (and the large turn-2+ reminder) in the session for the rest of the run.
+      // On the first pass (no critique), push the addendum (turn 2+) + question.
       if (critique) {
         messages.push({
           role: 'user',
           content: 'A previous attempt was judged insufficient. Fix this: ' + critique,
         });
+      } else {
+        if (turnCount > 1) {
+          const chartSummary = state.chartSpec
+            ? `${state.chartSpec.type} chart "${state.chartSpec.title}" with series: ${state.chartSpec.series.map((s) => s.name).join(', ')}`
+            : 'none';
+          messages.push({
+            role: 'user',
+            content:
+              `You already have data from earlier in this conversation:\n${summarizeRows(state.rows)}\n\n` +
+              `Current chart: ${chartSummary}.\n\n` +
+              'Do NOT call search_indicators or fetch tools again unless this question needs data ' +
+              "you don't have (a new country, indicator, or year range not already fetched).\n" +
+              'If this question needs a different chart from the SAME data (a new chart type, a ' +
+              're-ranked/filtered/re-aggregated view), you MUST call execute_js again against the ' +
+              'existing rows to (re-)derive the exact values before calling render_chart — the ' +
+              'summary above is a compressed preview (first year, last year, count) for your own ' +
+              'orientation only, never a source of chart data. Never call render_chart from the ' +
+              'summary directly.\n' +
+              'If this question just asks you to explain, describe, or interpret the data in words, ' +
+              'call finish_explanation with your answer — do not call render_chart at all.',
+          });
+        }
+        messages.push({ role: 'user', content: question });
       }
 
       let calls = 0;

@@ -111,6 +111,61 @@ describe('explanation turns', () => {
   });
 });
 
+describe('verifier-fail retry', () => {
+  it('appends only the critique on retry, not a duplicate of the question', async () => {
+    const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+    mockComplete.mockReset();
+
+    // First pass: render a chart, then finish.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'r1', name: 'render_chart', arguments: { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] } }],
+      usage: { input: 10, output: 5 },
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'f1', name: 'finish', arguments: { one_line_finding: 'First attempt.' } }],
+      usage: { input: 10, output: 5 },
+    });
+    // Verify #1 FAILs, which triggers agentPass(critique) a second time.
+    mockComplete.mockResolvedValueOnce({
+      text: 'FAIL: chart type mismatched to the question.',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+    // Retry pass: model finishes again.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'f2', name: 'finish', arguments: { one_line_finding: 'Second attempt.' } }],
+      usage: { input: 10, output: 5 },
+    });
+    // Verify #2 passes.
+    mockComplete.mockResolvedValueOnce({
+      text: 'PASS: fixed.',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    await session.ask('Only question', cb);
+
+    // The retry model call is mock index 3 (0=render, 1=finish, 2=verify-fail, 3=retry).
+    const retryCallArgs = mockComplete.mock.calls[3];
+    const messagesArg = retryCallArgs[1] as { role: string; content: string }[];
+    const questionCopies = messagesArg.filter(
+      (m) => m.role === 'user' && m.content === 'Only question'
+    ).length;
+    // Before the dedup fix, the retry pass re-pushed the question, so it appeared twice.
+    expect(questionCopies).toBe(1);
+    // The critique from the failed verifier IS appended on retry.
+    const hasCritique = messagesArg.some(
+      (m) => m.role === 'user' && m.content.startsWith('A previous attempt was judged insufficient.')
+    );
+    expect(hasCritique).toBe(true);
+  });
+});
+
 describe('message trimming', () => {
   it('replaces a completed turn\'s tool-result messages with a short marker', async () => {
     const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;

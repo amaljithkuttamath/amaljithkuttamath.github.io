@@ -1175,6 +1175,14 @@ const PRESETS = [
 
   newConvoBtn.addEventListener('click', () => {
     session = null;
+    // The latest turn is never collapsed (collapse only runs on prior turns
+    // at submit), so its chart is still live here. Dispose before clearing the
+    // DOM so ECharts releases its global registry entry and resize listener,
+    // same teardown collapseTurn() does for superseded turns.
+    for (const tb of liveChartTurns) {
+      tb.chartInstance?.dispose();
+      tb.chartInstance = null;
+    }
     threadEl.innerHTML = '';
     allTurns.length = 0;
     liveChartTurns.length = 0;
