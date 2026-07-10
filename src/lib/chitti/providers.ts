@@ -388,16 +388,36 @@ async function callOpenAICompatible(
     headers['X-Title'] = 'Chitti';
   }
 
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const doFetch = () =>
+    fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
 
+  let resp = await doFetch();
   if (!resp.ok) {
     const errText = await resp.text();
-    const label = isRouter ? 'OpenRouter' : 'OpenAI';
-    throw new Error(label + ' ' + resp.status + ': ' + shortErr(errText));
+    // Free-tier upstreams behind OpenRouter fail transiently all the time —
+    // surfaced as 400 "Provider returned error", 429, or 5xx. One retry
+    // after a short pause rescues most of these; a genuine request-shape
+    // error will fail identically the second time and surface as before.
+    const transient =
+      resp.status === 429 ||
+      resp.status >= 500 ||
+      (resp.status === 400 && /provider returned error/i.test(errText));
+    if (transient) {
+      await new Promise((r) => setTimeout(r, 1200));
+      resp = await doFetch();
+      if (!resp.ok) {
+        const retryText = await resp.text();
+        const label = isRouter ? 'OpenRouter' : 'OpenAI';
+        throw new Error(label + ' ' + resp.status + ' (after retry): ' + shortErr(retryText));
+      }
+    } else {
+      const label = isRouter ? 'OpenRouter' : 'OpenAI';
+      throw new Error(label + ' ' + resp.status + ': ' + shortErr(errText));
+    }
   }
 
   const data = await resp.json();
@@ -542,7 +562,16 @@ function safeParse(s: string): Record<string, unknown> {
 function shortErr(raw: string): string {
   try {
     const j = JSON.parse(raw);
-    return j.error?.message ?? j.message ?? raw.slice(0, 200);
+    let msg: string = j.error?.message ?? j.message ?? raw.slice(0, 200);
+    // OpenRouter wraps the upstream provider's actual complaint in
+    // error.metadata.raw — without it, a passthrough failure reads as the
+    // useless "Provider returned error".
+    const meta = j.error?.metadata;
+    const detail = typeof meta?.raw === 'string' ? meta.raw : undefined;
+    if (detail && detail !== msg) {
+      msg += ' — ' + (meta.provider_name ? meta.provider_name + ': ' : '') + detail.slice(0, 300);
+    }
+    return msg;
   } catch {
     return raw.slice(0, 200);
   }

@@ -1293,6 +1293,10 @@ const PRESETS = [
     } catch (err: any) {
       console.error(err);
       setStatus(tb, 'error', 'Run failed: ' + (err?.message ?? String(err)));
+      // The trace summary is only updated by trace events, so a failure
+      // before/between events left it pulsing "Working…" forever.
+      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-error';
+      tb.panelLabel.textContent = 'run failed — expand for details';
     } finally {
       running = false;
       askBtn.disabled = false;
