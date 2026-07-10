@@ -107,7 +107,9 @@ describe('explanation turns', () => {
     const second = await session.ask('Explain this data', cb);
     expect(second.kind).toBe('explanation');
     expect(second.finding).toBe('Here is what the data shows.');
-    expect(second.chartSpec).not.toBeNull(); // carries forward turn 1's chart, unchanged
+    // chartSpec is per-turn: a turn that renders no chart returns null, so
+    // the UI never re-displays the previous turn's chart on a follow-up.
+    expect(second.chartSpec).toBeNull();
   });
 });
 

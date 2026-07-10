@@ -76,7 +76,7 @@ Minimal pipeline for data questions — four tool calls, no more, unless a call 
 2. fetch_worldbank (a fixed, named list of countries you already know the ISO3 codes for) OR fetch_worldbank_all (every country — it resolves the full list and batches internally, so never call list_countries yourself just to build a country list for "all countries" questions).
 3. execute_js — compute whatever ranking/reduction/percentage-change/comparison the question needs by writing real JS against the fetched rows. Do NOT manually rank, diff, or compare more than a couple of countries in your own reasoning — that is slow and error-prone at scale; write code instead and read back the computed result.
 4. render_chart — pick the chart type (line for time series, bar for a single-year ranking, scatter for two indicators, grouped-bar for comparing a few countries) and pass the spec directly as this call's arguments, built from execute_js's result. There is no separate "write the spec, then render it" step — the call's arguments ARE the spec.
-Then call finish with a single tight sentence stating the top-line finding. NO methodology, NO caveats.
+Then call finish with an INSIGHT, not a restatement of the chart: lead with the top-line result (with its concrete number), then one more sentence on what is genuinely notable — the outlier, the trend break, the surprising gap, what it implies. Max 2 sentences. NO methodology, NO caveats.
 
 list_countries, write_file, and read_file still exist for less common cases (a specific named region/group's ISO3 codes, or genuinely needing to stash something too large to hold across many turns) — but for a normal "which countries..." or "all countries" question, you should not need them at all.
 
@@ -87,7 +87,7 @@ Rules:
   returns nothing; use fetch_worldbank_all for that case instead of trying to build the full list yourself.
 - Keep tool arguments minimal and valid. Years must be numbers.
 - You have a hard budget of ${MAX_TOOL_CALLS} tool calls. Be efficient. Do NOT re-fetch data you already have.
-- The finding must be ONE sentence and contain a concrete number or ranking when possible.`;
+- The finding must contain a concrete number or ranking, and say something the reader could not get just by glancing at the chart.`;
 
 // A compact, model-friendly summary of a data fetch.
 function summarizeRows(rows: DataRow[]): string {
@@ -132,6 +132,11 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     let totalCost = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
     let turnKind: 'chart' | 'explanation' = 'chart';
+    // The chart rendered during THIS turn only. state.chartSpec persists
+    // across turns as context (the turn-2+ addendum describes it), but
+    // returning/act-ing on the persistent one made every follow-up re-show
+    // the previous turn's chart and told the model it was already done.
+    let turnChartSpec: ChartSpec | null = null;
     const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
@@ -210,6 +215,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
           case 'render_chart': {
             const spec = normalizeSpec(a as unknown as ChartSpec);
             state.chartSpec = spec;
+            turnChartSpec = spec;
             cb.onChart(spec);
             result = 'rendered';
             break;
@@ -270,7 +276,11 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
               'orientation only, never a source of chart data. Never call render_chart from the ' +
               'summary directly.\n' +
               'If this question just asks you to explain, describe, or interpret the data in words, ' +
-              'call finish_explanation with your answer — do not call render_chart at all.',
+              'call finish_explanation with your answer — do not call render_chart at all.\n' +
+              'NEVER answer a follow-up by repeating the previous chart or finding: every turn must ' +
+              'add something new — a different cut of the data, a different chart type, or a fresh ' +
+              'insight in prose. If the question is already fully answered by what is on screen, say ' +
+              'so via finish_explanation and point at what to look at.',
           });
         }
         messages.push({ role: 'user', content: question });
@@ -292,7 +302,10 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
         if (!res.toolCalls.length) {
           noopTurns++;
           const fallbackText = res.text.trim() || res.reasoning?.trim() || '';
-          if (state.chartSpec && state.rows.length && fallbackText) {
+          // Per-turn spec here, NOT the session one: on follow-up turns the
+          // session still holds last turn's chart, and treating that as "done"
+          // ended the turn early with a stale chart and no new work.
+          if (turnChartSpec && state.rows.length && fallbackText) {
             state.finding = extractOneSentence(fallbackText);
             return;
           }
@@ -302,9 +315,9 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
             role: 'user',
             content:
               'Continue by calling a tool. ' +
-              (state.chartSpec
-                ? 'The chart is already rendered — call finish now with a one-line finding.'
-                : 'Pick the next tool in the pipeline.'),
+              (turnChartSpec
+                ? 'The chart is already rendered — call finish now with the insight.'
+                : 'Pick the next tool in the pipeline, or call finish_explanation if prose answers this better.'),
           });
           calls++;
           continue;
@@ -323,7 +336,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
         }
         if (finished) return;
 
-        if (state.chartSpec && state.rows.length && calls >= 6) return;
+        if (turnChartSpec && state.rows.length && calls >= 6) return;
       }
 
       if (!state.finding) {
@@ -343,7 +356,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
 
     async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
       const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
-      const result = await verify(cfg, question, state.chartSpec, state.finding, (c) => (totalCost += c));
+      const result = await verify(cfg, question, turnChartSpec, state.finding, (c) => (totalCost += c));
       ev.status = result.pass ? 'ok' : 'error';
       ev.pass = result.pass;
       ev.detail = result.report;
@@ -392,7 +405,9 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
 
     return {
       finding: state.finding,
-      chartSpec: state.chartSpec,
+      // Only the chart rendered THIS turn. Returning the persistent session
+      // spec made every chart-less follow-up re-display the previous chart.
+      chartSpec: turnChartSpec,
       rows: state.rows,
       csv: rowsToCSV(state.rows),
       indicators,

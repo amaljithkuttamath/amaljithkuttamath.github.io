@@ -441,12 +441,16 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   {
     name: 'finish',
     description:
-      'Signal completion with a single, tight one-line finding — the top-line takeaway only. ' +
-      'No methodology, no caveats.',
+      'Signal completion with the insight: the top-line result (with its concrete number) plus, ' +
+      'when the data supports it, one sentence on what is genuinely notable — the outlier, the ' +
+      'trend break, or what it implies. Max two sentences. No methodology, no caveats.',
     parameters: {
       type: 'object',
       properties: {
-        one_line_finding: { type: 'string', description: 'One sentence, the finding.' },
+        one_line_finding: {
+          type: 'string',
+          description: 'The insight: 1-2 tight sentences with a concrete number, not a chart caption.',
+        },
       },
       required: ['one_line_finding'],
     },
