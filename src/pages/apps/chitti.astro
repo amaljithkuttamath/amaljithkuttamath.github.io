@@ -16,6 +16,7 @@ const PRESETS = [
   'Which countries reduced child mortality the most since 2000?',
   'How has global life expectancy changed since 1960, by region?',
   'Compare GDP per capita of India, China, and Brazil since 1990',
+  'What does GDP per capita (PPP) actually measure, and why does PPP matter?',
 ];
 ---
 
@@ -48,8 +49,9 @@ const PRESETS = [
       <div class="ch-welcome">
         <h2 class="ch-welcome-title">Ask about the world</h2>
         <p class="ch-welcome-sub">
-          Real numbers from the World Bank, charted and cited. Start with a
-          question, or try one of these.
+          Real numbers from the World Bank, charted and cited — or a plain
+          prose answer when a chart isn't the point. Start with a question,
+          or try one of these.
         </p>
       </div>
       <form class="ch-ask" id="ch-ask" autocomplete="off">
@@ -1194,6 +1196,10 @@ const PRESETS = [
       }
 
       if (out.kind === 'explanation') {
+        // Open-ended answer: multi-paragraph prose, not a one-line headline.
+        // pre-wrap (via the class) preserves the model's paragraph breaks,
+        // and body sizing keeps a long answer readable.
+        tb.findingEl.classList.add('ch-finding-prose');
         renderFinding(tb, out.finding || 'No explanation produced.');
         renderRunningTotal(tb, tb.trace, out.cost);
         setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
@@ -1967,6 +1973,14 @@ const PRESETS = [
     max-width: 68ch;
   }
   .ch-finding:empty { display: none; }
+  /* Open-ended (explanation) answers: prose, not a headline. Preserve the
+     model's paragraph breaks and step down to body size so a long answer
+     reads as writing rather than one enormous line. */
+  .ch-finding-prose {
+    font-size: var(--text-body);
+    font-weight: 400;
+    white-space: pre-wrap;
+  }
   /* Zero-result closing line: same slot/typography as a normal finding, but
      muted and non-italic — reads as a plain-language explanation rather than
      an authoritative answer. No separate error component. */
