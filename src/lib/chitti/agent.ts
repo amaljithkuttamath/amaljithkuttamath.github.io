@@ -56,6 +56,9 @@ export interface AgentCallbacks {
   onFiles: (files: Record<string, string>) => void;
   onChart: (spec: ChartSpec) => void;
   onStatus: (msg: string, kind: 'loading' | 'ok' | 'error') => void;
+  // Fired once per turn if OpenRouter's free-fallback chain served the turn
+  // with a different model than the one selected.
+  onModel?: (servedModel: string) => void;
 }
 
 export interface AgentOutput {
@@ -149,6 +152,8 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
     // returning/act-ing on the persistent one made every follow-up re-show
     // the previous turn's chart and told the model it was already done.
     let turnChartSpec: ChartSpec | null = null;
+    // Whether the model-fallback trace note was already emitted this turn.
+    let fallbackNoted = false;
     const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
@@ -388,6 +393,20 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
 
         const res = await complete(cfg, messages, TOOL_SCHEMAS);
         totalCost += estimateCost(cfg.model, res.usage);
+
+        // Note (once per turn) when the free-fallback chain served this call
+        // with a different model — visible in the trace and the rail label.
+        const norm = (m: string) => m.replace(/:free$/, '');
+        if (res.servedModel && norm(res.servedModel) !== norm(cfg.model) && !fallbackNoted) {
+          fallbackNoted = true;
+          pushTrace({
+            tool: 'fallback',
+            argSummary: res.servedModel,
+            status: 'ok',
+            detail: 'primary model unavailable — OpenRouter routed to a backup free model',
+          });
+          cb.onModel?.(res.servedModel);
+        }
 
         if (res.reasoning) {
           pushTrace({ tool: 'reasoning', argSummary: '', status: 'ok', detail: res.reasoning });

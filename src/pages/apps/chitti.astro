@@ -1248,6 +1248,7 @@ const PRESETS = [
         onFiles: (files) => renderFiles(tb, files),
         onChart: (spec) => { void renderChart(tb, spec); },
         onStatus: (msg, kind) => setStatus(tb, kind, msg),
+        onModel: (served) => { tb.railModelEl.textContent = `${served} (fallback) / ${cfg.provider}`; },
       });
 
       if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);

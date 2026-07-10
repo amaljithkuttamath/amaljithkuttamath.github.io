@@ -51,6 +51,9 @@ export interface CompletionResult {
   // docs call out OpenAI's o-series as generating but never exposing it,
   // even when routed through OpenRouter).
   reasoning?: string;
+  // The model that actually served this completion (OpenRouter returns it).
+  // Differs from the requested model when the free-fallback chain kicked in.
+  servedModel?: string;
 }
 
 export interface ProviderConfig {
@@ -162,6 +165,18 @@ export const PROVIDERS: ProviderMeta[] = [
 export function providerMeta(id: ProviderId): ProviderMeta {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
+
+// Fallback chain for FREE OpenRouter models, in tested-reliability order.
+// Free upstreams flake regularly; OpenRouter's native `models` routing tries
+// these in order within a single request when the primary errors, instead of
+// failing the whole run. openrouter/free (auto-router) is deliberately last:
+// it can route each call to a different model, which confuses multi-step
+// tool loops — acceptable as a last resort, not as a first choice.
+export const FREE_FALLBACK_CHAIN = [
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'openrouter/free',
+];
 
 // Models verified (by hand, running this app's actual tool-calling pipeline
 // — not a general benchmark) to be reliable at multi-step tool use. Small
@@ -377,6 +392,13 @@ async function callOpenAICompatible(
   if (isRouter && cfg.requestReasoning) {
     body.reasoning = { enabled: true };
   }
+  // Free-model resilience: give OpenRouter a fallback chain so a flaky free
+  // upstream degrades to the next-best free model instead of failing the
+  // run. Only for :free primaries — paid model choices are never swapped.
+  if (isRouter && cfg.model.endsWith(':free')) {
+    const chain = [cfg.model, ...FREE_FALLBACK_CHAIN.filter((m) => m !== cfg.model)];
+    body.models = chain;
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -444,6 +466,7 @@ async function callOpenAICompatible(
       output: data.usage?.completion_tokens ?? 0,
     },
     reasoning,
+    servedModel: typeof data.model === 'string' ? data.model : undefined,
   };
 }
 
