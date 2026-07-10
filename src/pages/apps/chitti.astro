@@ -1195,6 +1195,8 @@ const PRESETS = [
      div is the actual constraint to override. */
   :global(div.container:has(.ch)) { max-width: min(1440px, 92vw) !important; }
   .ch { width: 100%; margin: 0 auto; }
+  .ch-thread { display: flex; flex-direction: column; gap: var(--space-lg); }
+  .ch-turn + .ch-turn { margin-top: var(--space-lg); }
 
   /* ── Header ── */
   .ch-head { margin-bottom: var(--space-lg); }
@@ -1232,6 +1234,35 @@ const PRESETS = [
      elevated surface, 8px radius, dashed internal perforation instead of a
      solid divider. Copy, chips, and behavior are unchanged from the prior
      console — visual restyle only. */
+  .ch-composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+  }
+  .ch-composer .ch-q {
+    flex: 1;
+    padding: 6px 4px;
+    font-size: var(--text-body);
+    min-height: 0;
+  }
+  .ch-new-convo {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--fg-muted);
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: nowrap;
+    padding: 0 0 10px;
+  }
+  .ch-new-convo:hover { color: var(--fg); }
   .ch-console {
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
@@ -1402,6 +1433,51 @@ const PRESETS = [
   }
 
   /* ── Status line ── */
+  .ch-turn-summary {
+    margin-bottom: var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+  }
+  .ch-turn-summary summary {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    cursor: pointer;
+    list-style: none;
+    padding: 6px 2px;
+  }
+  .ch-turn-summary summary::-webkit-details-marker { display: none; }
+  .ch-turn-summary summary::before { content: '▸ '; color: var(--fg-muted); }
+  .ch-turn-summary[open] summary::before { content: '▾ '; }
+  .ch-turn-q {
+    color: var(--fg);
+    font-style: italic;
+    font-family: var(--font-serif);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 55%;
+  }
+  .ch-turn-finding {
+    color: var(--fg-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  /* collapseTurn() creates this <img> at runtime via document.createElement,
+     so it never gets Astro's scope attribute. It must be :global() to match,
+     same reason as the .ch-trace-row timeline elements below. Without this,
+     the snapshot renders at its natural pixel width and overflows narrow
+     viewports (the max-width:100% would silently not apply). */
+  :global(.ch-turn-chart-snapshot) {
+    display: block;
+    max-width: 100%;
+    margin: 4px 0 8px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+  }
   .ch-status {
     display: flex;
     align-items: center;
@@ -1930,7 +2006,11 @@ const PRESETS = [
     .ch-byok-cta { margin-left: 0; }
     .ch-byok-sum { flex-wrap: wrap; }
     .ch-ask-foot { flex-direction: column; align-items: stretch; }
-    .ch-btn { width: 100%; }
+    /* Only the top console stacks its button full-width on mobile (its
+       .ch-ask-foot goes column above). The composer is a horizontal row, so
+       scope this to .ch-console so the composer's Ask button keeps its
+       natural width instead of collapsing the follow-up textarea. */
+    .ch-console .ch-btn { width: 100%; }
     .ch-chart { height: 300px; }
   }
 </style>
