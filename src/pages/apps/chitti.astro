@@ -172,6 +172,18 @@ const PRESETS = [
 
     <div class="ch-thread" id="ch-thread"></div>
 
+    <form class="ch-composer" id="ch-composer" autocomplete="off" style="display:none">
+      <textarea
+        id="ch-composer-q"
+        class="ch-q"
+        rows="1"
+        placeholder="Ask a follow-up…"
+        spellcheck="false"
+      ></textarea>
+      <button type="submit" class="ch-btn" id="ch-composer-btn">Ask</button>
+      <button type="button" class="ch-new-convo" id="ch-new-convo">+ new conversation</button>
+    </form>
+
   </div>
 
   <!-- Island: curated indicator names for client-side citation enrichment -->
@@ -211,6 +223,10 @@ const PRESETS = [
   const qIn = $('ch-q') as HTMLTextAreaElement;
   const askBtn = $('ch-btn') as HTMLButtonElement;
   const chips = $('ch-chips');
+
+  const composerForm = $('ch-composer') as HTMLFormElement;
+  const composerQ = $('ch-composer-q') as HTMLTextAreaElement;
+  const newConvoBtn = $('ch-new-convo') as HTMLButtonElement;
 
   const threadEl = $('ch-thread');
   const turnTemplate = $('ch-turn-template') as HTMLTemplateElement;
@@ -1119,6 +1135,8 @@ const PRESETS = [
         renderFinding(tb, out.finding || 'No explanation produced.');
         renderRunningTotal(tb, tb.trace, out.cost);
         setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
+        consoleEl.style.display = 'none';
+        composerForm.style.display = 'flex';
         tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
@@ -1131,6 +1149,8 @@ const PRESETS = [
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
+      consoleEl.style.display = 'none';
+      composerForm.style.display = 'flex';
       tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err: any) {
       console.error(err);
@@ -1140,6 +1160,29 @@ const PRESETS = [
       askBtn.disabled = false;
       askBtn.textContent = 'Ask';
     }
+  });
+
+  // The sticky composer delegates to the same submit handler above instead
+  // of duplicating the question-reading logic: it copies its value into the
+  // original top-console textarea (qIn), which stays the actual source of
+  // truth the handler reads from, then re-submits the original form.
+  composerForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    qIn.value = composerQ.value;
+    composerQ.value = '';
+    askForm.requestSubmit();
+  });
+
+  newConvoBtn.addEventListener('click', () => {
+    session = null;
+    threadEl.innerHTML = '';
+    allTurns.length = 0;
+    liveChartTurns.length = 0;
+    composerForm.style.display = 'none';
+    consoleEl.style.display = '';
+    consoleEl.classList.remove('ch-console-compact');
+    qIn.value = '';
+    qIn.focus();
   });
 </script>
 
