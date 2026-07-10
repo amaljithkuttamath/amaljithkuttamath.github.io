@@ -83,9 +83,11 @@ const PRESETS = [
           <span class="ch-status-msg">Planning…</span>
         </div>
 
-        <!-- Answer first: the one-line finding is the headline of the turn. -->
+        <!-- Answer first: the one-line finding is the headline of the turn.
+             A <div>, not <p>, because explanation answers render markdown
+             (paragraphs/lists) as block elements. -->
         <section class="ch-answer" style="display:none">
-          <p class="ch-finding"></p>
+          <div class="ch-finding"></div>
           <div class="ch-conf-legend" style="display:none">
             <span class="ch-conf-swatch ch-conf-swatch-hi"><i></i>confident</span>
             <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
@@ -1039,6 +1041,40 @@ const PRESETS = [
     return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
   }
 
+  // ── Minimal markdown ────────────────────────────────────────────────────
+  // The model's answers arrive as markdown (bold, lists, headings). A tiny
+  // renderer — escape first, then transform — instead of a library: the
+  // subset the agent actually emits is small and everything is escaped
+  // before any HTML is introduced, so no injection surface.
+  function inlineMd(escaped: string): string {
+    return escaped
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  }
+  function mdToHtml(text: string): string {
+    const lines = esc(text).split(/\r?\n/);
+    const out: string[] = [];
+    let list: 'ul' | 'ol' | null = null;
+    let para: string[] = [];
+    const flushPara = () => { if (para.length) { out.push('<p>' + inlineMd(para.join(' ')) + '</p>'); para = []; } };
+    const flushList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { flushPara(); flushList(); continue; }
+      const h = line.match(/^(#{1,4})\s+(.*)$/);
+      const ul = line.match(/^[-*]\s+(.*)$/);
+      const ol = line.match(/^\d+[.)]\s+(.*)$/);
+      if (h) { flushPara(); flushList(); out.push('<h4>' + inlineMd(h[2]) + '</h4>'); }
+      else if (ul) { flushPara(); if (list !== 'ul') { flushList(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inlineMd(ul[1]) + '</li>'); }
+      else if (ol) { flushPara(); if (list !== 'ol') { flushList(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inlineMd(ol[1]) + '</li>'); }
+      else { flushList(); para.push(line); }
+    }
+    flushPara();
+    flushList();
+    return out.join('');
+  }
+
   // ── Confidence-tinted finding text ─────────────────────────────────────
   // Per-word log-probability, when known. `null`/undefined means "no signal
   // for this word" — rendered as plain default-color text, no tint, no
@@ -1059,8 +1095,12 @@ const PRESETS = [
     tb.findingEl.textContent = '';
     if (!text) return;
     if (!logprobs || !logprobs.length) {
-      // No confidence signal available for this run — plain text, no legend.
-      tb.findingEl.textContent = text;
+      // No confidence signal available for this run. Render the model's
+      // markdown: full block rendering for prose explanations, inline-only
+      // (bold/code/em) for the one-line finding.
+      tb.findingEl.innerHTML = tb.findingEl.classList.contains('ch-finding-prose')
+        ? mdToHtml(text)
+        : inlineMd(esc(text));
       tb.confLegend.style.display = 'none';
       return;
     }
@@ -1191,7 +1231,6 @@ const PRESETS = [
         renderCitations(tb, []);
         renderRunningTotal(tb, tb.trace, out.cost);
         setStatus(tb, 'error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
-        tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
 
@@ -1203,7 +1242,6 @@ const PRESETS = [
         renderFinding(tb, out.finding || 'No explanation produced.');
         renderRunningTotal(tb, tb.trace, out.cost);
         setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
-        tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
 
@@ -1215,7 +1253,9 @@ const PRESETS = [
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
-      tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      // No scroll here (or in the branches above): the submit-time scroll is
+      // the only one. Auto-scrolling again when the answer lands was the
+      // second half of the "chat keeps jumping" bug.
     } catch (err: any) {
       console.error(err);
       setStatus(tb, 'error', 'Run failed: ' + (err?.message ?? String(err)));
@@ -1296,14 +1336,14 @@ const PRESETS = [
      headline answer as hard to read as a log line — removed; every element
      below declares its own family. */
   .ch-thread { display: flex; flex-direction: column; gap: var(--space-lg); }
-  /* The thread takes the space between the header and the composer, and scrolls
-     within itself so the composer stays put and the header stays visible. */
+  /* ONE scroller: the page. The thread used to be its own overflow-y:auto
+     container nested inside the scrolling page, and the various
+     scrollIntoView calls alternated between moving the inner container and
+     the page — which is exactly the "chat keeps jumping around" bug. Normal
+     document flow + a sticky composer replaces all of that. */
   .ch-thread:not(:empty) {
     flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: var(--space-sm) 2px var(--space-lg);
-    margin: 0 -2px;
+    padding: var(--space-sm) 0 var(--space-lg);
   }
   .ch-turn:last-child { scroll-margin-top: var(--space-sm); }
 
@@ -1350,10 +1390,14 @@ const PRESETS = [
      Not position:fixed, so short content never strands it over a void. */
   .ch-inputbar {
     flex-shrink: 0;
+    position: sticky;
+    bottom: 12px;
+    z-index: 5;
     margin-top: var(--space-md);
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-lg);
+    box-shadow: 0 4px 24px color-mix(in srgb, var(--bg) 60%, transparent);
     transition: border-color var(--duration) var(--ease);
     overflow: hidden;
   }
@@ -1973,14 +2017,32 @@ const PRESETS = [
     max-width: 68ch;
   }
   .ch-finding:empty { display: none; }
-  /* Open-ended (explanation) answers: prose, not a headline. Preserve the
-     model's paragraph breaks and step down to body size so a long answer
-     reads as writing rather than one enormous line. */
+  /* Open-ended (explanation) answers: rendered markdown at body size so a
+     long answer reads as writing rather than one enormous headline. The
+     child selectors are :global because the nodes come from innerHTML. */
   .ch-finding-prose {
     font-size: var(--text-body);
     font-weight: 400;
-    white-space: pre-wrap;
   }
+  .ch-finding :global(p) { margin: 0 0 0.8em; }
+  .ch-finding :global(p:last-child) { margin-bottom: 0; }
+  .ch-finding :global(ul), .ch-finding :global(ol) { margin: 0 0 0.8em; padding-left: 1.4em; }
+  .ch-finding :global(li) { margin: 0 0 0.35em; }
+  .ch-finding :global(h4) {
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    font-weight: 600;
+    margin: 1.1em 0 0.4em;
+  }
+  .ch-finding :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm);
+    padding: 0.05em 0.35em;
+  }
+  .ch-finding :global(strong) { font-weight: 600; }
   /* Zero-result closing line: same slot/typography as a normal finding, but
      muted and non-italic — reads as a plain-language explanation rather than
      an authoritative answer. No separate error component. */
