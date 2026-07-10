@@ -1647,14 +1647,7 @@ const PRESETS = [
     60% { transform: translateX(4px); }
   }
 
-  /* Never let the config panel outgrow the screen: it lives inside the
-     sticky composer, so anything taller than the viewport minus keyboard
-     was simply cut off with no way to reach the fields. */
-  .ch-byok-body {
-    padding: 4px var(--space-md) var(--space-md);
-    max-height: min(50vh, 340px);
-    overflow-y: auto;
-  }
+  .ch-byok-body { padding: 4px var(--space-md) var(--space-md); }
   .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
   .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
@@ -2252,6 +2245,25 @@ const PRESETS = [
     /* Decorative badge pills wrap into a ragged second line under the
        title at phone widths — they carry no function, drop them. */
     .ch-badges { display: none; }
+    /* The config panel becomes a bottom sheet on mobile: fixed overlay,
+       full width, everything visible at once — no inner scrolling (a
+       settings box you have to scroll inside is miserable UX). Outside
+       tap / Escape close it, same as the desktop popover. */
+    .ch-byok {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 20;
+      background: color-mix(in srgb, var(--fg) 6%, var(--bg));
+      border: 1px solid var(--fg-faint);
+      border-bottom: none;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      box-shadow: 0 -12px 48px color-mix(in srgb, var(--bg) 70%, transparent);
+    }
+    .ch-byok-body {
+      padding: var(--space-md) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+    }
     /* Keep the config chip a single line: while no key is set, the amber
        "needs an api key" CTA is the only thing worth the space; once a key
        exists the CTA hides and the (truncated) state text returns. */
