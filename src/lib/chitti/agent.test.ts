@@ -173,16 +173,14 @@ describe('message trimming', () => {
     const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
     mockComplete.mockReset();
 
-    // execute_js's result is JSON.stringify'd verbatim into the tool message
-    // (unlike fetch_worldbank, which goes through the compact summarizeRows()),
-    // so it's the faithful way to force a genuinely large tool-result payload
-    // in this test. A live fetch_worldbank_all call would also work but would
-    // need network mocking and is flakier than the deterministic code path here.
-    const bigRowJson = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ iso3: 'ABC', year: 2000 + i, value: i })));
-
+    // search_datasets returns a JSON list of catalog hits — a deterministic,
+    // network-free way to force a >200-char tool-result payload. (execute_js
+    // can no longer serve this role in the test: it now short-circuits with
+    // a small error message when no rows have been fetched, which is exactly
+    // the empty-dataset guard behavior, not a trimming subject.)
     mockComplete.mockResolvedValueOnce({
       text: '',
-      toolCalls: [{ id: 'e0', name: 'execute_js', arguments: { code: `return ${bigRowJson};` } }],
+      toolCalls: [{ id: 'e0', name: 'search_datasets', arguments: { query: 'co2 energy happiness gdp inflation poverty literacy unemployment debt' } }],
       usage: { input: 10, output: 5 },
     });
     mockComplete.mockResolvedValueOnce({

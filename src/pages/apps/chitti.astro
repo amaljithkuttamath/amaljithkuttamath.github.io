@@ -1344,7 +1344,11 @@ const PRESETS = [
   /* This is a full-height app view, not an article. Suppress the site footer
      here so its social links don't float mid-page above the composer, and let
      the container use the full viewport height. */
-  :global(div.container:has(.ch)) { display: flex; flex-direction: column; min-height: 100dvh; }
+  /* svh, not dvh: dvh re-measures every time the mobile URL bar collapses or
+     expands, so the whole column (and the docked composer with it) shifted
+     up and down while scrolling — the "bar keeps floating" bug. svh is the
+     stable small-viewport height: measured once, never dances. */
+  :global(div.container:has(.ch)) { display: flex; flex-direction: column; min-height: 100svh; }
   :global(div.container:has(.ch) > footer) { display: none; }
   :global(div.container:has(.ch) > main) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 

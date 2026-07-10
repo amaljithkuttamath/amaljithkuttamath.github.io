@@ -210,9 +210,30 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
             break;
           }
           case 'execute_js': {
-            const { ok, result: value, error } = executeJs(String(a.code ?? ''), state.rows);
-            result = ok ? JSON.stringify(value) : 'ERROR: ' + error;
-            ev.detail = ok ? 'ok' : 'error: ' + error;
+            const code = String(a.code ?? '');
+            // Guard the most common wasted-budget loops observed in real runs:
+            // computing against an empty dataset, and code that ran fine but
+            // never `return`ed (models often write expression-style snippets).
+            if (!state.rows.length) {
+              result = 'ERROR: no rows fetched yet in this conversation — call a fetch tool first, then compute.';
+              ev.detail = 'no data';
+              break;
+            }
+            let out = executeJs(code, state.rows);
+            if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
+              // Expression-style code with no return — retry wrapped.
+              out = executeJs('return (' + code + ')', state.rows);
+            }
+            if (out.ok && (out.result === null || out.result === undefined)) {
+              result =
+                'Your code ran without error but returned null/undefined. It must END with a ' +
+                '`return <value>` statement (e.g. "...; return top10;"). Fix that one thing and ' +
+                'call execute_js again — do not change your whole approach.';
+              ev.detail = 'returned null';
+            } else {
+              result = out.ok ? JSON.stringify(out.result) : 'ERROR: ' + out.error;
+              ev.detail = out.ok ? 'ok' : 'error: ' + out.error;
+            }
             break;
           }
           case 'write_file': {
@@ -328,7 +349,19 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
           content: 'A previous attempt was judged insufficient. Fix this: ' + critique,
         });
       } else {
-        if (turnCount > 1) {
+        if (turnCount > 1 && !state.rows.length) {
+          // Follow-up turn but nothing was ever fetched (e.g. turn 1 was a
+          // pure explanation). The data-reuse addendum below would claim
+          // "data already fetched: rows=0" and steer the model into
+          // computing against an empty dataset — observed burning the whole
+          // budget on null execute_js results. Treat as a fresh question.
+          messages.push({
+            role: 'user',
+            content:
+              'No data has been fetched yet in this conversation. Treat this as a fresh question: ' +
+              'run the full pipeline (search → fetch → compute → chart), or finish_explanation if it is conceptual.',
+          });
+        } else if (turnCount > 1) {
           const chartSummary = state.chartSpec
             ? `${state.chartSpec.type} chart "${state.chartSpec.title}" with series: ${state.chartSpec.series.map((s) => s.name).join(', ')}`
             : 'none';
