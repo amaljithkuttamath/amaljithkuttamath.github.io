@@ -35,11 +35,23 @@ const PRESETS = [
           <span class="badge">cited</span>
         </div>
       </div>
-      <p class="ch-subtitle">Charting Indicators From Trusted Institutional Data</p>
+      <p class="ch-subtitle">Real answers about the world, charted and cited.</p>
     </header>
 
-    <!-- Ask console: question first, connection tucked below -->
+    <!-- Setup / empty state: shown only while the thread is empty. Holds the
+         suggested-question chips and the BYOK connection panel. The actual
+         message input is the always-present bottom composer (#ch-composer);
+         the #ch-ask form below stays in the DOM (visually collapsed) purely as
+         the submit target the composer delegates to, so all the existing
+         submit/read-question plumbing keeps working unchanged. -->
     <section class="ch-console" id="ch-console">
+      <div class="ch-welcome">
+        <h2 class="ch-welcome-title">Ask about the world</h2>
+        <p class="ch-welcome-sub">
+          Real numbers from the World Bank, charted and cited. Start with a
+          question, or try one of these.
+        </p>
+      </div>
       <form class="ch-ask" id="ch-ask" autocomplete="off">
         <textarea
           id="ch-q"
@@ -54,65 +66,14 @@ const PRESETS = [
               <button type="button" class="ch-chip" data-q={p}>{p}</button>
             ))}
           </div>
-          <button type="submit" class="ch-btn" id="ch-btn">Ask</button>
         </div>
       </form>
-
-      <details class="ch-byok" id="ch-byok">
-        <summary class="ch-byok-sum">
-          <span class="ch-byok-caret" aria-hidden="true"></span>
-          <span class="ch-byok-state" id="ch-byok-state">openrouter · no key</span>
-          <span class="ch-byok-cta" id="ch-byok-cta">needs an api key · free via openrouter</span>
-        </summary>
-        <div class="ch-byok-body">
-          <div class="ch-byok-row">
-            <label class="ch-field">
-              <span class="ch-field-label">Provider</span>
-              <select id="ch-provider" class="ch-select">
-                {PROVIDERS.map((p) => (
-                  <option value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </label>
-            <label class="ch-field">
-              <span class="ch-field-label">Model</span>
-              <select id="ch-model" class="ch-select"></select>
-            </label>
-            <label class="ch-field ch-field-grow">
-              <span class="ch-field-label">API key</span>
-              <input
-                type="password"
-                id="ch-key"
-                class="ch-input"
-                placeholder="sk-… (never leaves your browser)"
-                spellcheck="false"
-                autocomplete="off"
-              />
-            </label>
-          </div>
-          <div class="ch-byok-row ch-byok-foot">
-            <label class="ch-save">
-              <input type="checkbox" id="ch-save" />
-              <span>Save key for this session</span>
-            </label>
-            <div class="ch-keylinks" id="ch-keylinks"></div>
-          </div>
-          <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
-        </div>
-      </details>
     </section>
 
     <template id="ch-turn-template">
       <div class="ch-turn">
-        <!-- Collapsed summary: hidden until this turn is superseded by a
-             later one. Once shown, it is the only visible content for this
-             turn (see collapseTurn()). -->
-        <details class="ch-turn-summary" style="display:none">
-          <summary>
-            <span class="ch-turn-q"></span>
-            <span class="ch-turn-finding"></span>
-          </summary>
-        </details>
+        <!-- The user's question, shown chat-style at the top of the turn. -->
+        <p class="ch-turn-q" style="display:none"></p>
 
         <!-- Status line -->
         <div class="ch-status" style="display:none">
@@ -172,17 +133,73 @@ const PRESETS = [
 
     <div class="ch-thread" id="ch-thread"></div>
 
-    <form class="ch-composer" id="ch-composer" autocomplete="off" style="display:none">
-      <textarea
-        id="ch-composer-q"
-        class="ch-q"
-        rows="1"
-        placeholder="Ask a follow-up…"
-        spellcheck="false"
-      ></textarea>
-      <button type="submit" class="ch-btn" id="ch-composer-btn">Ask</button>
-      <button type="button" class="ch-new-convo" id="ch-new-convo">+ new conversation</button>
-    </form>
+    <!-- Unified input bar, Codex/Perplexity/Claude style: one rounded
+         container with the textarea on top and a control row along the bottom.
+         The model/key picker chip lives inline on the left of that row; the
+         send button on the right. The config panel expands above, toggled by
+         the chip (a button, not <details>, so it can live inside the form). -->
+    <div class="ch-inputbar" id="ch-inputbar">
+      <div class="ch-byok" id="ch-byok" hidden>
+        <div class="ch-byok-body">
+          <div class="ch-byok-row">
+            <label class="ch-field">
+              <span class="ch-field-label">Provider</span>
+              <select id="ch-provider" class="ch-select">
+                {PROVIDERS.map((p) => (
+                  <option value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </label>
+            <label class="ch-field">
+              <span class="ch-field-label">Model</span>
+              <select id="ch-model" class="ch-select"></select>
+            </label>
+            <label class="ch-field ch-field-grow">
+              <span class="ch-field-label">API key</span>
+              <input
+                type="password"
+                id="ch-key"
+                class="ch-input"
+                placeholder="sk-… (never leaves your browser)"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+          </div>
+          <div class="ch-byok-row ch-byok-foot">
+            <label class="ch-save">
+              <input type="checkbox" id="ch-save" />
+              <span>Save key for this session</span>
+            </label>
+            <div class="ch-keylinks" id="ch-keylinks"></div>
+          </div>
+          <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+        </div>
+      </div>
+
+      <form class="ch-composer" id="ch-composer" autocomplete="off">
+        <textarea
+          id="ch-composer-q"
+          class="ch-q"
+          rows="1"
+          placeholder="Ask about the world…"
+          spellcheck="false"
+        ></textarea>
+        <div class="ch-composer-foot">
+          <button type="button" class="ch-byok-sum" id="ch-byok-sum" aria-expanded="false" aria-controls="ch-byok">
+            <span class="ch-byok-caret" aria-hidden="true"></span>
+            <span class="ch-byok-state" id="ch-byok-state">openrouter · no key</span>
+            <span class="ch-byok-cta" id="ch-byok-cta">needs an api key</span>
+          </button>
+          <div class="ch-composer-actions">
+            <button type="button" class="ch-new-convo" id="ch-new-convo" style="display:none">+ new</button>
+            <button type="submit" class="ch-send" id="ch-composer-btn" aria-label="Ask">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
 
   </div>
 
@@ -214,18 +231,39 @@ const PRESETS = [
   const keyLinks = $('ch-keylinks');
   const providerNote = $('ch-provider-note');
 
-  const byokDetails = $('ch-byok') as HTMLDetailsElement;
+  const byokPanel = $('ch-byok') as HTMLDivElement;
+  const byokSum = $('ch-byok-sum') as HTMLButtonElement;
   const byokState = $('ch-byok-state');
   const byokCta = $('ch-byok-cta');
+
+  // The config panel is a plain div toggled open/closed (not <details>, so the
+  // trigger button can live inside the composer form). openByok(true/false)
+  // is the single entry point; the chip button and outside-click drive it.
+  function openByok(open: boolean) {
+    byokPanel.hidden = !open;
+    byokSum.setAttribute('aria-expanded', String(open));
+  }
+  byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
+  // Close on outside click / Escape, like a popover.
+  document.addEventListener('click', (e) => {
+    if (byokPanel.hidden) return;
+    const bar = $('ch-inputbar');
+    if (bar && !bar.contains(e.target as Node)) openByok(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !byokPanel.hidden) openByok(false);
+  });
 
   const consoleEl = $('ch-console');
   const askForm = $('ch-ask') as HTMLFormElement;
   const qIn = $('ch-q') as HTMLTextAreaElement;
-  const askBtn = $('ch-btn') as HTMLButtonElement;
   const chips = $('ch-chips');
 
   const composerForm = $('ch-composer') as HTMLFormElement;
   const composerQ = $('ch-composer-q') as HTMLTextAreaElement;
+  // The composer's Ask button IS the primary (and only) submit button now, so
+  // the run-state "Working…" toggle drives it directly.
+  const askBtn = $('ch-composer-btn') as HTMLButtonElement;
   const newConvoBtn = $('ch-new-convo') as HTMLButtonElement;
 
   const threadEl = $('ch-thread');
@@ -246,9 +284,7 @@ const PRESETS = [
   // start times) to that one turn.
   interface TurnBlock {
     root: HTMLElement;
-    turnSummary: HTMLDetailsElement;
-    turnSummaryQ: HTMLElement;
-    turnSummaryFinding: HTMLElement;
+    questionEl: HTMLElement;
     statusRow: HTMLElement;
     statusDot: HTMLElement;
     statusMsg: HTMLElement;
@@ -292,9 +328,7 @@ const PRESETS = [
 
     const tb: TurnBlock = {
       root,
-      turnSummary: q<HTMLDetailsElement>(root, '.ch-turn-summary'),
-      turnSummaryQ: q(root, '.ch-turn-q'),
-      turnSummaryFinding: q(root, '.ch-turn-finding'),
+      questionEl: q(root, '.ch-turn-q'),
       statusRow: q(root, '.ch-status'),
       statusDot: q(root, '.ch-status-dot'),
       statusMsg: q(root, '.ch-status-msg'),
@@ -469,7 +503,7 @@ const PRESETS = [
       pid + ' · ' + (model ? model.label : modelSel.value) + (hasKey ? ' · key ✓' : '');
     byokState.classList.toggle('ch-byok-ready', hasKey);
     byokCta.style.display = hasKey ? 'none' : 'inline';
-    byokDetails.classList.toggle('ch-byok-missing', !hasKey);
+    byokSum.classList.toggle('ch-byok-missing', !hasKey);
   }
 
   function onProviderChange() {
@@ -536,8 +570,11 @@ const PRESETS = [
   // ── Preset chips ───────────────────────────────────────────────────────
   chips.querySelectorAll<HTMLButtonElement>('.ch-chip').forEach((b) => {
     b.addEventListener('click', () => {
+      // A suggestion chip submits immediately (like a Codex/ChatGPT prompt
+      // starter). Route through qIn (the submit handler's source of truth) and
+      // fire the same ask form the composer delegates to.
       qIn.value = b.dataset.q || '';
-      qIn.focus();
+      askForm.requestSubmit();
     });
   });
 
@@ -925,37 +962,13 @@ const PRESETS = [
 
   // Every turn block created so far, regardless of whether it has a chart.
   // Separate from liveChartTurns (which only tracks turns with a live
-  // chart) because an explanation-only turn with no chart still needs to
-  // collapse when superseded.
+  // chart) so the new-conversation reset can dispose every chart at once.
   const allTurns: TurnBlock[] = [];
 
-  // Called on a turn block that is no longer the latest turn. Freezes its
-  // chart as a static PNG snapshot (taken via ECharts's own getDataURL()
-  // before disposing, dispose()'s effect on the underlying canvas bitmap
-  // is undocumented/unverified, so this does not rely on it leaving anything
-  // visible behind) and swaps its full receipt/panel/answer display for a
-  // one-line collapsed summary. state.rows/chartSpec in agent.ts is
-  // unaffected by this, this is presentation only, the underlying session
-  // data is untouched.
-  function collapseTurn(tb: TurnBlock) {
-    const idx = liveChartTurns.indexOf(tb);
-    if (idx !== -1) liveChartTurns.splice(idx, 1);
-    if (tb.chartInstance) {
-      const dataUrl = tb.chartInstance.getDataURL({ type: 'png', backgroundColor: 'transparent' });
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      img.className = 'ch-turn-chart-snapshot';
-      img.alt = tb.chartTitle.textContent || 'Chart';
-      tb.turnSummary.appendChild(img);
-      tb.chartInstance.dispose();
-      tb.chartInstance = null;
-    }
-    tb.statusRow.style.display = 'none';
-    tb.panel.style.display = 'none';
-    tb.answerSection.style.display = 'none';
-    tb.turnSummary.style.display = 'block';
-    tb.turnSummaryQ.textContent = tb.question;
-    tb.turnSummaryFinding.textContent = tb.findingEl.textContent || '';
+  // The user's question, shown chat-style at the top of its turn.
+  function renderQuestion(tb: TurnBlock, question: string) {
+    tb.questionEl.textContent = question;
+    tb.questionEl.style.display = 'block';
   }
 
   // ── Data table + CSV ───────────────────────────────────────────────────
@@ -1067,10 +1080,10 @@ const PRESETS = [
 
     const apiKey = keyIn.value.trim();
     if (!apiKey) {
-      byokDetails.open = true;
-      byokDetails.classList.remove('ch-byok-nudge');
-      void byokDetails.offsetWidth;
-      byokDetails.classList.add('ch-byok-nudge');
+      openByok(true);
+      byokSum.classList.remove('ch-byok-nudge');
+      void byokSum.offsetWidth;
+      byokSum.classList.add('ch-byok-nudge');
       keyIn.focus();
       return;
     }
@@ -1084,21 +1097,32 @@ const PRESETS = [
 
     running = true;
     askBtn.disabled = true;
-    askBtn.textContent = 'Working…';
-    byokDetails.open = false;
+    askBtn.classList.add('ch-send-working');
+    openByok(false);
     qIn.value = '';
 
-    for (const prev of allTurns) collapseTurn(prev);
-
+    // Previous turns stay as full, readable history (chat style). Each turn
+    // renders its own question line, chart, and answer, and its chart stays
+    // live (re-themes/resizes via liveChartTurns). Nothing collapses.
     const tb = createTurnBlock();
     tb.question = question;
+    renderQuestion(tb, question);
     allTurns.push(tb);
     liveChartTurns.push(tb);
     tb.canvasEl.classList.add('ch-canvas-pending');
     tb.panel.classList.add('ch-panel-pending');
     setStatus(tb, 'loading', 'Planning…');
     tb.panel.style.display = 'grid';
-    consoleEl.classList.add('ch-console-compact');
+    // The conversation has started: hide the setup panel (chips + BYOK) and
+    // reveal the "+ new conversation" control. The bottom composer is always
+    // present and is the sole input.
+    consoleEl.style.display = 'none';
+    newConvoBtn.style.display = '';
+    composerQ.placeholder = 'Ask a follow-up…';
+    // Bring the just-created turn up to the top of the scroll area so the
+    // active exchange sits under the header and reads top-to-bottom down to
+    // the pinned composer, instead of the answer landing far from the input.
+    requestAnimationFrame(() => tb.root.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     renderFiles(tb, {});
 
     const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
@@ -1135,8 +1159,6 @@ const PRESETS = [
         renderFinding(tb, out.finding || 'No explanation produced.');
         renderRunningTotal(tb, tb.trace, out.cost);
         setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
-        consoleEl.style.display = 'none';
-        composerForm.style.display = 'flex';
         tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
       }
@@ -1149,8 +1171,6 @@ const PRESETS = [
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
-      consoleEl.style.display = 'none';
-      composerForm.style.display = 'flex';
       tb.root.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (err: any) {
       console.error(err);
@@ -1158,7 +1178,7 @@ const PRESETS = [
     } finally {
       running = false;
       askBtn.disabled = false;
-      askBtn.textContent = 'Ask';
+      askBtn.classList.remove('ch-send-working');
     }
   });
 
@@ -1186,11 +1206,14 @@ const PRESETS = [
     threadEl.innerHTML = '';
     allTurns.length = 0;
     liveChartTurns.length = 0;
-    composerForm.style.display = 'none';
+    // Back to the empty state: the setup panel (chips + BYOK) returns; the
+    // composer stays put at the bottom (it is always present) and drops back to
+    // the first-question placeholder; the "+ new conversation" control hides.
     consoleEl.style.display = '';
-    consoleEl.classList.remove('ch-console-compact');
-    qIn.value = '';
-    qIn.focus();
+    newConvoBtn.style.display = 'none';
+    composerQ.placeholder = 'Ask about the world…';
+    composerQ.value = '';
+    composerQ.focus();
   });
 </script>
 
@@ -1202,9 +1225,35 @@ const PRESETS = [
      700px); `<main>` and `.ch` itself have no width cap of their own, so the
      div is the actual constraint to override. */
   :global(div.container:has(.ch)) { max-width: min(1440px, 92vw) !important; }
-  .ch { width: 100%; margin: 0 auto; }
+  /* This is a full-height app view, not an article. Suppress the site footer
+     here so its social links don't float mid-page above the composer, and let
+     the container use the full viewport height. */
+  :global(div.container:has(.ch)) { display: flex; flex-direction: column; min-height: 100dvh; }
+  :global(div.container:has(.ch) > footer) { display: none; }
+  :global(div.container:has(.ch) > main) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* .ch is a viewport-filling column: header at the top, thread in the middle
+     (grows and scrolls), composer docked at the bottom of the flow. No fixed
+     positioning, so short content never strands the input over a void. */
+  .ch {
+    width: 100%;
+    margin: 0 auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
   .ch-thread { display: flex; flex-direction: column; gap: var(--space-lg); }
-  .ch-turn + .ch-turn { margin-top: var(--space-lg); }
+  /* The thread takes the space between the header and the composer, and scrolls
+     within itself so the composer stays put and the header stays visible. */
+  .ch-thread:not(:empty) {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-sm) 2px var(--space-lg);
+    margin: 0 -2px;
+  }
+  .ch-turn:last-child { scroll-margin-top: var(--space-sm); }
 
   /* ── Header ── */
   .ch-head { margin-bottom: var(--space-lg); }
@@ -1242,21 +1291,48 @@ const PRESETS = [
      elevated surface, 8px radius, dashed internal perforation instead of a
      solid divider. Copy, chips, and behavior are unchanged from the prior
      console — visual restyle only. */
-  .ch-composer {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
+  /* ── Unified input bar (Codex/Perplexity/Claude) ──────────────────────
+     One rounded container docked at the bottom of the viewport-filling
+     column: config panel (hidden) on top, then the textarea, then a control
+     row with the model/key chip on the left and the send button on the right.
+     Not position:fixed, so short content never strands it over a void. */
+  .ch-inputbar {
+    flex-shrink: 0;
     margin-top: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
     background: var(--bg-elevated);
     border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
+    transition: border-color var(--duration) var(--ease);
+    overflow: hidden;
+  }
+  .ch-inputbar:focus-within {
+    border-color: color-mix(in srgb, var(--fg) 26%, transparent);
+  }
+  .ch-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px var(--space-md) 8px;
   }
   .ch-composer .ch-q {
     flex: 1;
-    padding: 6px 4px;
+    padding: 4px 2px;
     font-size: var(--text-body);
     min-height: 0;
+    max-height: 160px;
+    background: transparent;
+  }
+  /* Bottom control row: model/key chip (left), actions (right). */
+  .ch-composer-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ch-composer-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
   .ch-new-convo {
     font-family: var(--font-mono);
@@ -1265,39 +1341,63 @@ const PRESETS = [
     color: var(--fg-muted);
     border: none;
     cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
     white-space: nowrap;
-    padding: 0 0 10px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
   }
-  .ch-new-convo:hover { color: var(--fg); }
+  .ch-new-convo:hover { color: var(--fg); background: var(--bg-hover); }
+  /* Round send button, filled with ink. */
+  .ch-send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: var(--fg);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition: opacity var(--duration) var(--ease);
+  }
+  .ch-send:hover { opacity: 0.85; }
+  .ch-send:disabled { opacity: 0.4; cursor: default; }
+  .ch-send-working svg { animation: ch-spin 0.8s linear infinite; }
+  @keyframes ch-spin { to { transform: rotate(360deg); } }
+  /* Empty state: a centered welcome that fills the space between the header
+     and the docked composer. No card/box, it's an invitation, not a form. */
   .ch-console {
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-md);
-    transition: border-color var(--duration) var(--ease);
-    overflow: hidden;
-  }
-  .ch-console:focus-within {
-    border-color: color-mix(in srgb, var(--fg) 22%, transparent);
-  }
-  /* Once a run starts, the console settles into a compact "asked" header
-     instead of staying full-size with now-irrelevant example chips and the
-     BYOK form sitting between the question and the live trace below it. */
-  .ch-console.ch-console-compact .ch-q {
+    flex: 1;
     min-height: 0;
-    padding: var(--space-sm) var(--space-md);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-lg);
+    padding: var(--space-lg) 0;
+  }
+  .ch-welcome { max-width: 44ch; }
+  .ch-welcome-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-section);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin: 0 0 8px;
+  }
+  .ch-welcome-sub {
     font-size: var(--text-body);
-    opacity: 0.75;
+    line-height: 1.55;
+    color: var(--fg-muted);
+    margin: 0;
   }
-  .ch-console.ch-console-compact .ch-chips,
-  .ch-console.ch-console-compact .ch-byok {
-    display: none;
-  }
-  .ch-console.ch-console-compact .ch-ask-foot {
-    padding-top: 0;
-  }
+  /* The #ch-ask <textarea> (#ch-q) is now only the plumbing target the bottom
+     composer delegates to, never a visible input, so collapse it. */
+  #ch-ask .ch-q { display: none; }
+  #ch-ask { width: 100%; display: flex; justify-content: center; }
+  .ch-ask-foot { padding-top: 0; width: 100%; display: flex; justify-content: center; }
 
   .ch-q {
     display: block;
@@ -1323,20 +1423,34 @@ const PRESETS = [
     padding: 6px var(--space-md) var(--space-md);
     flex-wrap: wrap;
   }
-  .ch-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  /* Suggestion chips in the centered empty state: wrap, centered, and read as
+     tappable prompt starters. Capped width so a full column of them stays a
+     tidy stack rather than one very wide row. */
+  .ch-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    max-width: 30rem;
+    margin: 0 auto;
+  }
   .ch-chip {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    background: transparent;
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    background: var(--bg-elevated);
     color: var(--fg-muted);
-    border: 1px dashed var(--fg-faint);
-    border-radius: var(--radius-full);
-    padding: 3px 10px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
     cursor: pointer;
     text-align: left;
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
   }
-  .ch-chip:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+  .ch-chip:hover {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--fg) 30%, transparent);
+    background: var(--bg-hover);
+  }
   .ch-btn {
     background: var(--fg);
     color: var(--bg);
@@ -1354,26 +1468,42 @@ const PRESETS = [
   .ch-btn:hover { opacity: 0.85; }
   .ch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* ── Connection strip (BYOK) ── */
-  .ch-byok { border-top: 1px dashed var(--fg-faint); }
+  /* ── BYOK: config panel (expands inside the input bar, above the textarea)
+     + the compact chip that toggles it (lives in the control row) ── */
+  .ch-byok {
+    border-bottom: 1px solid var(--fg-faint);
+    background: var(--bg);
+  }
+  .ch-byok[hidden] { display: none; }
+  /* The chip: a small pill button showing provider · model · key state. */
   .ch-byok-sum {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 9px var(--space-md);
+    gap: 6px;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
     cursor: pointer;
-    list-style: none;
-    user-select: none;
+    min-width: 0;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
   }
-  .ch-byok-sum::-webkit-details-marker { display: none; }
-  .ch-byok-caret::before { content: '▸'; color: var(--fg-muted); }
-  .ch-byok[open] .ch-byok-caret::before { content: '▾'; }
-  .ch-byok-state { letter-spacing: 0.03em; }
+  .ch-byok-sum:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+  .ch-byok-caret::before { content: '▸'; color: var(--fg-muted); font-size: 0.85em; }
+  .ch-byok-sum[aria-expanded='true'] .ch-byok-caret::before { content: '▾'; }
+  .ch-byok-state {
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 40ch;
+  }
   .ch-byok-state.ch-byok-ready { color: var(--success); }
-  .ch-byok-cta { margin-left: auto; color: var(--signal); letter-spacing: 0.03em; }
+  .ch-byok-sum.ch-byok-missing { border-color: color-mix(in srgb, var(--signal) 55%, transparent); }
+  .ch-byok-cta { color: var(--signal); letter-spacing: 0.02em; }
   .ch-byok-nudge { animation: ch-nudge 0.35s var(--ease); }
   @keyframes ch-nudge {
     0%, 100% { transform: translateX(0); }
@@ -1441,51 +1571,22 @@ const PRESETS = [
   }
 
   /* ── Status line ── */
-  .ch-turn-summary {
-    margin-bottom: var(--space-sm);
-    font-family: var(--font-mono);
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-  }
-  .ch-turn-summary summary {
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    cursor: pointer;
-    list-style: none;
-    padding: 6px 2px;
-  }
-  .ch-turn-summary summary::-webkit-details-marker { display: none; }
-  .ch-turn-summary summary::before { content: '▸ '; color: var(--fg-muted); }
-  .ch-turn-summary[open] summary::before { content: '▾ '; }
+  /* The user's question, chat-style, at the top of each turn. Every turn
+     stays as full readable history, no collapsing. A left ink rule marks it
+     as the user's line, distinct from the agent's answer below. */
   .ch-turn-q {
+    font-family: var(--font-sans);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    letter-spacing: -0.01em;
     color: var(--fg);
-    font-style: italic;
-    font-family: var(--font-serif);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 55%;
+    line-height: 1.4;
+    margin: 0 0 var(--space-md);
+    padding-left: var(--space-md);
+    border-left: 2px solid var(--fg);
   }
-  .ch-turn-finding {
-    color: var(--fg-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-  }
-  /* collapseTurn() creates this <img> at runtime via document.createElement,
-     so it never gets Astro's scope attribute. It must be :global() to match,
-     same reason as the .ch-trace-row timeline elements below. Without this,
-     the snapshot renders at its natural pixel width and overflows narrow
-     viewports (the max-width:100% would silently not apply). */
-  :global(.ch-turn-chart-snapshot) {
-    display: block;
-    max-width: 100%;
-    margin: 4px 0 8px;
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-  }
+  /* Space between stacked turns in the history thread. */
+  .ch-turn + .ch-turn { margin-top: var(--space-3xl); border-top: 1px solid var(--fg-faint); padding-top: var(--space-2xl); }
   .ch-status {
     display: flex;
     align-items: center;
@@ -1861,8 +1962,7 @@ const PRESETS = [
   /* ── Answer ── */
   .ch-answer { margin-bottom: var(--space-lg); animation: fadeIn 0.3s var(--ease); }
   .ch-finding {
-    font-family: var(--font-serif);
-    font-style: italic;
+    font-family: var(--font-sans);
     font-size: var(--text-section);
     color: var(--fg);
     line-height: 1.45;
