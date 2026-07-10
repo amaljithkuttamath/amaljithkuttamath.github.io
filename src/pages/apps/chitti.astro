@@ -1243,6 +1243,12 @@ const PRESETS = [
     flex-direction: column;
     min-height: 0;
   }
+  /* One font for the whole app: JetBrains Mono. Chitti reads as a single
+     consistent monospaced surface (terminal/receipt feel), no serif/sans mix.
+     !important so it wins over every per-element serif/sans rule regardless of
+     source order; :global so it also reaches JS-created trace/chart nodes that
+     never get Astro's scope attribute. */
+  .ch, .ch :global(*) { font-family: var(--font-mono) !important; }
   .ch-thread { display: flex; flex-direction: column; gap: var(--space-lg); }
   /* The thread takes the space between the header and the composer, and scrolls
      within itself so the composer stays put and the header stays visible. */
