@@ -166,16 +166,19 @@ export function providerMeta(id: ProviderId): ProviderMeta {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
 
-// Fallback chain for FREE OpenRouter models, in tested-reliability order.
+// Fallback chain for FREE OpenRouter models — VERIFIED tool-callers only.
 // Free upstreams flake regularly; OpenRouter's native `models` routing tries
 // these in order within a single request when the primary errors, instead of
-// failing the whole run. openrouter/free (auto-router) is deliberately last:
-// it can route each call to a different model, which confuses multi-step
-// tool loops — acceptable as a last resort, not as a first choice.
+// failing the whole run. Two deliberate quality bounds:
+// 1. The chain is per-request: every call lists the user's primary first,
+//    so a backup only ever serves while the primary is actually down.
+// 2. No wildcard entries. openrouter/free was removed — it auto-routes to
+//    arbitrary models, including ones tested as unreliable on this app's
+//    tool pipeline. Better to fail visibly than to answer with a model
+//    that hallucinates tool calls.
 export const FREE_FALLBACK_CHAIN = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3-super-120b-a12b:free',
-  'openrouter/free',
 ];
 
 // Models verified (by hand, running this app's actual tool-calling pipeline
