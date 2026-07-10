@@ -149,8 +149,16 @@ const PRESETS = [
          send button on the right. The config panel expands above, toggled by
          the chip (a button, not <details>, so it can live inside the form). -->
     <div class="ch-inputbar" id="ch-inputbar">
+      <!-- Backdrop for the mobile bottom sheet. iOS Safari doesn't bubble
+           click events from non-interactive page areas to document, so
+           outside-tap-to-close needs a real element with its own listener. -->
+      <div class="ch-byok-backdrop" id="ch-byok-backdrop" hidden></div>
       <div class="ch-byok" id="ch-byok" hidden>
         <div class="ch-byok-body">
+          <div class="ch-byok-head">
+            <span class="ch-byok-title">Model &amp; API key</span>
+            <button type="button" class="ch-byok-close" id="ch-byok-close" aria-label="Close">✕</button>
+          </div>
           <div class="ch-byok-row">
             <label class="ch-field">
               <span class="ch-field-label">Provider</span>
@@ -251,9 +259,14 @@ const PRESETS = [
   // is the single entry point; the chip button and outside-click drive it.
   function openByok(open: boolean) {
     byokPanel.hidden = !open;
+    $('ch-byok-backdrop').hidden = !open;
     byokSum.setAttribute('aria-expanded', String(open));
   }
   byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
+  // Explicit close paths that work everywhere, including iOS where
+  // document-level click delegation from page areas is unreliable.
+  $('ch-byok-close').addEventListener('click', () => openByok(false));
+  $('ch-byok-backdrop').addEventListener('click', () => openByok(false));
   // Close on outside click / Escape, like a popover.
   document.addEventListener('click', (e) => {
     if (byokPanel.hidden) return;
@@ -1648,6 +1661,32 @@ const PRESETS = [
   }
 
   .ch-byok-body { padding: 4px var(--space-md) var(--space-md); }
+  .ch-byok-backdrop { display: none; }
+  .ch-byok-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 4px;
+  }
+  .ch-byok-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+  }
+  .ch-byok-close {
+    background: transparent;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 15px;
+    line-height: 1;
+    padding: 6px 8px;
+    margin-right: -8px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
+  .ch-byok-close:hover { color: var(--fg); background: var(--bg-hover); }
   .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
   .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
@@ -2249,6 +2288,13 @@ const PRESETS = [
        full width, everything visible at once — no inner scrolling (a
        settings box you have to scroll inside is miserable UX). Outside
        tap / Escape close it, same as the desktop popover. */
+    .ch-byok-backdrop:not([hidden]) {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 19;
+      background: color-mix(in srgb, var(--bg) 55%, transparent);
+    }
     .ch-byok {
       position: fixed;
       left: 0;
