@@ -1136,17 +1136,36 @@ const PRESETS = [
   }
 
   // ── Citations ──────────────────────────────────────────────────────────
+  // Source-aware: ids are plain World Bank codes, "owid:<slug>", or
+  // "imf:<code>", each linking to its own institution's page.
+  const SOURCE_HOME: Record<string, [string, string]> = {
+    wb: ['World Bank Open Data', 'https://data.worldbank.org'],
+    owid: ['Our World in Data', 'https://ourworldindata.org'],
+    imf: ['IMF DataMapper', 'https://www.imf.org/external/datamapper'],
+  };
+  function sourceOf(id: string): 'wb' | 'owid' | 'imf' {
+    return id.startsWith('owid:') ? 'owid' : id.startsWith('imf:') ? 'imf' : 'wb';
+  }
+  function indicatorUrl(id: string): string {
+    if (id.startsWith('owid:')) return 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.slice(5));
+    if (id.startsWith('imf:')) return 'https://www.imf.org/external/datamapper/' + encodeURIComponent(id.slice(4));
+    return 'https://data.worldbank.org/indicator/' + encodeURIComponent(id);
+  }
   function renderCitations(tb: TurnBlock, indicators: { id: string; name: string }[]) {
     if (!indicators.length) { tb.citeEl.style.display = 'none'; return; }
     tb.citeEl.style.display = 'block';
     const iso = new Date().toISOString().slice(0, 10);
+    const sources = [...new Set(indicators.map((i) => sourceOf(i.id)))].map((s) => {
+      const [label, url] = SOURCE_HOME[s];
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
     const parts = indicators.map((ind) => {
       const name = INDICATOR_MAP[ind.id] || ind.name || ind.id;
-      const url = 'https://data.worldbank.org/indicator/' + encodeURIComponent(ind.id);
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${esc(ind.id)} — ${esc(name)}</a>`;
+      return `<a href="${indicatorUrl(ind.id)}" target="_blank" rel="noopener noreferrer">${esc(ind.id)} — ${esc(name)}</a>`;
     });
     tb.citeEl.innerHTML =
-      'Data from <a href="https://data.worldbank.org" target="_blank" rel="noopener noreferrer">World Bank Open Data</a> · Indicator: ' +
+      'Data from ' + sources.join(', ') +
+      ' · ' + (indicators.length === 1 ? 'Indicator: ' : 'Indicators: ') +
       parts.join(' · ') +
       ' · Retrieved ' + iso;
   }

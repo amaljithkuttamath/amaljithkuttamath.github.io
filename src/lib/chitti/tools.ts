@@ -25,6 +25,11 @@ export interface DataRow {
   iso3: string;
   year: number;
   value: number | null;
+  // Which indicator/dataset this row belongs to. Plain World Bank id
+  // (e.g. "SH.DYN.MORT"), or namespaced "owid:<slug>" / "imf:<id>".
+  // Lets execute_js and the analysis helpers separate rows when the
+  // session holds data from more than one fetch.
+  indicator?: string;
 }
 
 // Chart spec the agent builds and the renderer consumes.
@@ -184,6 +189,7 @@ export async function fetchWorldbank(
     iso3: r.countryiso3code,
     year: parseInt(r.date, 10),
     value: r.value === null || r.value === undefined ? null : Number(r.value),
+    indicator: indicatorId,
   }));
   // Sort by country then year ascending for stable downstream use.
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
@@ -225,6 +231,284 @@ export async function fetchWorldbankAll(
   }
   allRows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
   return { rows: allRows, countryCount: ids.length, batchCount: batches.length };
+}
+
+// ── Additional sources: Our World in Data + IMF DataMapper ──────────────
+// Both are free, keyless, browser-fetchable APIs. Curated catalogs (like
+// the World Bank indicators.json) rather than live search: the model
+// searches a known-good list, so it can't invent slugs that 404.
+
+export interface Dataset {
+  id: string; // namespaced: "owid:<slug>" or "imf:<code>"
+  name: string;
+  source: 'owid' | 'imf';
+  note?: string;
+}
+
+// OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv
+const OWID_DATASETS: [string, string][] = [
+  ['life-expectancy', 'Life expectancy at birth (years)'],
+  ['child-mortality', 'Child mortality rate (under-5, per 100 live births)'],
+  ['population', 'Population'],
+  ['gdp-per-capita-worldbank', 'GDP per capita (international-$, PPP)'],
+  ['human-development-index', 'Human Development Index (HDI)'],
+  ['happiness-cantril-ladder', 'Self-reported life satisfaction (Cantril ladder, 0-10)'],
+  ['co-emissions-per-capita', 'CO2 emissions per capita (tonnes)'],
+  ['annual-co2-emissions-per-country', 'Annual CO2 emissions (tonnes)'],
+  ['share-electricity-renewables', 'Share of electricity from renewables (%)'],
+  ['share-of-individuals-using-the-internet', 'Share of population using the internet (%)'],
+  ['cross-country-literacy-rates', 'Literacy rate (%)'],
+  ['homicide-rate-unodc', 'Homicide rate (per 100,000 people)'],
+  ['share-of-population-in-extreme-poverty', 'Share of population in extreme poverty (%)'],
+  ['daily-per-capita-caloric-supply', 'Daily supply of calories per person (kcal)'],
+];
+
+// IMF DataMapper codes — JSON at imf.org/external/datamapper/api/v1/<code>.
+// Distinctive value: includes IMF FORECASTS several years ahead.
+const IMF_DATASETS: [string, string][] = [
+  ['NGDP_RPCH', 'Real GDP growth (annual %, incl. IMF forecasts)'],
+  ['NGDPDPC', 'GDP per capita, current prices (US$, incl. forecasts)'],
+  ['PCPIPCH', 'Inflation rate, average consumer prices (annual %, incl. forecasts)'],
+  ['LUR', 'Unemployment rate (% of labor force, incl. forecasts)'],
+  ['GGXWDG_NGDP', 'General government gross debt (% of GDP, incl. forecasts)'],
+  ['BCA_NGDPD', 'Current account balance (% of GDP, incl. forecasts)'],
+];
+
+export const DATASETS: Dataset[] = [
+  ...OWID_DATASETS.map(([slug, name]): Dataset => ({ id: 'owid:' + slug, name, source: 'owid' })),
+  ...IMF_DATASETS.map(([code, name]): Dataset => ({ id: 'imf:' + code, name, source: 'imf' })),
+];
+
+export function searchDatasets(query: string): Dataset[] {
+  const terms = (query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return DATASETS.map((d) => {
+    const hay = (d.name + ' ' + d.id).toLowerCase();
+    const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
+    return { d, score };
+  })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.d)
+    .slice(0, 10);
+}
+
+// Friendly name for any indicator id, across all three sources.
+export function datasetName(id: string): string | undefined {
+  return DATASETS.find((d) => d.id === id)?.name;
+}
+
+// Minimal CSV parser: handles quoted cells (OWID entity names contain
+// commas, e.g. "Korea, Rep."). Good enough for machine-generated CSV.
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') inQ = false;
+      else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+// fetch_owid: CSV from the OWID grapher. Columns: Entity, Code, Year,
+// <metric...>. First metric column is the value. Aggregates like World use
+// OWID_WRL codes; rows with no code (subregions) are dropped.
+export async function fetchOwid(
+  slug: string,
+  countryIds?: string[],
+  yearStart?: number,
+  yearEnd?: number
+): Promise<{ rows: DataRow[]; metric: string }> {
+  const clean = slug.replace(/^owid:/, '');
+  const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
+  let resp: Response;
+  try {
+    resp = await fetch(url);
+  } catch (err: any) {
+    throw new Error(
+      `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, use fetch_worldbank for this question instead.`
+    );
+  }
+  if (!resp.ok) throw new Error(`OWID API HTTP ${resp.status} for slug "${clean}" — the slug may be wrong; use search_datasets results verbatim.`);
+  const text = await resp.text();
+  const lines = text.split(/\r?\n/).filter((l) => l.length);
+  if (lines.length < 2) throw new Error('OWID: empty dataset');
+  const header = parseCsvLine(lines[0]);
+  const metric = header[3] || clean;
+  const want = countryIds?.length
+    ? new Set(countryIds.map((c) => c.trim().toUpperCase()))
+    : null;
+  const rows: DataRow[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseCsvLine(lines[i]);
+    const code = (cells[1] || '').toUpperCase();
+    if (!code) continue; // regions without ISO codes
+    if (want && !want.has(code)) continue;
+    const year = parseInt(cells[2], 10);
+    if (Number.isNaN(year)) continue;
+    if (yearStart !== undefined && year < yearStart) continue;
+    if (yearEnd !== undefined && year > yearEnd) continue;
+    const v = cells[3];
+    rows.push({
+      country: cells[0],
+      iso3: code,
+      year,
+      value: v === '' || v === undefined ? null : Number(v),
+      indicator: 'owid:' + clean,
+    });
+  }
+  rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
+  return { rows, metric };
+}
+
+// fetch_imf: IMF DataMapper JSON. Shape:
+// { values: { <code>: { <ISO3>: { "<year>": value } } } }
+// Includes projection years beyond today — that's the point of this source.
+export async function fetchImf(
+  code: string,
+  countryIds?: string[],
+  yearStart?: number,
+  yearEnd?: number
+): Promise<{ rows: DataRow[] }> {
+  const clean = code.replace(/^imf:/, '').toUpperCase();
+  const path = countryIds?.length
+    ? `${clean}/${countryIds.map((c) => c.trim().toUpperCase()).join('/')}`
+    : clean;
+  const url = `https://www.imf.org/external/datamapper/api/v1/${path}`;
+  let resp: Response;
+  try {
+    resp = await fetch(url);
+  } catch (err: any) {
+    throw new Error(
+      `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to fetch_worldbank (no forecasts, but similar historical macro data).`
+    );
+  }
+  if (!resp.ok) throw new Error(`IMF API HTTP ${resp.status} for code "${clean}"`);
+  const data = await resp.json();
+  const byCountry: Record<string, Record<string, number>> = data?.values?.[clean] ?? {};
+  const nameOf = (iso3: string) => COUNTRIES.find((c) => c.id === iso3)?.name ?? iso3;
+  const rows: DataRow[] = [];
+  for (const iso3 of Object.keys(byCountry)) {
+    // DataMapper mixes countries with regional aggregates (3-letter but not
+    // ISO); keep everything — aggregates are useful and clearly named.
+    for (const [yearStr, value] of Object.entries(byCountry[iso3])) {
+      const year = parseInt(yearStr, 10);
+      if (Number.isNaN(year)) continue;
+      if (yearStart !== undefined && year < yearStart) continue;
+      if (yearEnd !== undefined && year > yearEnd) continue;
+      rows.push({
+        country: nameOf(iso3),
+        iso3,
+        year,
+        value: value === null || value === undefined ? null : Number(value),
+        indicator: 'imf:' + clean,
+      });
+    }
+  }
+  rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
+  return { rows };
+}
+
+// ── Analysis helpers ─────────────────────────────────────────────────────
+// Deterministic implementations of the two computations behind most
+// "insight" sentences, so the model gets them in one cheap call instead of
+// writing (and possibly fumbling) the JS itself. execute_js remains for
+// everything bespoke.
+
+export interface GrowthStat {
+  iso3: string;
+  country: string;
+  firstYear: number;
+  firstValue: number;
+  lastYear: number;
+  lastValue: number;
+  absChange: number;
+  pctChange: number | null; // null when firstValue is 0
+  cagr: number | null; // % per year; null when not computable
+}
+
+export function growthStats(rows: DataRow[], indicator?: string): GrowthStat[] {
+  const pool = indicator ? rows.filter((r) => r.indicator === indicator) : rows;
+  const byCountry: Record<string, DataRow[]> = {};
+  for (const r of pool) if (r.value !== null) (byCountry[r.iso3] ??= []).push(r);
+  const out: GrowthStat[] = [];
+  for (const iso3 of Object.keys(byCountry)) {
+    const rs = byCountry[iso3].sort((a, b) => a.year - b.year);
+    if (rs.length < 2) continue;
+    const first = rs[0];
+    const last = rs[rs.length - 1];
+    const years = last.year - first.year;
+    const fv = first.value as number;
+    const lv = last.value as number;
+    out.push({
+      iso3,
+      country: first.country,
+      firstYear: first.year,
+      firstValue: fv,
+      lastYear: last.year,
+      lastValue: lv,
+      absChange: lv - fv,
+      pctChange: fv === 0 ? null : ((lv - fv) / Math.abs(fv)) * 100,
+      cagr: fv > 0 && lv > 0 && years > 0 ? (Math.pow(lv / fv, 1 / years) - 1) * 100 : null,
+    });
+  }
+  return out.sort((a, b) => b.absChange - a.absChange);
+}
+
+export interface CorrelationResult {
+  r: number | null;
+  n: number;
+  year: number | null;
+  note?: string;
+}
+
+// Pearson correlation across countries between two indicators, matched by
+// ISO3 at one year (given, or the latest year both indicators share).
+export function correlate(
+  rows: DataRow[],
+  indicatorA: string,
+  indicatorB: string,
+  year?: number
+): CorrelationResult {
+  const a = rows.filter((r) => r.indicator === indicatorA && r.value !== null);
+  const b = rows.filter((r) => r.indicator === indicatorB && r.value !== null);
+  if (!a.length || !b.length) {
+    return { r: null, n: 0, year: null, note: 'one or both indicators have no fetched rows — fetch them first' };
+  }
+  let y = year;
+  if (y === undefined) {
+    const yearsA = new Set(a.map((r) => r.year));
+    const shared = [...new Set(b.map((r) => r.year))].filter((yy) => yearsA.has(yy));
+    if (!shared.length) return { r: null, n: 0, year: null, note: 'no overlapping years between the two indicators' };
+    y = Math.max(...shared);
+  }
+  const mapA = new Map(a.filter((r) => r.year === y).map((r) => [r.iso3, r.value as number]));
+  const pairs: [number, number][] = [];
+  for (const r of b) {
+    if (r.year === y && mapA.has(r.iso3)) pairs.push([mapA.get(r.iso3) as number, r.value as number]);
+  }
+  const n = pairs.length;
+  if (n < 3) return { r: null, n, year: y, note: 'fewer than 3 matched countries at this year' };
+  const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const xs = pairs.map((p) => p[0]);
+  const ys = pairs.map((p) => p[1]);
+  const mx = mean(xs);
+  const my = mean(ys);
+  let num = 0, dx = 0, dy = 0;
+  for (const [x, yv] of pairs) {
+    num += (x - mx) * (yv - my);
+    dx += (x - mx) ** 2;
+    dy += (yv - my) ** 2;
+  }
+  const denom = Math.sqrt(dx * dy);
+  return { r: denom === 0 ? null : num / denom, n, year: y };
 }
 
 // execute_js: the model writes real JS to rank/diff/filter/aggregate the
@@ -273,9 +557,13 @@ export function executeJs(code: string, rows: DataRow[]): ExecuteJsResult {
 
 // Build CSV from data rows for the download button.
 export function rowsToCSV(rows: DataRow[]): string {
-  const header = 'country,iso3,year,value';
+  const multi = new Set(rows.map((r) => r.indicator ?? '')).size > 1;
+  const header = multi ? 'indicator,country,iso3,year,value' : 'country,iso3,year,value';
   const body = rows
-    .map((r) => `${csvCell(r.country)},${r.iso3},${r.year},${r.value ?? ''}`)
+    .map((r) =>
+      (multi ? `${csvCell(r.indicator ?? '')},` : '') +
+      `${csvCell(r.country)},${r.iso3},${r.year},${r.value ?? ''}`
+    )
     .join('\n');
   return header + '\n' + body;
 }
@@ -385,8 +673,9 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     description:
       'Run JavaScript against the data you already fetched, to compute a ranking/reduction/' +
       'comparison/aggregate — instead of reasoning through the numbers by hand. Your code ' +
-      'receives one argument, `rows`, an array of {country, iso3, year, value} objects (the ' +
-      'combined result of every fetch_worldbank/fetch_worldbank_all call so far). Whatever your ' +
+      'receives one argument, `rows`, an array of {country, iso3, year, value, indicator} objects ' +
+      '(the combined result of every fetch call so far, across all sources; filter by the ' +
+      '`indicator` field when you have data from more than one). Whatever your ' +
       'code returns is sent back to you as the result — return the exact ranked/computed array ' +
       'or object you need for the chart or the finding, not intermediate steps. Use this for ' +
       'anything that requires comparing across many rows: top-N by change, percentage change, ' +
@@ -404,6 +693,100 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         },
       },
       required: ['code'],
+    },
+  },
+  {
+    name: 'search_datasets',
+    description:
+      'Search the non-World-Bank catalogs: Our World in Data (health, CO2/energy, happiness, HDI, ' +
+      'poverty, literacy) and IMF DataMapper (macro data INCLUDING FORECASTS several years ahead — ' +
+      'GDP growth, inflation, unemployment, government debt). Returns dataset ids ("owid:<slug>" ' +
+      'or "imf:<code>") and names. Use the returned id verbatim with fetch_owid / fetch_imf. ' +
+      'Prefer World Bank (search_indicators) for standard development indicators; come here for ' +
+      'topics it lacks or when the question needs projections/forecasts.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keywords, e.g. "co2 emissions", "inflation forecast", "happiness"' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'fetch_owid',
+    description:
+      'Fetch an Our World in Data dataset (id from search_datasets, "owid:<slug>"). Returns rows ' +
+      'of {country, iso3, year, value, indicator}. Omit country_ids for every country. Use ' +
+      '"OWID_WRL" as a country id for the world aggregate.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dataset_id: { type: 'string', description: 'e.g. "owid:life-expectancy" (verbatim from search_datasets)' },
+        country_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional ISO3 codes to filter to; omit for all countries.',
+        },
+        year_start: { type: 'number' },
+        year_end: { type: 'number' },
+      },
+      required: ['dataset_id'],
+    },
+  },
+  {
+    name: 'fetch_imf',
+    description:
+      'Fetch an IMF DataMapper series (id from search_datasets, "imf:<code>"). THE source for ' +
+      'forecasts: series extend several years beyond today as IMF projections — say so in the ' +
+      'finding when you use projected years. Returns rows of {country, iso3, year, value, ' +
+      'indicator}. Omit country_ids for all countries.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dataset_id: { type: 'string', description: 'e.g. "imf:NGDP_RPCH" (verbatim from search_datasets)' },
+        country_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional ISO3 codes; omit for all countries.',
+        },
+        year_start: { type: 'number' },
+        year_end: { type: 'number' },
+      },
+      required: ['dataset_id'],
+    },
+  },
+  {
+    name: 'growth_stats',
+    description:
+      'Compute per-country change statistics over the data you already fetched: first/last value, ' +
+      'absolute change, percent change, and CAGR, sorted by absolute change. One cheap call that ' +
+      'replaces hand-written ranking code for "which countries grew/fell the most" questions and ' +
+      'is a fast way to FIND the insight (outliers, surprising risers/fallers) before finishing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        indicator_id: {
+          type: 'string',
+          description: 'Restrict to one indicator id (recommended when multiple were fetched).',
+        },
+      },
+    },
+  },
+  {
+    name: 'correlate',
+    description:
+      'Pearson correlation across countries between two already-fetched indicators, matched by ' +
+      'country at one year (given, or the latest year both share). Use for "is X related to Y" ' +
+      'questions and to strengthen findings with a relationship the chart alone does not show. ' +
+      'Returns {r, n, year}. Both indicators must be fetched first.',
+    parameters: {
+      type: 'object',
+      properties: {
+        indicator_a: { type: 'string', description: 'First indicator id (as stored on rows, e.g. "SP.DYN.LE00.IN" or "owid:life-expectancy")' },
+        indicator_b: { type: 'string', description: 'Second indicator id' },
+        year: { type: 'number', description: 'Optional; defaults to latest shared year.' },
+      },
+      required: ['indicator_a', 'indicator_b'],
     },
   },
   {

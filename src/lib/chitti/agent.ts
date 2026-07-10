@@ -14,9 +14,15 @@ import {
   VFS,
   TOOL_SCHEMAS,
   searchIndicators,
+  searchDatasets,
+  datasetName,
   listCountries,
   fetchWorldbank,
   fetchWorldbankAll,
+  fetchOwid,
+  fetchImf,
+  growthStats,
+  correlate,
   executeJs,
   rowsToCSV,
   INDICATORS,
@@ -65,7 +71,9 @@ export interface AgentOutput {
   kind: 'chart' | 'explanation';
 }
 
-const SYSTEM_PROMPT = `You are Chitti, a data analyst agent that answers questions about the world using ONLY the World Bank Open Data API. Every tool call you make, and your reasoning before it, is shown live to the user as your work happens — that IS the audit trail. Do not write intermediate planning/shortlist/spec files to narrate a decision you can just state in your reasoning; each extra tool call is a real round-trip with real latency, so only call a tool when you need its actual result.
+const SYSTEM_PROMPT = `You are Chitti, a data analyst agent that answers questions about the world using free institutional data APIs: World Bank Open Data (default), Our World in Data (health, CO2/energy, happiness, HDI, poverty — via search_datasets/fetch_owid), and IMF DataMapper (macro data INCLUDING FORECASTS several years ahead — via search_datasets/fetch_imf; the only source with projections, and findings using projected years must say they are IMF projections). Every tool call you make, and your reasoning before it, is shown live to the user as your work happens — that IS the audit trail. Do not write intermediate planning/shortlist/spec files to narrate a decision you can just state in your reasoning; each extra tool call is a real round-trip with real latency, so only call a tool when you need its actual result.
+
+You are driven to produce INSIGHTS, not just charts. After fetching, growth_stats (per-country change/CAGR ranking) and correlate (relationship between two indicators) are one-call ways to find the outlier, trend break, or relationship worth reporting — cheaper and more reliable than writing the same JS yourself.
 
 Not every question needs a chart. First decide the answer's shape:
 - Data question ("which countries...", "compare...", "how has X changed...") → run the chart pipeline below.
@@ -210,6 +218,64 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
           }
           case 'read_file': {
             result = vfs.read(String(a.path)) || '(empty)';
+            break;
+          }
+          case 'search_datasets': {
+            const hits = searchDatasets(String(a.query ?? ''));
+            result = hits.length
+              ? JSON.stringify(hits.map((d) => ({ id: d.id, name: d.name, source: d.source })))
+              : 'No matches in the OWID/IMF catalogs — use search_indicators (World Bank) instead.';
+            break;
+          }
+          case 'fetch_owid': {
+            const id = String(a.dataset_id ?? '');
+            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            const { rows, metric } = await fetchOwid(
+              id,
+              ids,
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined
+            );
+            state.rows = state.rows.concat(rows);
+            const nid = 'owid:' + id.replace(/^owid:/, '');
+            state.indicators.set(nid, datasetName(nid) ?? metric);
+            result = summarizeRows(rows);
+            ev.detail = `${rows.length} rows · OWID`;
+            break;
+          }
+          case 'fetch_imf': {
+            const id = String(a.dataset_id ?? '');
+            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            const { rows } = await fetchImf(
+              id,
+              ids,
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined
+            );
+            state.rows = state.rows.concat(rows);
+            const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
+            state.indicators.set(nid, datasetName(nid) ?? nid);
+            result = summarizeRows(rows);
+            ev.detail = `${rows.length} rows · IMF (incl. forecasts)`;
+            break;
+          }
+          case 'growth_stats': {
+            const stats = growthStats(state.rows, a.indicator_id ? String(a.indicator_id) : undefined);
+            result = stats.length
+              ? JSON.stringify(stats.slice(0, 60))
+              : 'No computable rows — fetch data first (need 2+ years per country).';
+            ev.detail = `${stats.length} countries`;
+            break;
+          }
+          case 'correlate': {
+            const out = correlate(
+              state.rows,
+              String(a.indicator_a ?? ''),
+              String(a.indicator_b ?? ''),
+              a.year !== undefined ? Number(a.year) : undefined
+            );
+            result = JSON.stringify(out);
+            ev.detail = out.r === null ? out.note ?? 'n/a' : `r=${out.r.toFixed(3)}, n=${out.n}`;
             break;
           }
           case 'render_chart': {
@@ -434,9 +500,10 @@ export async function runAgent(
 }
 
 function indicatorName(id: string): string {
-  // Enrich the raw indicator id with its friendly curated name when we have one.
+  // Enrich the raw indicator id with its friendly curated name when we have
+  // one — checking the World Bank list first, then the OWID/IMF catalogs.
   const hit = INDICATORS.find((i) => i.id === id);
-  return hit ? hit.name : id;
+  return hit ? hit.name : (datasetName(id) ?? id);
 }
 
 // Pull the first plausible one-sentence takeaway out of a model's text.
