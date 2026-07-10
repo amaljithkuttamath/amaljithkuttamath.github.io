@@ -80,6 +80,9 @@ export interface ModelOption {
   // reasoning on a model that doesn't support the param at all is a request
   // error, so this flag gates whether we ask in the first place).
   reasoning?: boolean;
+  // OpenRouter-only: context window size, used to rank free fallback
+  // candidates (a rough capability proxy when nothing better is available).
+  ctx?: number;
 }
 
 export interface ProviderMeta {
@@ -166,20 +169,42 @@ export function providerMeta(id: ProviderId): ProviderMeta {
   return PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[0];
 }
 
-// Fallback chain for FREE OpenRouter models — VERIFIED tool-callers only.
-// Free upstreams flake regularly; OpenRouter's native `models` routing tries
-// these in order within a single request when the primary errors, instead of
-// failing the whole run. Two deliberate quality bounds:
+// Fallback chain for FREE OpenRouter models. Verified tool-callers first;
+// the rest is discovered live so it never goes stale. Quality bounds:
 // 1. The chain is per-request: every call lists the user's primary first,
 //    so a backup only ever serves while the primary is actually down.
-// 2. No wildcard entries. openrouter/free was removed — it auto-routes to
-//    arbitrary models, including ones tested as unreliable on this app's
-//    tool pipeline. Better to fail visibly than to answer with a model
-//    that hallucinates tool calls.
-export const FREE_FALLBACK_CHAIN = [
+// 2. Verified models (tested on this app's pipeline) outrank discovered
+//    ones, and discovered candidates must support BOTH tools and reasoning
+//    (weeds out most small models that fumble multi-step tool use), ranked
+//    by context length as a rough capability proxy.
+// 3. No wildcard auto-router — better to fail visibly than answer with a
+//    model that hallucinates tool calls.
+export const FREE_FALLBACK_VERIFIED = [
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3-super-120b-a12b:free',
 ];
+
+export async function buildFreeFallbackChain(primary: string): Promise<string[]> {
+  const verified = FREE_FALLBACK_VERIFIED.filter((id) => id !== primary);
+  try {
+    const models = await fetchModels('openrouter'); // cached 10 min
+    const live = new Set(models.map((m) => m.id));
+    const discovered = models
+      .filter(
+        (m) =>
+          m.free &&
+          m.reasoning &&
+          m.id !== primary &&
+          !FREE_FALLBACK_VERIFIED.includes(m.id)
+      )
+      .sort((a, b) => (b.ctx ?? 0) - (a.ctx ?? 0))
+      .slice(0, 2)
+      .map((m) => m.id);
+    return [primary, ...verified.filter((id) => live.has(id)), ...discovered];
+  } catch {
+    return [primary, ...verified];
+  }
+}
 
 // Models verified (by hand, running this app's actual tool-calling pipeline
 // — not a general benchmark) to be reliable at multi-step tool use. Small
@@ -267,6 +292,7 @@ async function fetchOpenRouterModels(): Promise<ModelOption[]> {
       label: id + (isFree ? '  · free' : '') + (isReasoning ? '  · reasoning' : ''),
       free: isFree,
       reasoning: isReasoning,
+      ctx: typeof m.context_length === 'number' ? m.context_length : undefined,
     });
     // Cache pricing so estimateCost is accurate for the current catalog.
     const inPrice = parseFloat(pricing.prompt ?? '0') * 1e6;
@@ -399,8 +425,7 @@ async function callOpenAICompatible(
   // upstream degrades to the next-best free model instead of failing the
   // run. Only for :free primaries — paid model choices are never swapped.
   if (isRouter && cfg.model.endsWith(':free')) {
-    const chain = [cfg.model, ...FREE_FALLBACK_CHAIN.filter((m) => m !== cfg.model)];
-    body.models = chain;
+    body.models = await buildFreeFallbackChain(cfg.model);
   }
 
   const headers: Record<string, string> = {
