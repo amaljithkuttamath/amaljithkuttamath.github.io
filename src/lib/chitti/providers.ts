@@ -200,9 +200,12 @@ export async function buildFreeFallbackChain(primary: string): Promise<string[]>
       .sort((a, b) => (b.ctx ?? 0) - (a.ctx ?? 0))
       .slice(0, 2)
       .map((m) => m.id);
-    return [primary, ...verified.filter((id) => live.has(id)), ...discovered];
+    // OpenRouter rejects requests with more than 3 entries in `models`
+    // ("'models' array must have 3 items or fewer"), so the chain is
+    // primary + the best 2 backups.
+    return [primary, ...verified.filter((id) => live.has(id)), ...discovered].slice(0, 3);
   } catch {
-    return [primary, ...verified];
+    return [primary, ...verified].slice(0, 3);
   }
 }
 
