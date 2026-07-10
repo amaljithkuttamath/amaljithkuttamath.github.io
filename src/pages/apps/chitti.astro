@@ -1624,7 +1624,14 @@ const PRESETS = [
     60% { transform: translateX(4px); }
   }
 
-  .ch-byok-body { padding: 4px var(--space-md) var(--space-md); }
+  /* Never let the config panel outgrow the screen: it lives inside the
+     sticky composer, so anything taller than the viewport minus keyboard
+     was simply cut off with no way to reach the fields. */
+  .ch-byok-body {
+    padding: 4px var(--space-md) var(--space-md);
+    max-height: min(50vh, 340px);
+    overflow-y: auto;
+  }
   .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
   .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
@@ -2216,9 +2223,18 @@ const PRESETS = [
     .ch-panel-meta { display: none; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
     .ch-field { min-width: 0; }
+    .ch-field-grow { min-width: 0; }
     .ch-byok-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
     .ch-byok-cta { margin-left: 0; }
     .ch-byok-sum { flex-wrap: wrap; }
+    /* iOS zooms the page when a focused input's font-size is below 16px —
+       which threw the whole panel out of the viewport the moment you
+       tapped the key field. 16px on every input in the app stops that. */
+    .ch-select, .ch-input, .ch-q { font-size: 16px; }
+    /* Selects and the key input can't force the panel wider than the bar. */
+    .ch-select, .ch-input { width: 100%; max-width: 100%; }
+    .ch-byok-state { max-width: 18ch; }
+    .ch-keylinks { flex-direction: column; gap: 6px; }
     .ch-ask-foot { flex-direction: column; align-items: stretch; }
     /* Only the top console stacks its button full-width on mobile (its
        .ch-ask-foot goes column above). The composer is a horizontal row, so
