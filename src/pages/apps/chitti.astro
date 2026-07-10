@@ -2245,7 +2245,14 @@ const PRESETS = [
     .ch-field-grow { min-width: 0; }
     .ch-byok-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
     .ch-byok-cta { margin-left: 0; }
-    .ch-byok-sum { flex-wrap: wrap; }
+    /* Decorative badge pills wrap into a ragged second line under the
+       title at phone widths — they carry no function, drop them. */
+    .ch-badges { display: none; }
+    /* Keep the config chip a single line: while no key is set, the amber
+       "needs an api key" CTA is the only thing worth the space; once a key
+       exists the CTA hides and the (truncated) state text returns. */
+    .ch-byok-sum { flex-wrap: nowrap; }
+    .ch-byok-sum.ch-byok-missing .ch-byok-state { display: none; }
     /* iOS zooms the page when a focused input's font-size is below 16px —
        which threw the whole panel out of the viewport the moment you
        tapped the key field. 16px on every input in the app stops that. */
