@@ -1403,10 +1403,15 @@ const PRESETS = [
   .ch-inputbar {
     flex-shrink: 0;
     position: sticky;
-    bottom: 12px;
+    /* Clear the iPhone home indicator / gesture bar. */
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     z-index: 5;
     margin-top: var(--space-md);
-    background: var(--bg-elevated);
+    /* OPAQUE background, not var(--bg-elevated): that token is 96%-
+       transparent white, so the thread scrolled visibly through the sticky
+       composer — it never read as an overlay, especially on mobile. Mix the
+       elevation tint over the solid page bg instead. */
+    background: color-mix(in srgb, var(--fg) 5%, var(--bg));
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-lg);
     box-shadow: 0 4px 24px color-mix(in srgb, var(--bg) 60%, transparent);
