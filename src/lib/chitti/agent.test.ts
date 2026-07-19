@@ -4,6 +4,7 @@ import {
   schemasForSources,
   resolveSources,
   datasetSourcesFor,
+  findSeries,
   DEFAULT_SOURCE_IDS,
 } from './tools';
 
@@ -19,22 +20,33 @@ describe('finish_explanation tool schema', () => {
 describe('source hard filter', () => {
   const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
 
-  it('World-Bank-only sessions cannot see OWID/IMF tools', () => {
+  it('World-Bank-only sessions cannot see OWID/IMF fetch tools', () => {
     const n = names(['worldbank']);
     expect(n).toContain('fetch_worldbank');
     expect(n).not.toContain('fetch_owid');
     expect(n).not.toContain('fetch_imf');
-    expect(n).not.toContain('search_datasets');
   });
 
-  it('OWID-only sessions get the shared dataset tool but not IMF fetch', () => {
+  it('OWID-only sessions get only their fetch tool', () => {
     const n = names(['owid']);
     expect(n).toContain('fetch_owid');
-    expect(n).toContain('search_datasets');
     expect(n).not.toContain('fetch_imf');
     expect(n).not.toContain('fetch_worldbank');
     // The shared catalog is filtered to OWID datasets only.
     expect(datasetSourcesFor(['owid'])).toEqual(['owid']);
+  });
+
+  it('find_series is a core tool present for every selection', () => {
+    for (const sel of [['worldbank'], ['owid'], ['imf'], undefined]) {
+      expect(names(sel)).toContain('find_series');
+    }
+  });
+
+  it('the per-source search tools are gone, replaced by find_series', () => {
+    const all = names(undefined);
+    expect(all).not.toContain('search_indicators');
+    expect(all).not.toContain('search_datasets');
+    expect(all).toContain('find_series');
   });
 
   it('always includes the source-agnostic core tools', () => {
@@ -47,6 +59,21 @@ describe('source hard filter', () => {
     expect(resolveSources([]).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(resolveSources(['nope']).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(schemasForSources(undefined).length).toBe(TOOL_SCHEMAS.length);
+  });
+});
+
+describe('findSeries — cross-source search', () => {
+  it('returns only OWID/IMF hits when World Bank is inactive (no network)', async () => {
+    // OWID+IMF search is a pure catalog filter (no fetch), so this is offline.
+    const hits = await findSeries('co2 emissions', ['owid']);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((h) => h.source === 'owid')).toBe(true);
+    expect(hits.every((h) => h.id.startsWith('owid:'))).toBe(true);
+  });
+
+  it('finds IMF forecast series and namespaces the id', async () => {
+    const hits = await findSeries('inflation', ['imf']);
+    expect(hits.some((h) => h.source === 'imf' && h.id.startsWith('imf:'))).toBe(true);
   });
 });
 
@@ -213,14 +240,16 @@ describe('message trimming', () => {
     const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
     mockComplete.mockReset();
 
-    // search_datasets returns a JSON list of catalog hits — a deterministic,
-    // network-free way to force a >200-char tool-result payload. (execute_js
-    // can no longer serve this role in the test: it now short-circuits with
-    // a small error message when no rows have been fetched, which is exactly
-    // the empty-dataset guard behavior, not a trimming subject.)
+    // find_series returns a JSON list of catalog hits — a deterministic,
+    // network-free way to force a >200-char tool-result payload. Scoped to the
+    // OWID/IMF catalog sources so the search is a pure in-memory filter (World
+    // Bank's search can fall back to a live API call). (execute_js can no
+    // longer serve this role: it short-circuits with a small error when no
+    // rows have been fetched, which is the empty-dataset guard, not a trim
+    // subject.)
     mockComplete.mockResolvedValueOnce({
       text: '',
-      toolCalls: [{ id: 'e0', name: 'search_datasets', arguments: { query: 'co2 energy happiness gdp inflation poverty literacy unemployment debt' } }],
+      toolCalls: [{ id: 'e0', name: 'find_series', arguments: { query: 'co2 energy happiness gdp inflation poverty literacy unemployment debt' } }],
       usage: { input: 10, output: 5 },
     });
     mockComplete.mockResolvedValueOnce({
@@ -234,7 +263,10 @@ describe('message trimming', () => {
       usage: { input: 5, output: 2 },
     });
 
-    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { sources: ['owid', 'imf'] }
+    );
     const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
     await session.ask('Fetch data', cb);
 
