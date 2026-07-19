@@ -1,0 +1,33 @@
+{
+  "name": "Chitti — real answers about the world",
+  "short_name": "Chitti",
+  "description": "Ask about the world, get real numbers — charted, cited, and computed live from World Bank, Our World in Data, and IMF APIs. Browser-only, bring your own key.",
+  "id": "/apps/chitti/",
+  "start_url": "/apps/chitti/",
+  "scope": "/apps/chitti/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0d0c",
+  "theme_color": "#0b0d0c",
+  "categories": ["productivity", "education", "utilities"],
+  "icons": [
+    {
+      "src": "/apps/chitti/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apps/chitti/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/apps/chitti/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
