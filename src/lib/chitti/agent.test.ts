@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   TOOL_SCHEMAS,
   schemasForSources,
+  subAgentSchemasFor,
   resolveSources,
   datasetSourcesFor,
   findSeries,
@@ -67,6 +68,52 @@ describe('source hard filter', () => {
     expect(resolveSources([]).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(resolveSources(['nope']).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(schemasForSources(undefined).length).toBe(TOOL_SCHEMAS.length);
+  });
+});
+
+describe('delegate_source gating + depth-1 (schema level)', () => {
+  const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
+
+  it('delegate_source is absent from single-source schemas, present when >1 active', () => {
+    // Gating: a session with one active database never even sees the tool.
+    expect(names(['worldbank'])).not.toContain('delegate_source');
+    expect(names(['owid'])).not.toContain('delegate_source');
+    expect(names(['imf'])).not.toContain('delegate_source');
+    // >1 active database → the tool appears in the main-loop schema set.
+    expect(names(['owid', 'imf'])).toContain('delegate_source');
+    expect(names(['worldbank', 'owid'])).toContain('delegate_source');
+    expect(names(undefined)).toContain('delegate_source'); // all sources = >1
+  });
+
+  it('sub-agent schema set is depth-1: no delegate_source, only its own source + core', () => {
+    for (const id of ['worldbank', 'owid', 'imf']) {
+      const n = subAgentSchemasFor(id).map((s) => s.name);
+      // Depth-1 enforced STRUCTURALLY: a sub-agent literally cannot delegate.
+      expect(n).not.toContain('delegate_source');
+      // Its allowed toolset: source-scoped find_series, execute_js (with llm()),
+      // its own fetch tool(s), and the terminal return_findings.
+      expect(n).toContain('find_series');
+      expect(n).toContain('execute_js');
+      expect(n).toContain('return_findings');
+      // No main-loop-only tools leak into a sub-agent.
+      expect(n).not.toContain('render_chart');
+      expect(n).not.toContain('finish');
+      expect(n).not.toContain('finish_explanation');
+    }
+    // Each sub-agent gets ONLY its own source's fetch tool.
+    expect(subAgentSchemasFor('owid').map((s) => s.name)).toContain('fetch_owid');
+    expect(subAgentSchemasFor('owid').map((s) => s.name)).not.toContain('fetch_imf');
+    expect(subAgentSchemasFor('owid').map((s) => s.name)).not.toContain('fetch_worldbank');
+    expect(subAgentSchemasFor('worldbank').map((s) => s.name)).toContain('fetch_worldbank');
+    expect(subAgentSchemasFor('worldbank').map((s) => s.name)).toContain('fetch_worldbank_all');
+    expect(subAgentSchemasFor('imf').map((s) => s.name)).toContain('fetch_imf');
+  });
+
+  it('return_findings is never exposed to the main loop', () => {
+    for (const sel of [['worldbank'], ['owid', 'imf'], undefined]) {
+      expect(names(sel)).not.toContain('return_findings');
+    }
+    expect(TOOL_SCHEMAS.map((s) => s.name)).not.toContain('return_findings');
   });
 });
 
@@ -735,5 +782,258 @@ describe('RLM llm() inside execute_js', () => {
     // A plain (fetched) artifact carries no derived marker.
     expect(plainWrite?.derived).toBeFalsy();
     expect(files['themes.json']).toBe('["rising","falling"]');
+  });
+});
+
+// ── delegate_source: depth-1 per-source sub-agents, on the RLM plumbing ───────
+// Drive real turns through createSession with complete() mocked. Each sub-agent
+// turn is just another queued mockComplete value; its fetches merge into the
+// shared parent state, and its receipts stream nested under the delegate step —
+// all without any network or live model.
+describe('delegate_source sub-agents (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const llmReply = (text: string) => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  // Every tool-result message of a given name the model was shown, deduped by id.
+  const toolMsgs = (name: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) {
+        if (m.role === 'tool' && m.name === name && !seen.has(m.tool_call_id)) {
+          seen.add(m.tool_call_id);
+          out.push(m.content);
+        }
+      }
+    }
+    return out;
+  };
+
+  it('a single-source session refuses delegate_source at dispatch (runtime guard)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    // The mock forces the call even though it is absent from a one-source
+    // schema — proving the dispatch itself refuses, not just the schema filter.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'World Bank', question: 'x' }, 'd1'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    const res = toolMsgs('delegate_source');
+    expect(res.length).toBe(1);
+    expect(res[0]).toContain('unavailable');
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.detail).toBe('unavailable');
+  });
+
+  it('caps at 3 delegations per turn; the 4th is refused, the first 3 run', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'owid', question: 'q1' }, 'd1'),
+        tc('delegate_source', { source: 'imf', question: 'q2' }, 'd2'),
+        tc('delegate_source', { source: 'owid', question: 'q3' }, 'd3'),
+        tc('delegate_source', { source: 'imf', question: 'q4' }, 'd4'),
+      ])
+    );
+    // Three sub-agents that each return immediately.
+    for (let i = 0; i < 3; i++)
+      mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sum' + i }, 'r' + i)]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    await newSession(['owid', 'imf']).ask('q', cb);
+
+    const res = toolMsgs('delegate_source');
+    expect(res.length).toBe(4);
+    // First 3 succeeded (distilled summaries, source-labelled); 4th hit the cap.
+    expect(res.slice(0, 3).every((r) => r.startsWith('['))).toBe(true);
+    expect(res[3]).toMatch(/delegation budget spent/);
+    const dels = trace().filter((e) => e.tool === 'delegate_source');
+    expect(dels.length).toBe(4);
+    expect(dels[3].status).toBe('ok'); // a cap refusal is a normal result, not an error
+    expect(dels[3].detail).toBe('cap reached');
+  });
+
+  it('a sub-agent that never returns findings stops at its 6-step cap; parent continues', async () => {
+    // find_series over OWID is a pure in-memory catalog filter (offline).
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'gdp' }, 'd1')]));
+    // Six sub-agent turns that keep searching and never return_findings.
+    for (let i = 0; i < 6; i++)
+      mockComplete.mockResolvedValueOnce(modelTurn([tc('find_series', { query: 'gdp' }, 'f' + i)]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+
+    // Exactly six nested sub-agent steps; the 7th turn never ran.
+    const nested = trace().filter((e) => e.nested && e.tool === 'find_series');
+    expect(nested.length).toBe(6);
+    const res = toolMsgs('delegate_source');
+    expect(res[0]).toMatch(/6-step limit/);
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.status).toBe('error');
+    expect(ev?.detail).toBe('cap reached');
+    // The main loop continued past the failed delegation.
+    expect(out.finding).toBe('done');
+  });
+
+  it('merges two sub-agents\' fetched rows + indicators into parent state, citations intact', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes('api.worldbank.org'))
+          return {
+            ok: true,
+            json: async () => [
+              { page: 1, pages: 1 },
+              [
+                { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 70 },
+                { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 71 },
+              ],
+            ],
+          };
+        if (u.includes('ourworldindata.org'))
+          return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\nIndia,IND,2021,69.5\n' };
+        throw new Error('unexpected url ' + u);
+      })
+    );
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'World Bank', question: 'life expectancy IND' }, 'd1'),
+        tc('delegate_source', { source: 'owid', question: 'life expectancy IND' }, 'd2'),
+      ])
+    );
+    // Sub-agent 1 (World Bank): fetch then return.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_worldbank', { indicator_id: 'SP.DYN.LE00.IN', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'WB life exp ~71' }, 'r1')]));
+    // Sub-agent 2 (OWID): fetch then return.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_owid', { dataset_id: 'owid:life-expectancy', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'of')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'OWID life exp ~69.5' }, 'r2')]));
+    // Parent combines: chart + finish.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'IND', data: [[2020, 70]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'combined' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('life expectancy', cb);
+
+    // Rows from BOTH sources merged, each carrying its own citation (indicator).
+    expect(out.rows.length).toBe(4);
+    const inds = new Set(out.rows.map((r) => r.indicator));
+    expect(inds.has('SP.DYN.LE00.IN')).toBe(true);
+    expect(inds.has('owid:life-expectancy')).toBe(true);
+    // Indicator registry (drives the evidence table + chart↔evidence linking).
+    const indIds = out.indicators.map((i) => i.id);
+    expect(indIds).toContain('SP.DYN.LE00.IN');
+    expect(indIds).toContain('owid:life-expectancy');
+    // The parent model never saw the raw rows — only the distilled summaries.
+    const res = toolMsgs('delegate_source');
+    expect(res.some((r) => r.includes('WB life exp'))).toBe(true);
+    expect(res.some((r) => r.includes('OWID life exp'))).toBe(true);
+  });
+
+  it('sub-agent llm() calls draw from the SAME per-turn llm budget as the main loop', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('api.worldbank.org'))
+          return { ok: true, json: async () => [{ page: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+        throw new Error('unexpected ' + url);
+      })
+    );
+
+    // Main turn: seed rows, then two execute_js runs spending 6 of the 8 llm()
+    // calls (4 + 2 — the per-run cap is 4, so a single 6-call run would trip it;
+    // this exercises the shared PER-TURN budget instead).
+    const runCode = (n: number) => `for (let i = 0; i < ${n}; i++) { await llm("m" + i, rows[0]); } return ${n};`;
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: runCode(4) }, 'ejA'),
+        tc('execute_js', { code: runCode(2) }, 'ejB'),
+      ])
+    );
+    for (let i = 0; i < 6; i++) mockComplete.mockResolvedValueOnce(llmReply('l' + i));
+    // Main delegates to World Bank; the sub-agent's execute_js tries 4 more
+    // llm() calls but only 2 fit (6 + 2 = 8), the 3rd/4th reject per-turn.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'more' }, 'd1')]));
+    const subCode =
+      'let ok = 0; let caught = ""; for (let i = 0; i < 4; i++) { try { await llm("s" + i, rows[0]); ok++; } catch (e) { caught = e.message; } } return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('execute_js', { code: subCode }, 'sej')]));
+    for (let i = 0; i < 2; i++) mockComplete.mockResolvedValueOnce(llmReply('sl' + i));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r1')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank', 'owid']).ask('q', cb);
+
+    // 6 main + 2 sub = exactly the 8-per-turn cap of llm() receipts.
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(8);
+    // The sub-agent's 3rd/4th calls rejected with the PER-TURN error, proving a
+    // shared budget (a fresh per-run budget would have allowed 4).
+    const subEjResult = (() => {
+      for (const call of mockComplete.mock.calls) {
+        const msgs = call[1] as any[];
+        if (!Array.isArray(msgs)) continue;
+        for (const m of msgs)
+          if (m.role === 'tool' && m.name === 'execute_js' && m.tool_call_id === 'sej') return JSON.parse(m.content);
+      }
+      return null;
+    })();
+    expect(subEjResult?.ok).toBe(2);
+    expect(subEjResult?.caught).toMatch(/per turn/);
+  });
+
+  it('a sub-agent whose model call fails yields an error receipt; the main loop continues', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'q' }, 'd1')]));
+    // The sub-agent's first model call rejects.
+    mockComplete.mockRejectedValueOnce(new Error('provider exploded'));
+    // A later parent turn proves the loop continued past the failed delegation.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'Recovered.' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.status).toBe('error');
+    expect(ev?.detail).toBe('error');
+    const res = toolMsgs('delegate_source');
+    expect(res[0]).toContain('failed');
+    expect(res[0]).toContain('provider exploded');
+    // Never a crash, never fabricated filler — the loop reached a real finish.
+    expect(out.finding).toBe('Recovered.');
   });
 });

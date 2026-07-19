@@ -1012,7 +1012,51 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       required: ['explanation'],
     },
   },
+  {
+    name: 'delegate_source',
+    description:
+      'Delegate ONE database\'s part of the question to a focused sub-agent, and get back a short ' +
+      'distilled summary (the sub-agent\'s fetched rows merge into your data automatically, with ' +
+      'their citations intact — you never see the raw rows). Offered only when more than one ' +
+      'database is active. Use it ONLY for questions that genuinely span multiple databases: ' +
+      'delegate each source\'s slice, then combine the summaries. For anything one database ' +
+      'answers on its own, use the direct fetch/compute tools — delegation spends extra model ' +
+      'calls. Call it once per source (you may call it a few times, one source each).',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'The database to delegate to — its name or id (e.g. "Our World in Data", "owid", "IMF", "World Bank").',
+        },
+        question: {
+          type: 'string',
+          description: 'The focused, single-source sub-question, e.g. "life expectancy for G7 countries since 1960".',
+        },
+      },
+      required: ['source', 'question'],
+    },
+  },
 ];
+
+// The sub-agent's terminal tool — hands a distilled text summary back to the
+// main agent and ends the sub-agent loop. Kept OUT of TOOL_SCHEMAS (and thus
+// out of every main-loop schema set); it exists only inside a delegation.
+export const RETURN_FINDINGS_SCHEMA: ToolSchema = {
+  name: 'return_findings',
+  description:
+    'Finish this sub-agent and return a SHORT distilled summary (a few sentences: the key ' +
+    'numbers and what they show) to the main agent. Your fetched rows are already merged back ' +
+    'with their citations — do not paste raw rows here. Call this once you have what the ' +
+    'sub-question needs.',
+  parameters: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'The distilled text summary for the main agent.' },
+    },
+    required: ['summary'],
+  },
+};
 
 // ── Source registry ──────────────────────────────────────────────────────
 // The single source of truth for "which databases exist". One entry per
@@ -1111,9 +1155,27 @@ export function resolveSources(ids?: string[]): SourceDef[] {
 // The tool schemas the model should see for a given source selection: the
 // always-on core plus every selected source's own tools, in original order.
 export function schemasForSources(ids?: string[]): ToolSchema[] {
+  const sources = resolveSources(ids);
   const allowed = new Set(CORE_TOOL_NAMES);
-  for (const s of resolveSources(ids)) for (const t of s.toolNames) allowed.add(t);
+  for (const s of sources) for (const t of s.toolNames) allowed.add(t);
+  // delegate_source is offered to the MAIN loop only when more than one source
+  // is active — a single-source session has nothing to delegate across, so the
+  // tool never even appears in its schema (the dispatch refuses it too).
+  if (sources.length > 1) allowed.add('delegate_source');
   return TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
+}
+
+// The tool schema set for a depth-1 per-source sub-agent (a delegation target).
+// Scoped to ONE database: find_series (the caller restricts it to this source),
+// execute_js (with the recursive llm() primitive), this source's own fetch
+// tool(s), plus return_findings. delegate_source is structurally absent — a
+// sub-agent can never itself delegate, so recursion is bounded to depth 1.
+export function subAgentSchemasFor(sourceId: string): ToolSchema[] {
+  const src = SOURCES.find((s) => s.id === sourceId);
+  const names = new Set<string>(['find_series', 'execute_js']);
+  if (src) for (const t of src.toolNames) names.add(t);
+  const base = TOOL_SCHEMAS.filter((sch) => names.has(sch.name));
+  return [...base, RETURN_FINDINGS_SCHEMA];
 }
 
 // The dataset-catalog sources (owid/imf) among a selection — pushed into

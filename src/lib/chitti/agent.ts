@@ -26,6 +26,8 @@ import {
   INDICATORS,
   resolveSources,
   schemasForSources,
+  subAgentSchemasFor,
+  type LlmFn,
   type SourceDef,
   type ChartSpec,
   type DataRow,
@@ -44,6 +46,14 @@ const MAX_TOOL_CALLS = 12;
 const MAX_LLM_PER_RUN = 4;
 const MAX_LLM_PER_TURN = 8;
 const LLM_DATA_CAP = 20_000;
+
+// Depth-1 delegation bounds (delegate_source). A turn may spawn at most
+// MAX_DELEGATIONS_PER_TURN per-source sub-agents (shared counter, same pattern
+// as turnLlmCalls), and each sub-agent may make at most MAX_SUBAGENT_CALLS tool
+// calls before it must return_findings or is stopped. Sub-agent llm() calls
+// draw from the SAME per-turn llm budget (MAX_LLM_PER_TURN) as the main loop.
+const MAX_DELEGATIONS_PER_TURN = 3;
+const MAX_SUBAGENT_CALLS = 6;
 
 export interface TraceEvent {
   tool: string;
@@ -147,7 +157,19 @@ Rules:
 - Use ids from search results verbatim. Years are numbers.
 - Only the active databases listed above are available — do not mention or attempt any other source.
 - PROVENANCE: anything llm() produces is model-derived, not fetched. Never present it as a data value, cite it, or put it in a chart as if measured. If you save an llm()-derived artifact with write_file, set derived=true so it is labelled model-derived.
-- list_countries, write_file, read_file exist but are almost never needed.`;
+${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- list_countries, write_file, read_file exist but are almost never needed.`;
+}
+
+// The system prompt for a depth-1 per-source sub-agent — scoped to ONE
+// database. It fetches and distils; it never charts, verifies, or delegates
+// (those belong to the main loop, and delegate_source is not in its schema).
+function buildSubAgentPrompt(src: SourceDef): string {
+  return `You are a focused sub-agent. You work with exactly ONE database: ${src.label}.
+${src.promptSnippet}
+
+Your tools: find_series (searches ${src.label} only), the fetch tool for this source, execute_js (compute over the rows fetched so far — you may also \`await llm(prompt, dataSlice)\` for bounded semantic work), and return_findings.
+
+Do the minimum needed to answer the sub-question: find the series, fetch it, optionally compute, then call return_findings with a SHORT distilled summary — a few sentences naming the key numbers and what they show. Your fetched rows are automatically merged back to the main agent WITH their citations, so never paste raw rows into the summary. Budget: ${MAX_SUBAGENT_CALLS} tool calls. Call tools; do not narrate a plan in prose.`;
 }
 
 // A compact, model-friendly summary of a data fetch.
@@ -204,8 +226,12 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     let totalCost = 0;
     // Shared per-turn counter for recursive llm() calls across every execute_js
     // run in this turn (the MAX_LLM_PER_TURN cap). Resets each turn by living
-    // here, in ask()'s scope.
+    // here, in ask()'s scope. Sub-agent llm() calls increment this same counter,
+    // so a delegation cannot escape the turn's overall llm budget.
     let turnLlmCalls = 0;
+    // Shared per-turn counter for delegate_source sub-agents (MAX_DELEGATIONS_
+    // PER_TURN). Same scope-lifetime pattern as turnLlmCalls.
+    let turnDelegations = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
     let turnKind: 'chart' | 'explanation' = 'chart';
     // The chart rendered during THIS turn only. state.chartSpec persists
@@ -227,16 +253,181 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       cb.onTrace([...trace]);
     }
 
-    async function dispatch(tc: ToolCall, tokens?: number): Promise<string> {
+    // Build a fresh bounded recursive llm() primitive for one execute_js run.
+    // Its per-run counter is local; the per-turn counter (turnLlmCalls) and cost
+    // are shared closure state, so llm() calls from the main loop AND from any
+    // delegation sub-agent all draw from the one MAX_LLM_PER_TURN budget. Each
+    // call streams a nested receipt (child line-item), is text-only with no tool
+    // access (depth-1 by construction), and rejects — catchably — past any cap.
+    function makeLlm(): LlmFn {
+      let runLlmCalls = 0;
+      return async (prompt: string, data?: unknown): Promise<string> => {
+        const p = String(prompt ?? '');
+        if (runLlmCalls >= MAX_LLM_PER_RUN) {
+          throw new Error(
+            `llm() limit reached: max ${MAX_LLM_PER_RUN} calls per execute_js run. ` +
+              'Do fewer, bigger-slice calls, or finish with what you have.'
+          );
+        }
+        if (turnLlmCalls >= MAX_LLM_PER_TURN) {
+          throw new Error(
+            `llm() limit reached: max ${MAX_LLM_PER_TURN} calls per turn (across all execute_js runs).`
+          );
+        }
+        let serialized = '';
+        if (data !== undefined) {
+          serialized = JSON.stringify(data) ?? '';
+          if (serialized.length > LLM_DATA_CAP) {
+            throw new Error(
+              `llm() data too large: ${serialized.length} bytes serialized > ${LLM_DATA_CAP} cap. ` +
+                'Slice the data smaller (fewer rows/fields per call) and try again.'
+            );
+          }
+        }
+        // Count the call only once it's past every guard — a rejected
+        // (over-cap or over-size) call must not consume budget.
+        runLlmCalls++;
+        turnLlmCalls++;
+        const childEv = pushTrace({
+          tool: 'llm',
+          argSummary: p.slice(0, 80),
+          status: 'running',
+          nested: true,
+          dataBytes: serialized.length,
+        });
+        const started = Date.now();
+        const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
+        try {
+          const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
+          totalCost += estimateCost(cfg.model, res.usage);
+          childEv.status = 'ok';
+          childEv.durationMs = Date.now() - started;
+          childEv.tokens = res.usage.input + res.usage.output;
+          childEv.detail = serialized ? formatBytes(serialized.length) + ' in' : 'no data';
+          updateTrace();
+          return res.text ?? '';
+        } catch (err: any) {
+          childEv.status = 'error';
+          childEv.durationMs = Date.now() - started;
+          childEv.detail = 'llm() failed: ' + (err?.message ?? String(err));
+          updateTrace();
+          // Reject with a catchable error: user code may try/catch it; an
+          // uncaught rejection fails that execute_js run via the normal
+          // error-receipt path, and the loop continues.
+          throw new Error('llm() failed: ' + (err?.message ?? String(err)));
+        }
+      };
+    }
+
+    // Run a depth-1 per-source sub-agent (a delegate_source target). It drives
+    // its OWN small tool loop over a source-scoped schema set (find_series
+    // restricted to this source, the source's fetch tool, execute_js+llm(), and
+    // return_findings) against a SEPARATE message array — so the raw fetched
+    // rows land in the sub-agent's context, never the main model's. Rows and
+    // indicators still merge into the shared `state` (and VFS) via the reused
+    // dispatch(), keeping every citation intact. Returns only a distilled text
+    // summary. Errors and the step cap degrade to an ok:false failure summary;
+    // the main loop always continues.
+    async function runSubAgent(
+      src: SourceDef,
+      question: string
+    ): Promise<{ ok: boolean; summary: string; detail: string }> {
+      const subSchemas = subAgentSchemasFor(src.id);
+      const subMessages: ChatMessage[] = [
+        { role: 'system', content: buildSubAgentPrompt(src) },
+        { role: 'user', content: question || `Fetch and distil the relevant ${src.label} data.` },
+      ];
+      let steps = 0;
+      let summary = '';
+      let returned = false;
+      try {
+        while (steps < MAX_SUBAGENT_CALLS) {
+          const res = await complete(cfg, subMessages, subSchemas);
+          totalCost += estimateCost(cfg.model, res.usage);
+          if (!res.toolCalls.length) {
+            // No tool call — nudge once toward acting, counting it against the
+            // step budget so a silent model can't loop forever.
+            steps++;
+            subMessages.push({ role: 'assistant', content: res.text });
+            subMessages.push({
+              role: 'user',
+              content: 'Call a tool: fetch what the sub-question needs, then return_findings with a short distilled summary.',
+            });
+            continue;
+          }
+          subMessages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
+          const turnTokens = res.usage.input + res.usage.output;
+          for (const [idx, tc] of res.toolCalls.entries()) {
+            steps++;
+            const out = await dispatch(tc, {
+              tokens: idx === 0 ? turnTokens : undefined,
+              nested: true,
+              sourceIds: [src.id],
+              allowDelegate: false,
+            });
+            subMessages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
+            if (tc.name === 'return_findings') {
+              returned = true;
+              summary = String(tc.arguments.summary ?? '').trim();
+            }
+            if (steps >= MAX_SUBAGENT_CALLS) break;
+          }
+          if (returned) break;
+        }
+      } catch (err: any) {
+        // A hard failure (e.g. a model call rejected). Any rows fetched before
+        // it still merged with citations; report and let the main loop continue.
+        return {
+          ok: false,
+          summary: `Sub-agent for ${src.label} failed: ${err?.message ?? String(err)}. Continuing without it.`,
+          detail: 'error',
+        };
+      }
+      if (returned) {
+        return {
+          ok: true,
+          summary: `[${src.label}] ${summary || '(sub-agent returned no summary text)'}`,
+          detail: `${steps} step${steps === 1 ? '' : 's'}`,
+        };
+      }
+      return {
+        ok: false,
+        summary: `Sub-agent for ${src.label} reached its ${MAX_SUBAGENT_CALLS}-step limit without returning findings. Continuing without it.`,
+        detail: 'cap reached',
+      };
+    }
+
+    // dispatch runs one tool call. Options let the SAME dispatcher serve both
+    // the main loop and a delegation sub-agent, so a sub-agent's fetch merges
+    // rows/indicators exactly as a direct fetch would (citations intact):
+    //   nested       — render this step as an indented child receipt (sub-agent
+    //                  steps stream under their delegate_source parent).
+    //   sourceIds    — which databases find_series searches (a sub-agent scopes
+    //                  it to its one source).
+    //   allowDelegate — false inside a sub-agent, so delegate_source is refused
+    //                  at runtime too, not only structurally (depth-1).
+    interface DispatchOpts {
+      tokens?: number;
+      nested?: boolean;
+      sourceIds?: string[];
+      allowDelegate?: boolean;
+    }
+    async function dispatch(tc: ToolCall, opts: DispatchOpts = {}): Promise<string> {
+      const {
+        tokens,
+        nested,
+        sourceIds = activeSources.map((s) => s.id),
+        allowDelegate = true,
+      } = opts;
       const a = tc.arguments;
-      const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens });
+      const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens, nested });
       try {
         let result = '';
         switch (tc.name) {
           case 'find_series': {
             const { hits, receipt } = await findSeriesWithReceipt(
               String(a.query ?? ''),
-              activeSources.map((s) => s.id)
+              sourceIds
             );
             // Attach the structured receipt for the UI's search-receipt card.
             // The model still receives only the SeriesHit[] JSON (plus a single
@@ -303,67 +494,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               break;
             }
             // The bounded recursive llm() primitive for THIS execute_js run.
-            // Per-run cap is a local counter; the per-turn cap is the shared
-            // turnLlmCalls. Each successful/failed call emits a nested receipt
-            // (child line-item under this execute_js step). Text-only, one
-            // complete() call, no tools — depth-1 by construction.
-            let runLlmCalls = 0;
-            const llm = async (prompt: string, data?: unknown): Promise<string> => {
-              const p = String(prompt ?? '');
-              if (runLlmCalls >= MAX_LLM_PER_RUN) {
-                throw new Error(
-                  `llm() limit reached: max ${MAX_LLM_PER_RUN} calls per execute_js run. ` +
-                    'Do fewer, bigger-slice calls, or finish with what you have.'
-                );
-              }
-              if (turnLlmCalls >= MAX_LLM_PER_TURN) {
-                throw new Error(
-                  `llm() limit reached: max ${MAX_LLM_PER_TURN} calls per turn (across all execute_js runs).`
-                );
-              }
-              let serialized = '';
-              if (data !== undefined) {
-                serialized = JSON.stringify(data) ?? '';
-                if (serialized.length > LLM_DATA_CAP) {
-                  throw new Error(
-                    `llm() data too large: ${serialized.length} bytes serialized > ${LLM_DATA_CAP} cap. ` +
-                      'Slice the data smaller (fewer rows/fields per call) and try again.'
-                  );
-                }
-              }
-              // Count the call only once it's past every guard — a rejected
-              // (over-cap or over-size) call must not consume budget.
-              runLlmCalls++;
-              turnLlmCalls++;
-              const childEv = pushTrace({
-                tool: 'llm',
-                argSummary: p.slice(0, 80),
-                status: 'running',
-                nested: true,
-                dataBytes: serialized.length,
-              });
-              const started = Date.now();
-              const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
-              try {
-                const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
-                totalCost += estimateCost(cfg.model, res.usage);
-                childEv.status = 'ok';
-                childEv.durationMs = Date.now() - started;
-                childEv.tokens = res.usage.input + res.usage.output;
-                childEv.detail = serialized ? formatBytes(serialized.length) + ' in' : 'no data';
-                updateTrace();
-                return res.text ?? '';
-              } catch (err: any) {
-                childEv.status = 'error';
-                childEv.durationMs = Date.now() - started;
-                childEv.detail = 'llm() failed: ' + (err?.message ?? String(err));
-                updateTrace();
-                // Reject with a catchable error: user code may try/catch it;
-                // an uncaught rejection fails this execute_js run via the
-                // normal error-receipt path, and the main loop continues.
-                throw new Error('llm() failed: ' + (err?.message ?? String(err)));
-              }
-            };
+            // Shared between the main loop and delegation sub-agents (makeLlm),
+            // so every llm() call — wherever it originates — draws from the same
+            // per-turn budget and emits the same nested receipt.
+            const llm = makeLlm();
             let out = await executeJs(code, state.rows, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
@@ -468,6 +602,59 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             state.finding = String(a.explanation ?? '').trim();
             turnKind = 'explanation';
             result = 'done';
+            break;
+          }
+          case 'delegate_source': {
+            // Gating: refused inside a sub-agent (allowDelegate=false → depth-1)
+            // and refused when only one source is active (nothing to delegate
+            // across — and the tool isn't even in a single-source schema).
+            if (!allowDelegate || activeSources.length <= 1) {
+              result =
+                'ERROR: delegate_source is unavailable here — use the direct fetch/compute tools for this source.';
+              ev.detail = 'unavailable';
+              break;
+            }
+            if (turnDelegations >= MAX_DELEGATIONS_PER_TURN) {
+              result =
+                `ERROR: delegation budget spent (max ${MAX_DELEGATIONS_PER_TURN} per turn). ` +
+                'Combine what the sub-agents already returned, or use the direct tools.';
+              ev.detail = 'cap reached';
+              break;
+            }
+            const wanted = String(a.source ?? '').trim().toLowerCase();
+            const src = activeSources.find(
+              (s) => s.id.toLowerCase() === wanted || s.label.toLowerCase() === wanted
+            );
+            if (!src) {
+              result =
+                `ERROR: "${a.source}" is not an active source. Active: ` +
+                activeSources.map((s) => s.label).join(', ') + '.';
+              ev.detail = 'unknown source';
+              break;
+            }
+            turnDelegations++;
+            const subQ = String(a.question ?? '').trim();
+            // Friendly parent-receipt summary: "World Bank → 'life expectancy…'".
+            ev.argSummary = `${src.label} → "${subQ.slice(0, 60)}"`;
+            updateTrace();
+            const sub = await runSubAgent(src, subQ);
+            if (!sub.ok) {
+              // Failure: the parent receipt shows an error, the distilled failure
+              // summary goes back as the tool result, and the main loop continues.
+              ev.status = 'error';
+              ev.detail = sub.detail;
+              updateTrace();
+              return sub.summary;
+            }
+            ev.detail = sub.detail;
+            result = sub.summary;
+            break;
+          }
+          case 'return_findings': {
+            // Terminal tool of a sub-agent; consumed by runSubAgent, which reads
+            // the summary off the call. Here it just acknowledges the step.
+            ev.detail = 'returned';
+            result = 'ok';
             break;
           }
           default:
@@ -587,7 +774,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         const turnTokens = res.usage.input + res.usage.output;
         for (const [idx, tc] of res.toolCalls.entries()) {
           calls++;
-          const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
+          const out = await dispatch(tc, { tokens: idx === 0 ? turnTokens : undefined });
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
           if (tc.name === 'finish' || tc.name === 'finish_explanation') finished = true;
           if (calls >= MAX_TOOL_CALLS) break;
@@ -793,6 +980,10 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
       return `${a.type} · ${a.title}`;
     case 'finish':
       return String(a.one_line_finding ?? '').slice(0, 80);
+    case 'delegate_source':
+      return `${a.source} → "${String(a.question ?? '').slice(0, 60)}"`;
+    case 'return_findings':
+      return String(a.summary ?? '').slice(0, 80);
     default:
       return '';
   }
