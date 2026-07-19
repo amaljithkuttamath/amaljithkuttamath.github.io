@@ -12,7 +12,6 @@ import {
 } from './providers';
 import {
   VFS,
-  TOOL_SCHEMAS,
   searchIndicators,
   searchDatasets,
   datasetName,
@@ -26,6 +25,10 @@ import {
   executeJs,
   rowsToCSV,
   INDICATORS,
+  resolveSources,
+  schemasForSources,
+  datasetSourcesFor,
+  type SourceDef,
   type ChartSpec,
   type DataRow,
 } from './tools';
@@ -74,7 +77,19 @@ export interface AgentOutput {
   kind: 'chart' | 'explanation';
 }
 
-const SYSTEM_PROMPT = `You are Chitti, a data analyst agent. You answer questions about the world with real numbers fetched live from free institutional APIs. Your reasoning and every tool call stream to the user as you work — state decisions in your reasoning, never in files.
+// The system prompt is assembled per session from the active databases, so a
+// hard-filtered session is never told about — and never reaches for — a source
+// it isn't allowed to use.
+function buildSystemPrompt(sources: SourceDef[]): string {
+  const labels = sources.map((s) => s.label);
+  const many = sources.length > 1;
+  const defaultLabel = sources.some((s) => s.id === 'worldbank') ? 'World Bank' : labels[0];
+  const snippets = sources.map((s) => '   - ' + s.promptSnippet).join('\n');
+  const step1 = many
+    ? `1. PICK ONE SOURCE (active databases: ${labels.join(', ')}). Choose the one that fits the question; when unsure or more than one fits, prefer ${defaultLabel}.\n${snippets}`
+    : `1. YOUR SOURCE — one active database: ${labels[0]}. Use it for every data question in this pipeline.\n${snippets}`;
+
+  return `You are Chitti, a data analyst agent. You answer questions about the world with real numbers fetched live from free institutional APIs. Your reasoning and every tool call stream to the user as you work — state decisions in your reasoning, never in files.
 
 DECIDE THE SHAPE FIRST, then commit:
 - CONCEPTUAL ("what does X mean", "why does Y matter", "explain…") → call finish_explanation with clear markdown prose. No chart. Only fetch data if one concrete number would sharpen the answer.
@@ -82,13 +97,9 @@ DECIDE THE SHAPE FIRST, then commit:
 
 PIPELINE — one step at a time, about 4-5 calls total:
 
-1. PICK ONE SOURCE. World Bank is the default; leave it only when it clearly cannot answer:
-   - search_indicators (World Bank) → almost every development, economic, health, or social question.
-   - search_datasets → fetch_imf → ONLY when the question needs forecasts/projections.
-   - search_datasets → fetch_owid → ONLY for topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty.
-   When unsure: World Bank.
+${step1}
 
-2. FETCH ONCE. fetch_worldbank with explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; fetch_worldbank_all for "every country" questions (it builds the list and batches itself — country_ids has no wildcard, never build the full list yourself).
+2. FETCH ONCE using the chosen source's fetch tool: explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; a source's "all countries" path for "every country" questions (country_ids has no wildcard — never build the full country list yourself).
 
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
@@ -102,7 +113,9 @@ PIPELINE — one step at a time, about 4-5 calls total:
 Rules:
 - Hard budget: ${MAX_TOOL_CALLS} tool calls. Never re-fetch data you already have.
 - Use ids from search results verbatim. Years are numbers.
+- Only the active databases listed above are available — do not mention or attempt any other source.
 - list_countries, write_file, read_file exist but are almost never needed.`;
+}
 
 // A compact, model-friendly summary of a data fetch.
 function summarizeRows(rows: DataRow[]): string {
@@ -125,8 +138,20 @@ export interface ChittiSession {
   ask(question: string, cb: AgentCallbacks): Promise<AgentOutput>;
 }
 
-export function createSession(cfg: ProviderConfig): ChittiSession {
-  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+export interface SessionOptions {
+  // Active database ids (from tools.ts SOURCES). Empty/omitted → all sources.
+  // The hard filter: only these sources' tools and prompt guidance reach the
+  // model, so it can only answer from the databases the user selected.
+  sources?: string[];
+}
+
+export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
+  const activeSources = resolveSources(opts?.sources);
+  const toolSchemas = schemasForSources(opts?.sources);
+  const allowedDatasetSources = datasetSourcesFor(opts?.sources);
+  const messages: ChatMessage[] = [
+    { role: 'system', content: buildSystemPrompt(activeSources) },
+  ];
   const vfsFiles: Record<string, string> = {};
   const state: {
     rows: DataRow[];
@@ -251,10 +276,10 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
             break;
           }
           case 'search_datasets': {
-            const hits = searchDatasets(String(a.query ?? ''));
+            const hits = searchDatasets(String(a.query ?? ''), allowedDatasetSources);
             result = hits.length
               ? JSON.stringify(hits.map((d) => ({ id: d.id, name: d.name, source: d.source })))
-              : 'No matches in the OWID/IMF catalogs — use search_indicators (World Bank) instead.';
+              : 'No matches in the active dataset catalog(s) for this query.';
             break;
           }
           case 'fetch_owid': {
@@ -391,7 +416,7 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
         const status = pipelineStatus(state, calls);
         cb.onStatus(status, 'loading');
 
-        const res = await complete(cfg, messages, TOOL_SCHEMAS);
+        const res = await complete(cfg, messages, toolSchemas);
         totalCost += estimateCost(cfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
@@ -541,9 +566,10 @@ export function createSession(cfg: ProviderConfig): ChittiSession {
 export async function runAgent(
   cfg: ProviderConfig,
   question: string,
-  cb: AgentCallbacks
+  cb: AgentCallbacks,
+  opts?: SessionOptions
 ): Promise<AgentOutput> {
-  return createSession(cfg).ask(question, cb);
+  return createSession(cfg, opts).ask(question, cb);
 }
 
 function indicatorName(id: string): string {

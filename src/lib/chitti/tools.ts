@@ -279,13 +279,18 @@ export const DATASETS: Dataset[] = [
   ...IMF_DATASETS.map(([code, name]): Dataset => ({ id: 'imf:' + code, name, source: 'imf' })),
 ];
 
-export function searchDatasets(query: string): Dataset[] {
+// `allow` restricts results to a subset of catalog sources — used when the
+// user has hard-filtered the active databases, so an OWID-only session never
+// sees IMF datasets (and vice-versa) even though both share this one tool.
+export function searchDatasets(query: string, allow?: Dataset['source'][]): Dataset[] {
+  const allowSet = allow && allow.length ? new Set(allow) : null;
   const terms = (query || '').toLowerCase().split(/\s+/).filter(Boolean);
-  return DATASETS.map((d) => {
-    const hay = (d.name + ' ' + d.id).toLowerCase();
-    const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
-    return { d, score };
-  })
+  return DATASETS.filter((d) => !allowSet || allowSet.has(d.source))
+    .map((d) => {
+      const hay = (d.name + ' ' + d.id).toLowerCase();
+      const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
+      return { d, score };
+    })
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((x) => x.d)
@@ -854,3 +859,94 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
 ];
+
+// ── Source registry ──────────────────────────────────────────────────────
+// The single source of truth for "which databases exist". One entry per
+// database feeds BOTH the UI picker (label + blurb) and the agent (which
+// tools + prompt guidance + citation the model gets). Adding a database =
+// add its fetch fn + tool schema above, then one entry here — it then shows
+// up as a user-selectable chip and becomes available to the agent, nothing
+// else to wire.
+
+export interface SourceDef {
+  id: string;
+  label: string;
+  blurb: string; // one line, shown under the chip in the picker
+  // Tool names (from TOOL_SCHEMAS) this source owns. A tool may be shared by
+  // more than one source (search_datasets serves both OWID and IMF); it is
+  // offered whenever any owning source is selected.
+  toolNames: string[];
+  // How the model should use this source — spliced into the system prompt's
+  // "pick a source" step only when this source is active.
+  promptSnippet: string;
+  cite: { name: string; url: string };
+  // OWID/IMF share search_datasets; this maps the source to its catalog tag
+  // so an active-source filter can be pushed into searchDatasets(). Omit for
+  // sources (like World Bank) that don't use the shared dataset catalog.
+  datasetSource?: Dataset['source'];
+}
+
+// Source-agnostic tools: control flow, computation over already-fetched rows,
+// and country lookup. Always available regardless of which databases are on.
+export const CORE_TOOL_NAMES = [
+  'list_countries', 'execute_js', 'growth_stats', 'correlate',
+  'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file',
+];
+
+export const SOURCES: SourceDef[] = [
+  {
+    id: 'worldbank',
+    label: 'World Bank',
+    blurb: 'Development, economic, health & social indicators for every country.',
+    toolNames: ['search_indicators', 'fetch_worldbank', 'fetch_worldbank_all'],
+    promptSnippet:
+      'World Bank (search_indicators → fetch_worldbank / fetch_worldbank_all): the broad default — development, economic, health, and social indicators. Use fetch_worldbank with explicit ISO3 codes (or one aggregate like WLD); use fetch_worldbank_all for "every country" questions (it batches internally — never build the full country list yourself).',
+    cite: { name: 'World Bank Open Data', url: 'https://data.worldbank.org' },
+  },
+  {
+    id: 'owid',
+    label: 'Our World in Data',
+    blurb: 'CO₂ & energy, happiness, HDI, literacy, extreme poverty.',
+    toolNames: ['search_datasets', 'fetch_owid'],
+    promptSnippet:
+      'Our World in Data (search_datasets → fetch_owid): topics World Bank lacks — CO2/energy, happiness, HDI, literacy, extreme poverty.',
+    cite: { name: 'Our World in Data', url: 'https://ourworldindata.org' },
+    datasetSource: 'owid',
+  },
+  {
+    id: 'imf',
+    label: 'IMF',
+    blurb: 'Macro data with multi-year forecasts: GDP, inflation, debt.',
+    toolNames: ['search_datasets', 'fetch_imf'],
+    promptSnippet:
+      'IMF DataMapper (search_datasets → fetch_imf): the source for forecasts/projections several years ahead — GDP growth, inflation, unemployment, government debt. Say "IMF projection" when you use projected years.',
+    cite: { name: 'IMF DataMapper', url: 'https://www.imf.org/external/datamapper' },
+    datasetSource: 'imf',
+  },
+];
+
+export const DEFAULT_SOURCE_IDS = SOURCES.map((s) => s.id);
+
+// Normalize an incoming selection: keep only known ids; empty/unknown → all.
+export function resolveSources(ids?: string[]): SourceDef[] {
+  const known = new Set(DEFAULT_SOURCE_IDS);
+  const picked = (ids ?? []).filter((id) => known.has(id));
+  const chosen = picked.length ? picked : DEFAULT_SOURCE_IDS;
+  return SOURCES.filter((s) => chosen.includes(s.id));
+}
+
+// The tool schemas the model should see for a given source selection: the
+// always-on core plus every selected source's own tools, in original order.
+export function schemasForSources(ids?: string[]): ToolSchema[] {
+  const allowed = new Set(CORE_TOOL_NAMES);
+  for (const s of resolveSources(ids)) for (const t of s.toolNames) allowed.add(t);
+  return TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
+}
+
+// The dataset-catalog sources (owid/imf) among a selection — pushed into
+// searchDatasets so the shared catalog tool respects the hard filter.
+export function datasetSourcesFor(ids?: string[]): Dataset['source'][] {
+  return resolveSources(ids)
+    .map((s) => s.datasetSource)
+    .filter((x): x is Dataset['source'] => !!x);
+}
