@@ -1419,3 +1419,253 @@ describe('fetch_series router + session cache (driven)', () => {
     expect(out.rows[0].indicator).toBe('SP.DYN.LE00.IN');
   });
 });
+
+// ── VFS as citation ledger (backlog #11) ─────────────────────────────────────
+// Every number traceable: each live fetch writes a structured citation record
+// into state (surfaced as out.citations) AND mirrors the whole ledger into the
+// VFS as citations.json (via:'fetch'). Egress is blocked here, so live source
+// headers (the real World Bank `lastupdated`) are NOT verifiable — every fetch
+// below is a STUB. The WB `lastupdated` vintage is proven with a stubbed header
+// standing in for the real one; that substitution is called out honestly.
+describe('citation ledger (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+
+  // Capture BOTH the trace and the latest VFS files snapshot (so citations.json
+  // — written through the real VFS onChange path — can be read back and parsed).
+  const capture = () => {
+    let trace: any[] = [];
+    let files: Record<string, string> = {};
+    const cb = {
+      onTrace: (ev: any[]) => (trace = ev),
+      onFiles: (f: Record<string, string>) => (files = f),
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    return { cb, trace: () => trace, files: () => files };
+  };
+
+  // A WB stub whose response header carries `lastupdated` — a stand-in for the
+  // real World Bank vintage field (egress is blocked; the live header can't be
+  // reached). Records every URL it is called with.
+  const wbFetchWithVintage = (lastupdated?: string) => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, ...(lastupdated ? { lastupdated } : {}) },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 42 }],
+        ],
+      };
+    });
+    return { fn, urls };
+  };
+
+  it('records a ledger entry on a successful fetch with the resolved country, URL, row count and fetched-at', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        // "UK" must be resolved to GBR before it lands in the citation.
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['UK'], year_start: 2019, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    expect(out.citations.length).toBe(1);
+    const c = out.citations[0];
+    expect(c.source).toBe('worldbank');
+    expect(c.sourceLabel).toBe('World Bank Open Data');
+    expect(c.indicatorId).toBe('SP.DYN.LE00.IN');
+    // Resolved country code, not the raw "UK".
+    expect(c.countries).toEqual(['GBR']);
+    expect(c.yearRange).toEqual({ start: 2019, end: 2020 });
+    expect(c.rowCount).toBe(1);
+    // Human-visitable page is what renders; the API URL is kept separately.
+    expect(c.url).toBe('https://data.worldbank.org/indicator/SP.DYN.LE00.IN');
+    expect(c.requestUrl).toContain('api.worldbank.org');
+    // fetchedAt is a real ISO timestamp; the record is not marked cached.
+    expect(() => new Date(c.fetchedAt).toISOString()).not.toThrow();
+    expect(c.fetchedAt).toBe(new Date(c.fetchedAt).toISOString());
+    expect(c.cached).toBe(false);
+  });
+
+  it('captures sourceUpdated from a WB-style lastupdated header, and omits it when absent', async () => {
+    // With vintage.
+    {
+      const { fn } = wbFetchWithVintage('2024-12-16');
+      vi.stubGlobal('fetch', fn);
+      mockComplete.mockResolvedValueOnce(
+        modelTurn([
+          tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+          tc('finish_explanation', { explanation: 'done' }, 'fe'),
+        ])
+      );
+      const { cb } = capture();
+      const out = await newSession(['worldbank']).ask('q', cb);
+      expect(out.citations[0].sourceUpdated).toBe('2024-12-16');
+    }
+    mockComplete.mockReset();
+    vi.unstubAllGlobals();
+    // Without vintage — the field is OMITTED, never invented.
+    {
+      const { fn } = wbFetchWithVintage(undefined);
+      vi.stubGlobal('fetch', fn);
+      mockComplete.mockResolvedValueOnce(
+        modelTurn([
+          tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+          tc('finish_explanation', { explanation: 'done' }, 'fe'),
+        ])
+      );
+      const { cb } = capture();
+      const out = await newSession(['worldbank']).ask('q', cb);
+      expect('sourceUpdated' in out.citations[0]).toBe(false);
+    }
+  });
+
+  it('a cache hit does NOT duplicate the ledger entry — same citation, cited once', async () => {
+    const { fn, urls } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // One real network call, and exactly ONE ledger entry.
+    expect(urls.length).toBe(1);
+    expect(out.citations.length).toBe(1);
+  });
+
+  it('sub-agent fetches land in the SAME ledger as the main loop', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'le' }, 'd1')]));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+    // The sub-agent's fetch produced the citation in the shared session ledger.
+    expect(out.citations.length).toBe(1);
+    expect(out.citations[0].indicatorId).toBe('SP.DYN.LE00.IN');
+  });
+
+  it('model-derived (via:llm) files never appear in the citation ledger', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        // A model-derived artifact — must be marked via:'llm' in the VFS and must
+        // NOT enter the citation ledger.
+        tc('write_file', { path: 'themes.json', content: '["rising"]', derived: true }, 'w'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, files } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // Exactly one citation — the fetch — and nothing referencing the derived file.
+    expect(out.citations.length).toBe(1);
+    expect(out.citations.some((c) => c.indicatorId === 'themes.json')).toBe(false);
+    // The derived file exists in the VFS alongside the fetched ledger.
+    expect(files()['themes.json']).toBe('["rising"]');
+    expect(files()['citations.json']).toBeTruthy();
+  });
+
+  it('mirrors the ledger into a readable, well-formed citations.json (via:fetch)', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        // Read the ledger back through the model's own file tool.
+        tc('read_file', { path: 'citations.json' }, 'rf'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, files } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    const raw = files()['citations.json'];
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].indicatorId).toBe('SP.DYN.LE00.IN');
+    expect(parsed[0].url).toBe('https://data.worldbank.org/indicator/SP.DYN.LE00.IN');
+    expect(parsed[0].sourceUpdated).toBe('2024-12-16');
+    // The whole ledger matches out.citations exactly.
+    expect(parsed).toEqual(out.citations);
+  });
+
+  it('CSV export carries the provenance lines at the top', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'IND', data: [[2020, 42]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'done' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // Provenance rides at the top as `#` comment lines, above the data header.
+    expect(out.csv).toContain('# Source: World Bank Open Data');
+    expect(out.csv).toContain('SP.DYN.LE00.IN');
+    expect(out.csv).toContain('source updated 2024-12-16');
+    const headerIdx = out.csv.indexOf('country,iso3,year,value');
+    expect(headerIdx).toBeGreaterThan(0);
+    // Every provenance line precedes the CSV data header.
+    expect(out.csv.slice(0, headerIdx).split('\n').filter((l) => l.startsWith('# Source:')).length).toBe(1);
+  });
+
+  it('records OWID / IMF citations too, without inventing a vintage they do not provide', async () => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('ourworldindata.org'))
+        return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\n' };
+      if (u.includes('imf.org'))
+        return { ok: true, json: async () => ({ values: { NGDP_RPCH: { IND: { '2020': 5 } } } }) };
+      throw new Error('unexpected ' + u);
+    });
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'owid:life-expectancy', countries: ['IND'] }, 'ow'),
+        tc('fetch_series', { id: 'imf:NGDP_RPCH', countries: ['IND'] }, 'im'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+    const byId = Object.fromEntries(out.citations.map((c) => [c.indicatorId, c]));
+    expect(byId['owid:life-expectancy'].url).toBe('https://ourworldindata.org/grapher/life-expectancy');
+    expect('sourceUpdated' in byId['owid:life-expectancy']).toBe(false);
+    expect(byId['imf:NGDP_RPCH'].url).toBe('https://www.imf.org/external/datamapper/NGDP_RPCH');
+    expect('sourceUpdated' in byId['imf:NGDP_RPCH']).toBe(false);
+  });
+});

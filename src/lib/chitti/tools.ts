@@ -294,6 +294,14 @@ export interface FetchWorldbankResult {
   // Original requested country count, only set when it exceeded the 60-per-
   // call cap and was truncated. Undefined when no truncation occurred.
   truncatedFrom?: number;
+  // The exact API URL this call hit — recorded verbatim for the citation
+  // ledger (the request URL, distinct from the human-visitable data.worldbank
+  // page). Never reconstructed after the fact; it is the string we fetched.
+  requestUrl: string;
+  // Data vintage straight from the World Bank JSON header (`data[0].lastupdated`,
+  // e.g. "2024-12-16"). This is when the World Bank last refreshed the series —
+  // NOT when we fetched it. Undefined when the header omits it (never invented).
+  sourceUpdated?: string;
 }
 
 export async function fetchWorldbank(
@@ -318,6 +326,12 @@ export async function fetchWorldbank(
     const msg = Array.isArray(data) && data[0]?.message?.[0]?.value;
     throw new Error('World Bank API: ' + (msg || 'no data returned'));
   }
+  // data[0] is the WB response header; it carries `lastupdated` — the series'
+  // real data vintage. Capture it when present (string, e.g. "2024-12-16");
+  // omit otherwise. This is disclosed as `sourceUpdated`, never as fetchedAt.
+  const lastupdated = (data[0] && typeof data[0].lastupdated === 'string')
+    ? (data[0].lastupdated as string)
+    : undefined;
   const rows: DataRow[] = (data[1] as any[]).map((r) => ({
     country: r.country?.value ?? r.countryiso3code,
     iso3: r.countryiso3code,
@@ -327,7 +341,7 @@ export async function fetchWorldbank(
   }));
   // Sort by country then year ascending for stable downstream use.
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows, truncatedFrom };
+  return { rows, truncatedFrom, requestUrl: url, sourceUpdated: lastupdated };
 }
 
 // fetch_worldbank_all: every real country for one indicator, batched and
@@ -342,6 +356,10 @@ export interface FetchWorldbankAllResult {
   rows: DataRow[];
   countryCount: number;
   batchCount: number;
+  // Representative request URL (the first batch's) + the series vintage from
+  // that batch's WB header — for the citation ledger of an every-country fetch.
+  requestUrl: string;
+  sourceUpdated?: string;
 }
 
 export async function fetchWorldbankAll(
@@ -359,12 +377,18 @@ export async function fetchWorldbankAll(
   // for a request that isn't latency-critical (this whole call already
   // replaces what used to be several separate LLM-driven round-trips).
   const allRows: DataRow[] = [];
+  let requestUrl = '';
+  let sourceUpdated: string | undefined;
   for (const batch of batches) {
-    const { rows } = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
-    allRows.push(...rows);
+    const r = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
+    allRows.push(...r.rows);
+    // The batches share one indicator/vintage; keep the first batch's URL and
+    // lastupdated as the representative citation for the whole every-country set.
+    if (!requestUrl) requestUrl = r.requestUrl;
+    if (sourceUpdated === undefined) sourceUpdated = r.sourceUpdated;
   }
   allRows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows: allRows, countryCount: ids.length, batchCount: batches.length };
+  return { rows: allRows, countryCount: ids.length, batchCount: batches.length, requestUrl, sourceUpdated };
 }
 
 // ── Additional sources: Our World in Data + IMF DataMapper ──────────────
@@ -492,7 +516,7 @@ export async function fetchOwid(
   countryIds?: string[],
   yearStart?: number,
   yearEnd?: number
-): Promise<{ rows: DataRow[]; metric: string }> {
+): Promise<{ rows: DataRow[]; metric: string; requestUrl: string }> {
   const clean = slug.replace(/^owid:/, '');
   const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
   let resp: Response;
@@ -532,7 +556,9 @@ export async function fetchOwid(
     });
   }
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows, metric };
+  // The grapher CSV carries no data-vintage field in its body, so no
+  // sourceUpdated is emitted here (never invented — omitted honestly).
+  return { rows, metric, requestUrl: url };
 }
 
 // fetch_imf: IMF DataMapper JSON. Shape:
@@ -543,7 +569,7 @@ export async function fetchImf(
   countryIds?: string[],
   yearStart?: number,
   yearEnd?: number
-): Promise<{ rows: DataRow[] }> {
+): Promise<{ rows: DataRow[]; requestUrl: string }> {
   const clean = code.replace(/^imf:/, '').toUpperCase();
   const path = countryIds?.length
     ? `${clean}/${countryIds.map((c) => c.trim().toUpperCase()).join('/')}`
@@ -580,7 +606,9 @@ export async function fetchImf(
     }
   }
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows };
+  // DataMapper JSON carries no per-series vintage, so no sourceUpdated (omitted,
+  // never invented). requestUrl is the exact endpoint we hit.
+  return { rows, requestUrl: url };
 }
 
 // ── Analysis helpers ─────────────────────────────────────────────────────
@@ -767,6 +795,75 @@ export function rowsToCSV(rows: DataRow[]): string {
 
 function csvCell(s: string): string {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+// ── Citation ledger ──────────────────────────────────────────────────────
+// A structured, first-class provenance record for one live fetch. Written at
+// the fetch choke point (routeFetch), stored in session state keyed by the
+// fetch-cache key, mirrored into the VFS as citations.json (via:'fetch'), and
+// rendered by the UI's evidence section. Every field is captured verbatim from
+// the fetch — nothing is reconstructed after the fact, so what the receipt (and
+// the verifier) shows is exactly what happened. Model-derived (llm()) artifacts
+// never produce a Citation: only fetched data gets one.
+export interface Citation {
+  // Stable id = the session fetch-cache key (id + resolved countries + range),
+  // so a repeat/cached use maps to the SAME entry rather than a duplicate.
+  id: string;
+  source: 'worldbank' | 'owid' | 'imf';
+  sourceLabel: string; // friendly institution name, e.g. "World Bank Open Data"
+  indicatorId: string; // the (normalized) series id
+  indicatorName: string; // friendly indicator name when known, else the id
+  // The human-visitable canonical page — this is what the citation LINKS to.
+  url: string;
+  // The exact API URL the data actually came from, only when it differs from
+  // the human URL (they always do here). Kept for full traceability.
+  requestUrl?: string;
+  countries: string[]; // resolved ISO3 / aggregate codes ([] = every country)
+  yearRange: { start?: number; end?: number } | null;
+  fetchedAt: string; // ISO timestamp — when CHITTI fetched (not the vintage)
+  // Data vintage from the source's own response (WB `lastupdated`), when the
+  // source provides one. Omitted otherwise — never invented.
+  sourceUpdated?: string;
+  rowCount: number;
+  // Whether the record's underlying fetch was a real network call. Always false
+  // on the stored ledger entry (it IS the real fetch); a later cache hit reuses
+  // this same entry and discloses "cached" only on that use's receipt.
+  cached: boolean;
+}
+
+const CITATION_SOURCE_LABEL: Record<Citation['source'], string> = {
+  worldbank: 'World Bank Open Data',
+  owid: 'Our World in Data',
+  imf: 'IMF DataMapper',
+};
+
+export function citationSourceLabel(source: Citation['source']): string {
+  return CITATION_SOURCE_LABEL[source];
+}
+
+// The human-visitable page for a series id — the URL a citation links to.
+// Mirrors the per-source institution pages (distinct from the API request URL).
+export function citationHumanUrl(source: Citation['source'], id: string): string {
+  if (source === 'owid') return 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.replace(/^owid:/, ''));
+  if (source === 'imf') return 'https://www.imf.org/external/datamapper/' + encodeURIComponent(id.replace(/^imf:/i, ''));
+  return 'https://data.worldbank.org/indicator/' + encodeURIComponent(id);
+}
+
+// Compact one-line-per-source provenance header for CSV export. Emitted as
+// `#`-prefixed comment lines so it rides along at the top of the file without
+// breaking spreadsheet import (Excel/Sheets/pandas all skip or isolate a
+// leading comment block). A blank comment separates the block from the header.
+export function citationsToCsvComments(citations: Citation[]): string {
+  if (!citations.length) return '';
+  const lines = citations.map((c) => {
+    const range = c.yearRange
+      ? ` — ${c.yearRange.start ?? ''}–${c.yearRange.end ?? ''}`
+      : '';
+    const where = c.countries.length ? ` — countries: ${c.countries.join(', ')}` : ' — all countries';
+    const vintage = c.sourceUpdated ? ` — source updated ${c.sourceUpdated}` : '';
+    return `# Source: ${c.sourceLabel} — ${c.indicatorName} (${c.indicatorId}) — ${c.url}${where}${range} — fetched ${c.fetchedAt}${vintage}`;
+  });
+  return ['# Chitti — data provenance (every number fetched live and cited):', ...lines, '#'].join('\n') + '\n';
 }
 
 // ── Tool schemas exposed to the model ────────────────────────────────────

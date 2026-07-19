@@ -23,6 +23,9 @@ import {
   correlate,
   executeJs,
   rowsToCSV,
+  citationSourceLabel,
+  citationHumanUrl,
+  citationsToCsvComments,
   INDICATORS,
   resolveSources,
   schemasForSources,
@@ -32,6 +35,7 @@ import {
   type ChartSpec,
   type DataRow,
   type SearchReceipt,
+  type Citation,
 } from './tools';
 import { resolveCountryList, formatResolutions } from './countries';
 
@@ -137,6 +141,11 @@ export interface AgentOutput {
   rows: DataRow[];
   csv: string;
   indicators: { id: string; name: string }[];
+  // The citation ledger for this session: one structured provenance record per
+  // distinct live fetch (backlog #11). Only fetched data appears here —
+  // model-derived (llm()) artifacts never enter it. The UI's evidence section
+  // renders these; the CSV export carries them as comment lines.
+  citations: Citation[];
   confidence: 'ok' | 'low';
   verifierReport: string;
   cost: number;
@@ -239,8 +248,13 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     rows: DataRow[];
     chartSpec: ChartSpec | null;
     indicators: Map<string, string>;
+    // The citation ledger (backlog #11): keyed by the fetch-cache key so a
+    // repeat/cached fetch maps to the SAME entry (cite once). Session-scoped,
+    // like state.rows — provenance persists across turns. Insertion order is
+    // preserved by Map, so the evidence section lists sources in fetch order.
+    citations: Map<string, Citation>;
     finding: string;
-  } = { rows: [], chartSpec: null, indicators: new Map(), finding: '' };
+  } = { rows: [], chartSpec: null, indicators: new Map(), citations: new Map(), finding: '' };
 
   // Session fetch cache (backlog #9), at the fetch_series choke point. Key =
   // normalized (id + resolved countries + year range); value = the exact
@@ -497,11 +511,17 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let rows: DataRow[] = [];
       let body = '';
       let detail = '';
+      // Provenance captured verbatim from the fetcher, for the citation ledger.
+      let nid = id; // the normalized indicator id used as the citation key part
+      let requestUrl = ''; // the exact API URL that was hit
+      let sourceUpdated: string | undefined; // source data vintage, when present
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
             const r = await fetchWorldbank(id, codes, Number(ys), Number(ye));
             rows = r.rows;
+            requestUrl = r.requestUrl;
+            sourceUpdated = r.sourceUpdated;
             body = resNote + summarizeRows(rows);
             if (r.truncatedFrom) {
               body +=
@@ -514,6 +534,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // No countries → every real country, batched internally.
             const r = await fetchWorldbankAll(id, Number(ys), Number(ye));
             rows = r.rows;
+            requestUrl = r.requestUrl;
+            sourceUpdated = r.sourceUpdated;
             body = summarizeRows(rows);
             detail = `${rows.length} rows · ${r.countryCount} countries · ${r.batchCount} batch${r.batchCount === 1 ? '' : 'es'}`;
           }
@@ -523,7 +545,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         case 'owid': {
           const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye);
           rows = r.rows;
-          const nid = 'owid:' + id.replace(/^owid:/, '');
+          requestUrl = r.requestUrl;
+          nid = 'owid:' + id.replace(/^owid:/, '');
           state.indicators.set(nid, datasetName(nid) ?? r.metric);
           body = resNote + summarizeRows(rows);
           detail = resDetail + `${rows.length} rows · OWID`;
@@ -532,7 +555,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         case 'imf': {
           const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye);
           rows = r.rows;
-          const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
+          requestUrl = r.requestUrl;
+          nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
           state.indicators.set(nid, datasetName(nid) ?? nid);
           body = resNote + summarizeRows(rows);
           detail = resDetail + `${rows.length} rows · IMF (incl. forecasts)`;
@@ -543,8 +567,58 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // Cache only this successful result (and the rows it merged — the entry is
       // a faithful record; state.rows already holds them, see the map's header).
       fetchCache.set(key, { rows, result: body, detail });
+      // Record the citation ledger entry for this fetch (backlog #11). Keyed by
+      // the same cache key, so a later identical (cached) fetch reuses THIS entry
+      // rather than duplicating it — a cache hit returns above, before here, and
+      // never overwrites. Only a real, successful fetch writes a citation, so a
+      // model-derived artifact can never enter the ledger. Mirrored into the VFS
+      // as citations.json (via:'fetch') so the model can read it with read_file.
+      recordCitation(key, source, nid, codes, ys, ye, rows.length, requestUrl, sourceUpdated);
       ev.detail = detail;
       return body;
+    }
+
+    // Build and store one citation ledger entry, then re-mirror the whole ledger
+    // to the VFS as citations.json with via:'fetch' meta (symmetric to a
+    // model-derived artifact's via:'llm'). fetchedAt is stamped here — the moment
+    // Chitti fetched — kept strictly distinct from sourceUpdated (the source's
+    // own vintage). Idempotent per key: a repeat with the same key overwrites an
+    // identical record, so the ledger stays one-entry-per-distinct-fetch.
+    function recordCitation(
+      key: string,
+      source: 'worldbank' | 'owid' | 'imf',
+      nid: string,
+      codes: string[],
+      ys: number | undefined,
+      ye: number | undefined,
+      rowCount: number,
+      requestUrl: string,
+      sourceUpdated: string | undefined
+    ): void {
+      const humanUrl = citationHumanUrl(source, nid);
+      const citation: Citation = {
+        id: key,
+        source,
+        sourceLabel: citationSourceLabel(source),
+        indicatorId: nid,
+        indicatorName: indicatorName(nid),
+        url: humanUrl,
+        // Keep the API request URL only when it genuinely differs from the human
+        // page (it always does across our sources, but stay honest structurally).
+        ...(requestUrl && requestUrl !== humanUrl ? { requestUrl } : {}),
+        countries: codes,
+        yearRange: ys !== undefined || ye !== undefined ? { start: ys, end: ye } : null,
+        fetchedAt: new Date().toISOString(),
+        ...(sourceUpdated ? { sourceUpdated } : {}),
+        rowCount,
+        cached: false,
+      };
+      state.citations.set(key, citation);
+      vfs.write(
+        'citations.json',
+        JSON.stringify([...state.citations.values()], null, 2),
+        { via: 'fetch' }
+      );
     }
 
     // dispatch runs one tool call. Options let the SAME dispatcher serve both
@@ -947,7 +1021,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
     async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
       const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
-      const result = await verify(cfg, question, turnChartSpec, state.finding, (c) => (totalCost += c));
+      // Hand the verifier the structured ledger entries (truthful URLs +
+      // vintages) rather than reconstructed citation strings — light touch, the
+      // verdict logic is unchanged (backlog #11 point 5).
+      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c));
       ev.status = result.pass ? 'ok' : 'error';
       ev.pass = result.pass;
       ev.detail = result.report;
@@ -993,6 +1070,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     }
 
     const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
+    const citations = [...state.citations.values()];
 
     return {
       finding: state.finding,
@@ -1000,8 +1078,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // spec made every chart-less follow-up re-display the previous chart.
       chartSpec: turnChartSpec,
       rows: state.rows,
-      csv: rowsToCSV(state.rows),
+      // Provenance rides along at the top of the export as `#` comment lines,
+      // so a downloaded CSV carries the citation ledger with it (backlog #11).
+      csv: citationsToCsvComments(citations) + rowsToCSV(state.rows),
       indicators,
+      citations,
       confidence,
       verifierReport: verifierReport.report,
       cost: totalCost,
@@ -1068,9 +1149,18 @@ async function verify(
   question: string,
   spec: ChartSpec | null,
   finding: string,
+  citations: Citation[],
   addCost: (c: number) => void
 ): Promise<{ pass: boolean; report: string; tokens?: number }> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
+  // The ledger's own entries — truthful source, indicator, URL and vintage,
+  // straight from the fetch (not reconstructed). Gives the verifier real
+  // provenance to check the finding against; its verdict logic is unchanged.
+  const citeText = citations.length
+    ? citations
+        .map((c) => `${c.sourceLabel}: ${c.indicatorName} (${c.indicatorId}) ${c.url}${c.sourceUpdated ? ` [updated ${c.sourceUpdated}]` : ''}`)
+        .join('\n')
+    : '(no live data fetched)';
   const messages: ChatMessage[] = [
     {
       role: 'system',
@@ -1082,7 +1172,7 @@ async function verify(
     },
     {
       role: 'user',
-      content: `Question: ${question}\n\nChart spec: ${specText}\n\nFinding: ${finding || '(none)'}`,
+      content: `Question: ${question}\n\nChart spec: ${specText}\n\nFinding: ${finding || '(none)'}\n\nSources (citation ledger):\n${citeText}`,
     },
   ];
   try {

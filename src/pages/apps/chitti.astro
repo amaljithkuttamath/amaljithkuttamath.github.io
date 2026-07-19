@@ -356,7 +356,7 @@ const PRESETS = [
     type ModelOption,
   } from '../../lib/chitti/providers';
   import type { TraceEvent } from '../../lib/chitti/agent';
-  import type { ChartSpec, DataRow } from '../../lib/chitti/tools';
+  import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
 
   // ── Elements ──────────────────────────────────────────────────────────
@@ -1764,38 +1764,51 @@ const PRESETS = [
   }
 
   // ── Citations ──────────────────────────────────────────────────────────
-  // Source-aware: ids are plain World Bank codes, "owid:<slug>", or
-  // "imf:<code>", each linking to its own institution's page.
-  const SOURCE_HOME: Record<string, [string, string]> = {
-    wb: ['World Bank Open Data', 'https://data.worldbank.org'],
-    owid: ['Our World in Data', 'https://ourworldindata.org'],
-    imf: ['IMF DataMapper', 'https://www.imf.org/external/datamapper'],
-  };
-  function sourceOf(id: string): 'wb' | 'owid' | 'imf' {
-    return id.startsWith('owid:') ? 'owid' : id.startsWith('imf:') ? 'imf' : 'wb';
+  // The citation ledger (backlog #11): one structured record per distinct live
+  // fetch, rendered as a references section on a receipt — compact, mono,
+  // understated. Every field comes straight from the fetch (source, indicator,
+  // human URL, resolved countries, year range, fetched-at, and — when the
+  // source gave one — its data vintage). Model-derived (llm()) artifacts never
+  // reach this list: only fetched data produces a Citation.
+  function fmtRange(r: Citation['yearRange']): string {
+    if (!r) return 'all years';
+    if (r.start !== undefined && r.end !== undefined) return r.start === r.end ? `${r.start}` : `${r.start}–${r.end}`;
+    if (r.start !== undefined) return `${r.start}–`;
+    if (r.end !== undefined) return `–${r.end}`;
+    return 'all years';
   }
-  function indicatorUrl(id: string): string {
-    if (id.startsWith('owid:')) return 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.slice(5));
-    if (id.startsWith('imf:')) return 'https://www.imf.org/external/datamapper/' + encodeURIComponent(id.slice(4));
-    return 'https://data.worldbank.org/indicator/' + encodeURIComponent(id);
+  function fmtFetchedAt(iso: string): string {
+    // Compact "2026-07-19 14:03 UTC" — a receipt timestamp, not a full ISO string.
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
   }
-  function renderCitations(tb: TurnBlock, indicators: { id: string; name: string }[]) {
-    if (!indicators.length) { tb.citeEl.style.display = 'none'; return; }
+  function renderCitations(tb: TurnBlock, citations: Citation[]) {
+    if (!citations.length) { tb.citeEl.style.display = 'none'; tb.citeEl.innerHTML = ''; return; }
     tb.citeEl.style.display = 'block';
-    const iso = new Date().toISOString().slice(0, 10);
-    const sources = [...new Set(indicators.map((i) => sourceOf(i.id)))].map((s) => {
-      const [label, url] = SOURCE_HOME[s];
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-    });
-    const parts = indicators.map((ind) => {
-      const name = INDICATOR_MAP[ind.id] || ind.name || ind.id;
-      return `<a href="${indicatorUrl(ind.id)}" target="_blank" rel="noopener noreferrer">${esc(ind.id)} — ${esc(name)}</a>`;
+    const rows = citations.map((c) => {
+      const name = INDICATOR_MAP[c.indicatorId] || c.indicatorName || c.indicatorId;
+      const where = c.countries.length ? c.countries.join(', ') : 'all countries';
+      const vintage = c.sourceUpdated
+        ? `<span class="ch-cite-vintage">source updated ${esc(c.sourceUpdated)}</span>`
+        : '';
+      return (
+        '<li class="ch-cite-item">' +
+        `<span class="ch-cite-src">${esc(c.sourceLabel)}</span>` +
+        `<a class="ch-cite-ind" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(name)} <span class="ch-cite-id">(${esc(c.indicatorId)})</span></a>` +
+        '<span class="ch-cite-facets">' +
+        `<span class="ch-cite-facet">${esc(where)}</span>` +
+        `<span class="ch-cite-facet">${esc(fmtRange(c.yearRange))}</span>` +
+        `<span class="ch-cite-facet">fetched ${esc(fmtFetchedAt(c.fetchedAt))}</span>` +
+        vintage +
+        '</span>' +
+        '</li>'
+      );
     });
     tb.citeEl.innerHTML =
-      'Data from ' + sources.join(', ') +
-      ' · ' + (indicators.length === 1 ? 'Indicator: ' : 'Indicators: ') +
-      parts.join(' · ') +
-      ' · Retrieved ' + iso;
+      '<div class="ch-cite-head">References — every number fetched live &amp; cited</div>' +
+      '<ol class="ch-cite-list">' + rows.join('') + '</ol>';
   }
 
   // ── Run ────────────────────────────────────────────────────────────────
@@ -1913,7 +1926,7 @@ const PRESETS = [
       renderFinding(tb, out.finding || 'No finding produced.');
       if (out.confidence === 'low') tb.confEl.style.display = 'inline-block';
       renderTable(tb, out.rows, out.csv);
-      renderCitations(tb, out.indicators);
+      renderCitations(tb, out.citations);
       renderRunningTotal(tb, tb.trace, out.cost);
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
@@ -2011,7 +2024,7 @@ const PRESETS = [
       // LLM call: the harness hands over a realistic event sequence (e.g. an
       // execute_js step with nested llm() child receipts) and this drives the
       // app's own renderer over it.
-      stageTrace(question: string, events: any[], files?: Record<string, string>) {
+      stageTrace(question: string, events: any[], files?: Record<string, string>, citations?: Citation[]) {
         const tb = createTurnBlock();
         allTurns.push(tb);
         consoleEl.style.display = 'none';
@@ -2020,6 +2033,14 @@ const PRESETS = [
         renderQuestion(tb, question);
         if (files) renderFiles(tb, files);
         renderTrace(tb, events as TraceEvent[]);
+        // Citations render OUTSIDE the trace, in the evidence section — drive
+        // them through the SAME renderCitations path the live run uses (real
+        // .ch-meta / .ch-cite containers, no floating DOM), so an offline
+        // screenshot exercises the actual references renderer.
+        if (citations && citations.length) {
+          tb.metaSection.style.display = 'block';
+          renderCitations(tb, citations);
+        }
         dbg.tb = tb;
         return tb.root;
       },
@@ -3443,15 +3464,83 @@ const PRESETS = [
     box-shadow: inset 3px 0 0 var(--signal);
   }
 
-  /* ── Citations ── */
+  /* ── Citations: a references section on a receipt — compact, mono,
+     understated, amber used sparingly (only the section rule + hairlines). ── */
   .ch-cite {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     color: var(--fg-muted);
-    line-height: 1.7;
+    line-height: 1.6;
     margin-top: var(--space-sm);
     padding: 0 2px;
     word-break: break-word;
+  }
+  :global(.ch-cite-head) {
+    font-size: var(--text-tag);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    padding-bottom: 4px;
+    /* The one amber accent: a thin top rule stamps the references block, like a
+       receipt's tear line above its footer. Everything else stays muted. */
+    border-top: 1px dashed color-mix(in srgb, var(--signal) 45%, transparent);
+    padding-top: 6px;
+  }
+  :global(.ch-cite-list) {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+    counter-reset: ch-cite;
+  }
+  :global(.ch-cite-item) {
+    counter-increment: ch-cite;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    padding: 6px 0;
+    border-bottom: 1px dotted var(--fg-faint);
+  }
+  :global(.ch-cite-item:last-child) { border-bottom: none; }
+  /* A hanging "[n]" reference marker in the left gutter. */
+  :global(.ch-cite-item::before) {
+    content: '[' counter(ch-cite) ']';
+    grid-row: 1 / span 2;
+    color: var(--fg-muted);
+    align-self: start;
+    padding-top: 1px;
+  }
+  :global(.ch-cite-src) {
+    grid-column: 2;
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  :global(.ch-cite-ind) {
+    grid-column: 2;
+    color: var(--fg);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--fg-muted);
+  }
+  :global(.ch-cite-ind:hover) { text-decoration-color: var(--fg); }
+  :global(.ch-cite-id) { color: var(--fg-muted); }
+  :global(.ch-cite-facets) {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    margin-top: 2px;
+    color: var(--fg-muted);
+  }
+  /* Facets separated by a hairline middot, receipt-line style. */
+  :global(.ch-cite-facet + .ch-cite-facet)::before,
+  :global(.ch-cite-facet + .ch-cite-vintage)::before {
+    content: '·';
+    margin-right: 6px;
+    color: var(--fg-muted);
+  }
+  /* The vintage — the one honest data-provenance fact worth a subtle amber tint. */
+  :global(.ch-cite-vintage) {
+    color: color-mix(in srgb, var(--signal) 80%, var(--fg-muted));
   }
   :global(.ch-cite a) { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
   :global(.ch-cite a:hover) { color: var(--fg); }
