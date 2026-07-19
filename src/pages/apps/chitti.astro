@@ -292,6 +292,23 @@ const PRESETS = [
               <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
             </div>
           </div>
+
+          <!-- Judgment calls: off by default. Each one is a second, nested
+               completion billed to the user's own key, so the user opts in.
+               Locks with the database picker on the first ask. -->
+          <div class="ch-byok-row ch-rlm-row">
+            <div class="ch-rlm" id="ch-rlm">
+              <label class="ch-save">
+                <input type="checkbox" id="ch-rlm-toggle" />
+                <span>Let code make judgment calls</span>
+              </label>
+              <p class="ch-rlm-hint" id="ch-rlm-hint">
+                Off by default. When on, computed steps can ask the model to classify or
+                label rows. Each one is an extra call billed to your key, and its output is
+                model judgment, not fetched data.
+              </p>
+            </div>
+          </div>
           </div>
         </div>
       </div>
@@ -946,6 +963,19 @@ const PRESETS = [
   // The hard filter binds when the session is created (first ask), so the
   // picker locks for the rest of the conversation. "+ new conversation" clears
   // the session and calls unlockSources().
+  //
+  // The judgment-call toggle binds at the same moment and for the same
+  // reason: it is read once, when createSession() is called, so letting it
+  // change mid-conversation would show a control that no longer decides
+  // anything. It rides the same lock rather than growing a second mechanism.
+  const rlmBox = $('ch-rlm');
+  const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
+  const rlmHint = $('ch-rlm-hint');
+  const RLM_HINT_DEFAULT = rlmHint?.textContent || '';
+
+  function rlmEnabled(): boolean {
+    return !!rlmToggle?.checked;
+  }
   function lockSources() {
     sourcesLocked = true;
     sourcesBox?.classList.add('is-locked');
@@ -955,6 +985,13 @@ const PRESETS = [
       sourcesHint.textContent = 'Locked for this conversation — start a new one to change.';
       sourcesHint.classList.remove('is-warn');
     }
+    rlmBox?.classList.add('is-locked');
+    if (rlmToggle) rlmToggle.disabled = true;
+    if (rlmHint) {
+      rlmHint.textContent = rlmEnabled()
+        ? 'On for this conversation. Start a new one to turn it off.'
+        : 'Off for this conversation. Start a new one to turn it on.';
+    }
   }
   function unlockSources() {
     sourcesLocked = false;
@@ -962,6 +999,9 @@ const PRESETS = [
     sourceItems.forEach((b) => b.removeAttribute('aria-disabled'));
     if (sourcesSearch) sourcesSearch.disabled = false;
     updateSourcesCount();
+    rlmBox?.classList.remove('is-locked');
+    if (rlmToggle) rlmToggle.disabled = false;
+    if (rlmHint) rlmHint.textContent = RLM_HINT_DEFAULT;
   }
   sourceItems.forEach((b) => {
     b.addEventListener('click', () => {
@@ -1028,6 +1068,11 @@ const PRESETS = [
   function formatTokens(n: number): string {
     const val = n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
     return val + ' tok';
+  }
+
+  // Compact byte count for the nested llm() receipts: "820 B", "4.1 KB".
+  function formatBytes(n: number): string {
+    return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
   }
 
   // The search-receipt card: find_series streams as a visible receipt of the
@@ -1243,6 +1288,39 @@ const PRESETS = [
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
         body.appendChild(d);
+      }
+      // Nested llm() receipts: one line per bounded judgment call made inside
+      // this execute_js run. Rendered as its own indented block, labelled
+      // model-derived, so a value the model judged is never mistaken on
+      // screen for a value a database returned.
+      if (e.rlmReceipts && e.rlmReceipts.length) {
+        const nest = document.createElement('div');
+        nest.className = 'ch-rlm';
+        const label = document.createElement('div');
+        label.className = 'ch-rlm-label';
+        label.textContent = 'model-derived · llm() judgment, not fetched data';
+        nest.appendChild(label);
+        for (const r of e.rlmReceipts) {
+          const line = document.createElement('div');
+          line.className = 'ch-rlm-line' + (r.ok ? '' : ' ch-rlm-fail');
+          const parts = [
+            'depth ' + r.depth,
+            r.dataBytes ? formatBytes(r.dataBytes) : 'no data',
+            r.durationMs < 1000 ? r.durationMs + 'ms' : (r.durationMs / 1000).toFixed(1) + 's',
+          ];
+          if (r.tokens) parts.push(formatTokens(r.tokens));
+          if (!r.ok && r.error) parts.push(r.error);
+          const q = document.createElement('span');
+          q.className = 'ch-rlm-prompt';
+          q.textContent = r.promptSummary;
+          line.appendChild(q);
+          const m = document.createElement('span');
+          m.className = 'ch-rlm-meta';
+          m.textContent = parts.join(' · ');
+          line.appendChild(m);
+          nest.appendChild(line);
+        }
+        body.appendChild(nest);
       }
       // Ink-stamped VERIFIED badge — only the verify step, only on a genuine pass.
       if (e.tool === 'verify' && e.pass === true) {
@@ -1853,7 +1931,7 @@ const PRESETS = [
       // is locked for the rest of the conversation. "+ new conversation" clears
       // `session` and unlocks the picker.
       if (!session) {
-        session = createSession(cfg, { sources: selectedSources() });
+        session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
         lockSources();
       }
       const out = await session.ask(question, {
@@ -2707,6 +2785,18 @@ const PRESETS = [
   }
   .ch-save input { accent-color: var(--signal); }
 
+  .ch-rlm-row { display: block; }
+  .ch-rlm { display: flex; flex-direction: column; gap: 6px; }
+  .ch-rlm.is-locked { opacity: 0.55; }
+  .ch-rlm.is-locked .ch-save { cursor: not-allowed; }
+  .ch-rlm-hint {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+
   .ch-keylinks { display: flex; gap: 12px; flex-wrap: wrap; }
   :global(.ch-keylink) {
     font-family: var(--font-mono);
@@ -2920,6 +3010,40 @@ const PRESETS = [
     opacity: 0.8;
   }
   :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+
+  /* ── Nested llm() receipts ──────────────────────────────────────────────
+     One indented line per bounded judgment call inside an execute_js run.
+     The left rule and the standing label carry the point: these values are
+     the model's own judgment, never a number a source returned. */
+  :global(.ch-rlm) {
+    margin-top: 6px;
+    padding-left: 10px;
+    border-left: 1px solid var(--fg-faint);
+  }
+  :global(.ch-rlm-label) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    margin-bottom: 3px;
+  }
+  :global(.ch-rlm-line) {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.8;
+  }
+  :global(.ch-rlm-prompt) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.ch-rlm-meta) { flex: none; }
+  :global(.ch-rlm-fail) { color: var(--danger); }
 
   /* ── Search-receipt card ────────────────────────────────────────────────
      find_series shows its work: a compact card on a darker ground reading
