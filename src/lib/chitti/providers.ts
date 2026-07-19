@@ -72,6 +72,10 @@ export interface ProviderConfig {
 export interface ModelOption {
   id: string;
   label: string;
+  // Human-readable catalog name (OpenRouter's `name`, e.g. "NVIDIA: Nemotron
+  // 3 Ultra 550B"). Undefined when the catalog doesn't provide one — the UI
+  // then falls back to the id. Never fabricated.
+  name?: string;
   free?: boolean;
   // OpenRouter-only: true when the model's `supported_parameters` includes
   // 'reasoning' (per OpenRouter's own docs, not every provider that flags
@@ -83,6 +87,11 @@ export interface ModelOption {
   // OpenRouter-only: context window size, used to rank free fallback
   // candidates (a rough capability proxy when nothing better is available).
   ctx?: number;
+  // OpenRouter-only: pricing in USD per 1M tokens (prompt / completion).
+  // Undefined when the catalog omits the field — never guessed. Zero for
+  // genuinely free models.
+  promptPricePerM?: number;
+  completionPricePerM?: number;
 }
 
 export interface ProviderMeta {
@@ -270,37 +279,86 @@ export async function fetchModels(provider: ProviderId, apiKey?: string): Promis
   return models;
 }
 
-// OpenRouter — public endpoint, no auth. Filter to models that actually
-// support tool calling (that's what a deep-agent workload needs) and put
-// free models first.
-async function fetchOpenRouterModels(): Promise<ModelOption[]> {
-  const resp = await fetch('https://openrouter.ai/api/v1/models');
-  if (!resp.ok) return [];
-  const j = await resp.json();
-  const raw = (j.data || []) as any[];
+// ── OpenRouter catalog: pure, offline-testable parsing ─────────────────
+// The live fetch is a thin wrapper; the shape-handling below is pulled out
+// as pure functions so the searchable model picker's free-detection, pricing
+// formatting, and catalog parsing can be unit-tested against fixture JSON
+// without any network. Parse defensively: OpenRouter's payload is external.
+
+// One raw model entry from openrouter.ai/api/v1/models `data[]`. Only the
+// fields we read are typed; everything is optional because it's external.
+interface RawOpenRouterModel {
+  id?: string;
+  name?: string;
+  context_length?: number;
+  supported_parameters?: string[];
+  pricing?: { prompt?: string | number; completion?: string | number };
+}
+
+// A model is "free" when its id is tagged `:free` OR its per-token prompt AND
+// completion prices both parse to exactly 0. Requiring both to be zero avoids
+// mislabelling a model that reads for free but charges to generate.
+export function isFreeModel(m: RawOpenRouterModel): boolean {
+  if ((m.id ?? '').endsWith(':free')) return true;
+  const prompt = pricePerMillion(m.pricing?.prompt);
+  const completion = pricePerMillion(m.pricing?.completion);
+  return prompt === 0 && completion === 0;
+}
+
+// OpenRouter quotes pricing in USD *per token* as a string (e.g. "0.0000004").
+// Convert to USD per 1M tokens. Returns undefined when the field is missing or
+// unparseable — the UI omits the figure rather than guessing.
+export function pricePerMillion(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!Number.isFinite(n)) return undefined;
+  return n * 1e6;
+}
+
+// Format a USD-per-1M-tokens figure for the picker. undefined in → undefined
+// out (omit the field). $0 for free. Compact otherwise: $0.15, $2, $15.
+export function formatPricePerM(perM: number | undefined): string | undefined {
+  if (perM === undefined) return undefined;
+  if (perM === 0) return '$0';
+  // Sub-dollar prices keep two decimals; whole-ish prices trim trailing zeros.
+  const s = perM < 1 ? perM.toFixed(2) : perM.toFixed(2).replace(/\.?0+$/, '');
+  return '$' + s;
+}
+
+// Parse OpenRouter's /models JSON into ModelOption[]: tool-capable models only
+// (a deep-agent needs tools), preview/deprecated `~`-prefixed slugs dropped,
+// free models first then alphabetical. Pure — no fetch, no PRICING mutation.
+export function parseOpenRouterCatalog(json: unknown): ModelOption[] {
+  const data = (json as { data?: unknown })?.data;
+  const raw: RawOpenRouterModel[] = Array.isArray(data) ? (data as RawOpenRouterModel[]) : [];
 
   const opts: ModelOption[] = [];
   for (const m of raw) {
-    const id: string = m.id || '';
+    const id = typeof m.id === 'string' ? m.id : '';
     if (!id) continue;
-    const params: string[] = m.supported_parameters || [];
-    if (!params.includes('tools')) continue;
-    const pricing = m.pricing || {};
-    const isFree = String(pricing.prompt ?? '0') === '0' && String(pricing.completion ?? '0') === '0';
     // Skip preview/deprecated models (prefixed with ~ on OpenRouter).
     if (id.startsWith('~')) continue;
-    const isReasoning = params.includes('reasoning');
+    const params: string[] = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
+    if (!params.includes('tools')) continue;
+
+    const free = isFreeModel(m);
+    const reasoning = params.includes('reasoning');
+    const ctx = typeof m.context_length === 'number' ? m.context_length : undefined;
+    const name = typeof m.name === 'string' && m.name.trim() ? m.name.trim() : undefined;
+    // Free models cost nothing regardless of any stray catalog figure.
+    const promptPricePerM = free ? 0 : pricePerMillion(m.pricing?.prompt);
+    const completionPricePerM = free ? 0 : pricePerMillion(m.pricing?.completion);
+
     opts.push({
       id,
-      label: id + (isFree ? '  · free' : '') + (isReasoning ? '  · reasoning' : ''),
-      free: isFree,
-      reasoning: isReasoning,
-      ctx: typeof m.context_length === 'number' ? m.context_length : undefined,
+      label: id + (free ? '  · free' : '') + (reasoning ? '  · reasoning' : ''),
+      name,
+      free,
+      reasoning,
+      ctx,
+      promptPricePerM,
+      completionPricePerM,
     });
-    // Cache pricing so estimateCost is accurate for the current catalog.
-    const inPrice = parseFloat(pricing.prompt ?? '0') * 1e6;
-    const outPrice = parseFloat(pricing.completion ?? '0') * 1e6;
-    if (inPrice || outPrice) PRICING[id] = { in: inPrice, out: outPrice };
   }
 
   // Free first, then alphabetical.
@@ -308,6 +366,22 @@ async function fetchOpenRouterModels(): Promise<ModelOption[]> {
     if (!!a.free !== !!b.free) return a.free ? -1 : 1;
     return a.id.localeCompare(b.id);
   });
+  return opts;
+}
+
+// OpenRouter — public endpoint, no auth. Delegates parsing to the pure
+// parseOpenRouterCatalog and, as its one side effect, caches per-model pricing
+// so estimateCost tracks the live catalog.
+async function fetchOpenRouterModels(): Promise<ModelOption[]> {
+  const resp = await fetch('https://openrouter.ai/api/v1/models');
+  if (!resp.ok) return [];
+  const j = await resp.json();
+  const opts = parseOpenRouterCatalog(j);
+  for (const m of opts) {
+    const inPrice = m.promptPricePerM ?? 0;
+    const outPrice = m.completionPricePerM ?? 0;
+    if (inPrice || outPrice) PRICING[m.id] = { in: inPrice, out: outPrice };
+  }
   return opts;
 }
 

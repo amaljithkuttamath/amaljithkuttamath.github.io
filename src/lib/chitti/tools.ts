@@ -93,15 +93,43 @@ const SYNONYMS: Record<string, string[]> = {
   carbon: ['co2', 'emissions'],
   emissions: ['co2', 'carbon'],
   gdp: ['gross domestic product', 'economy', 'output'],
+  economy: ['gdp', 'economic', 'output'],
+  economic: ['gdp', 'economy', 'output'],
+  output: ['gdp', 'economy'],
   gni: ['gross national income'],
   inflation: ['consumer prices', 'cpi'],
-  unemployment: ['labor force', 'jobless'],
+  unemployment: ['labor force', 'jobless', 'unemployed'],
+  jobless: ['unemployment', 'unemployed'],
+  unemployed: ['unemployment'],
   population: ['people', 'demographic', 'inhabitants'],
+  people: ['population'],
+  // "per person" is the colloquial "per capita"; the reverse is not added so
+  // a plain "per capita" query doesn't drag in the one dataset named "person".
+  person: ['capita'],
+  pc: ['per capita'],
   mortality: ['death', 'deaths'],
   fertility: ['births', 'birth rate'],
   longevity: ['life expectancy'],
   lifespan: ['life expectancy'],
+  // aging skews toward the "ages 65 and above" series, not a literal word.
+  aging: ['ages', 'elderly', 'old', 'older'],
+  ageing: ['ages', 'elderly', 'old', 'older'],
+  doctors: ['physicians', 'medical'],
+  physicians: ['doctors'],
+  vaccination: ['immunization', 'vaccine'],
+  vaccine: ['immunization', 'vaccination'],
+  immunization: ['vaccination', 'vaccine'],
+  spending: ['expenditure', 'expenses'],
+  expenditure: ['spending'],
+  // IMF is the forecast source — route "forecast/projection" phrasings there.
+  forecast: ['projection', 'projected', 'forecasts', 'outlook'],
+  forecasts: ['forecast', 'projection'],
+  projection: ['forecast', 'forecasts', 'projected'],
+  projected: ['forecast', 'projection'],
   internet: ['online', 'web', 'connectivity'],
+  online: ['internet', 'web'],
+  phone: ['mobile', 'cellular'],
+  cellular: ['mobile', 'phone'],
   poverty: ['poor', 'income'],
   literacy: ['reading', 'education'],
   renewables: ['renewable', 'solar', 'wind', 'clean energy'],
@@ -109,9 +137,21 @@ const SYNONYMS: Record<string, string[]> = {
   energy: ['electricity', 'power'],
   debt: ['borrowing', 'liabilities'],
   trade: ['exports', 'imports'],
+  cover: ['area'],
   happiness: ['life satisfaction', 'wellbeing', 'cantril'],
   hdi: ['human development'],
 };
+
+// Function/units words that carry no topic signal. Dropped from per-term
+// scoring so a short token can't win on an incidental substring hit — "in"
+// (from "gdp in france") was matching "international", and "rate" (a units
+// suffix on many indicator names) was outscoring the actual topic term. The
+// full-phrase and name-prefix bonuses still use the raw query, so multi-word
+// phrases like "gdp per capita" keep their exact-match weight.
+const STOPWORDS = new Set([
+  'in', 'of', 'the', 'a', 'an', 'to', 'for', 'and', 'or', 'how', 'many', 'much',
+  'are', 'is', 'be', 'on', 'at', 'by', 'with', 'from', 'rate',
+]);
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -143,7 +183,7 @@ export function explainMatch(query: string, id: string, name: string): MatchExpl
   if (nName.startsWith(q)) score += 6; // name leads with the query
   if (nId === q) score += 8; // id is exactly the query
 
-  const base = new Set(q.split(' ').filter(Boolean));
+  const base = new Set(q.split(' ').filter((w) => w && !STOPWORDS.has(w)));
   // Synonym word → the base term it expands from. First writer wins so a word
   // reachable from two base terms is attributed once (matches the old Set
   // dedup that kept scoring stable).
@@ -1143,6 +1183,13 @@ export async function findSeriesWithReceipt(
   const seen = new Set<string>();
   const deduped = hits
     .filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)))
+    // Rank across ALL sources by relevance, not by source order. The hits are
+    // gathered source-by-source (World Bank block, then the OWID/IMF catalog),
+    // so without this a weak World Bank hit outranks a far stronger OWID/IMF
+    // match purely because its source was searched first. Array.sort is stable,
+    // so equal scores keep their gather order — World Bank still wins genuine
+    // ties, and curated hits still precede the live-catalog ones.
+    .sort((a, b) => scoreSeries(query, b.id, b.name) - scoreSeries(query, a.id, a.name))
     .slice(0, 12);
 
   const labelOf = (id: string) => activeSources.find((s) => s.id === id)?.label ?? id;

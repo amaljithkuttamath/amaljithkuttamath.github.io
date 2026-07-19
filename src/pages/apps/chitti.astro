@@ -195,7 +195,7 @@ const PRESETS = [
           </button>
           <div class="ch-byok-settings" id="ch-byok-settings" hidden>
             <div class="ch-byok-row">
-              <label class="ch-field">
+              <label class="ch-field ch-field-grow">
                 <span class="ch-field-label">Provider</span>
                 <select id="ch-provider" class="ch-select">
                   {PROVIDERS.map((p) => (
@@ -203,12 +203,34 @@ const PRESETS = [
                   ))}
                 </select>
               </label>
-              <label class="ch-field">
-                <span class="ch-field-label">Model</span>
-                <select id="ch-model" class="ch-select"></select>
-              </label>
             </div>
             <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+
+            <!-- Model picker: searchable + scrollable, mirroring the database
+                 picker below. Shows each model's human name, a free badge,
+                 context length, and prompt/completion pricing per 1M tokens
+                 (from the live OpenRouter catalog; curated fallback offline).
+                 The hidden <select id="ch-model"> stays the state source of
+                 truth so all existing wiring keeps working unchanged. -->
+            <div class="ch-byok-row ch-model-row">
+              <div class="ch-modelpick" id="ch-modelpick">
+                <div class="ch-modelpick-top">
+                  <span class="ch-field-label">Model</span>
+                  <span class="ch-modelpick-count" id="ch-modelpick-count"></span>
+                </div>
+                <input
+                  type="search"
+                  class="ch-modelpick-search"
+                  id="ch-model-search"
+                  placeholder="Search models…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div class="ch-modelpick-list" id="ch-modelpick-list"></div>
+                <p class="ch-modelpick-empty" id="ch-modelpick-empty" hidden>No models match.</p>
+                <select id="ch-model" class="ch-select" hidden aria-hidden="true" tabindex="-1"></select>
+              </div>
+            </div>
 
           <!-- Database picker. Hard filter: Chitti answers only from the
                selected databases. Built from the source registry (tools.ts),
@@ -299,6 +321,7 @@ const PRESETS = [
     PROVIDERS,
     providerMeta,
     fetchModels,
+    formatPricePerM,
     RECOMMENDED_OPENROUTER_MODELS,
     type ProviderId,
     type ProviderConfig,
@@ -306,12 +329,17 @@ const PRESETS = [
   } from '../../lib/chitti/providers';
   import type { TraceEvent } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow } from '../../lib/chitti/tools';
+  import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
 
   // ── Elements ──────────────────────────────────────────────────────────
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
   const providerSel = $('ch-provider') as HTMLSelectElement;
   const modelSel = $('ch-model') as HTMLSelectElement;
+  const modelPickList = $('ch-modelpick-list');
+  const modelPickSearch = $('ch-model-search') as HTMLInputElement;
+  const modelPickCount = $('ch-modelpick-count');
+  const modelPickEmpty = $('ch-modelpick-empty');
   const keyIn = $('ch-key') as HTMLInputElement;
   const saveChk = $('ch-save') as HTMLInputElement;
   const keyLinks = $('ch-keylinks');
@@ -434,6 +462,9 @@ const PRESETS = [
     lastSpec: ChartSpec | null;
     lastRows: DataRow[];
     lastCSV: string;
+    // Index (into lastRows) of the evidence row currently highlighted by a
+    // chart click, or -1 when nothing is highlighted. Chart↔table linking.
+    activeRowIndex: number;
     trace: TraceEvent[];
     files: Record<string, string>;
     startTimes: number[];
@@ -482,6 +513,7 @@ const PRESETS = [
       lastSpec: null,
       lastRows: [],
       lastCSV: '',
+      activeRowIndex: -1,
       trace: [],
       files: {},
       startTimes: [],
@@ -557,8 +589,149 @@ const PRESETS = [
     } else if (models.length) {
       modelSel.value = models[0].id;
     }
+    // The hidden <select> above stays the state source of truth; the visible
+    // searchable picker is rendered from the same list and drives it.
+    renderModelPicker(models, pid);
     updateByokState();
   }
+
+  // The visible model picker: a searchable, scrollable list mirroring the
+  // database picker. Each row shows the model's human name, a free badge, its
+  // context length, and prompt/completion pricing per 1M tokens — everything a
+  // user needs to actually choose, instead of a truncated slug. Clicking a row
+  // just sets the hidden <select> (so requestReasoning and every other reader
+  // keep working) and refreshes the chip.
+  let modelPickAll: ModelOption[] = [];
+  function renderModelPicker(models: ModelOption[], pid?: ProviderId) {
+    modelPickAll = models;
+    if (!modelPickList) return;
+    modelPickList.innerHTML = '';
+
+    const buildRow = (m: ModelOption): HTMLButtonElement => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ch-model-item';
+      btn.dataset.id = m.id;
+      const on = m.id === modelSel.value;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', String(on));
+
+      // Top line: human name (fallback to id) + optional free/reasoning badges.
+      const nameRow = document.createElement('span');
+      nameRow.className = 'ch-model-namerow';
+      const name = document.createElement('span');
+      name.className = 'ch-model-name';
+      name.textContent = m.name || m.id;
+      nameRow.appendChild(name);
+      if (m.free) {
+        const badge = document.createElement('span');
+        badge.className = 'ch-model-badge ch-model-badge-free';
+        badge.textContent = 'free';
+        nameRow.appendChild(badge);
+      }
+      if (m.reasoning) {
+        const badge = document.createElement('span');
+        badge.className = 'ch-model-badge';
+        badge.textContent = 'reasoning';
+        nameRow.appendChild(badge);
+      }
+
+      // Sub line: the id (so the exact slug is always visible), then any
+      // context/pricing facts the catalog actually provided — omitted, never
+      // guessed, when absent.
+      const meta = document.createElement('span');
+      meta.className = 'ch-model-meta';
+      // The id sub-line is only worth showing when the top line is a distinct
+      // human name; otherwise it just repeats the id already shown above.
+      if (m.name && m.name !== m.id) {
+        const idEl = document.createElement('code');
+        idEl.className = 'ch-model-id';
+        idEl.textContent = m.id;
+        meta.appendChild(idEl);
+      }
+      const facts: string[] = [];
+      if (typeof m.ctx === 'number' && m.ctx > 0) {
+        facts.push((m.ctx >= 1000 ? Math.round(m.ctx / 1000) + 'K' : String(m.ctx)) + ' ctx');
+      }
+      const inP = formatPricePerM(m.promptPricePerM);
+      const outP = formatPricePerM(m.completionPricePerM);
+      if (inP && outP) facts.push(inP + ' / ' + outP + ' per 1M');
+      else if (inP) facts.push(inP + ' in per 1M');
+      for (const f of facts) {
+        const fact = document.createElement('span');
+        fact.className = 'ch-model-fact';
+        fact.textContent = f;
+        meta.appendChild(fact);
+      }
+
+      const text = document.createElement('span');
+      text.className = 'ch-model-text';
+      text.appendChild(nameRow);
+      text.appendChild(meta);
+      const check = document.createElement('span');
+      check.className = 'ch-model-check';
+      check.setAttribute('aria-hidden', 'true');
+      btn.appendChild(check);
+      btn.appendChild(text);
+
+      btn.addEventListener('click', () => {
+        if (!models.some((x) => x.id === m.id)) return;
+        modelSel.value = m.id;
+        modelPickList.querySelectorAll('.ch-model-item').forEach((el) => {
+          const isSel = (el as HTMLElement).dataset.id === m.id;
+          el.classList.toggle('is-on', isSel);
+          el.setAttribute('aria-pressed', String(isSel));
+        });
+        updateByokState();
+      });
+      // data-search powers the live filter (name + id + badges).
+      btn.dataset.search = `${m.name || ''} ${m.id} ${m.free ? 'free' : ''} ${m.reasoning ? 'reasoning' : ''}`.toLowerCase();
+      return btn;
+    };
+
+    const addGroup = (label: string, list: ModelOption[]) => {
+      if (!list.length) return;
+      const group = document.createElement('div');
+      group.className = 'ch-model-group';
+      const cat = document.createElement('div');
+      cat.className = 'ch-model-cat';
+      cat.textContent = label;
+      group.appendChild(cat);
+      for (const m of list) group.appendChild(buildRow(m));
+      modelPickList.appendChild(group);
+    };
+
+    if (pid === 'openrouter') {
+      const recommended = models.filter((m) => RECOMMENDED_OPENROUTER_MODELS.has(m.id));
+      const rest = models.filter((m) => !RECOMMENDED_OPENROUTER_MODELS.has(m.id));
+      if (recommended.length) addGroup('Recommended for this pipeline', recommended);
+      addGroup(recommended.length ? 'All models' : 'Models', rest);
+    } else {
+      for (const m of models) modelPickList.appendChild(buildRow(m));
+    }
+
+    if (modelPickCount) modelPickCount.textContent = models.length ? `${models.length} available` : '';
+    applyModelFilter();
+  }
+
+  // Live filter: hide non-matching rows and any group left empty.
+  function applyModelFilter() {
+    if (!modelPickList) return;
+    const q = (modelPickSearch?.value || '').trim().toLowerCase();
+    const rows = Array.from(modelPickList.querySelectorAll<HTMLElement>('.ch-model-item'));
+    let anyVisible = false;
+    rows.forEach((r) => {
+      const hit = !q || (r.dataset.search || '').includes(q);
+      r.hidden = !hit;
+      if (hit) anyVisible = true;
+    });
+    modelPickList.querySelectorAll<HTMLElement>('.ch-model-group').forEach((g) => {
+      const vis = Array.from(g.querySelectorAll<HTMLElement>('.ch-model-item')).some((it) => !it.hidden);
+      g.hidden = !vis;
+    });
+    if (modelPickEmpty) modelPickEmpty.hidden = anyVisible;
+  }
+  modelPickSearch?.addEventListener('input', applyModelFilter);
 
   // Populate the model dropdown — first from the hardcoded fallback (instant),
   // then replace with the live /models fetch (right values).
@@ -623,13 +796,18 @@ const PRESETS = [
   }
 
   // One-line summary of the connection, shown even when the panel is closed.
+  // The model name is the whole point of the chip, so it's shown in full (the
+  // CSS wraps it rather than truncating). Prefer the catalog's human name, then
+  // the exact slug — never a lossy label.
   function updateByokState() {
     const pid = currentProvider();
     const meta = providerMeta(pid);
-    const model = meta.models.find((m) => m.id === modelSel.value);
+    const live = modelPickAll.find((m) => m.id === modelSel.value);
+    const curated = meta.models.find((m) => m.id === modelSel.value);
+    const modelName = live?.name || live?.id || curated?.label || modelSel.value || meta.defaultModel;
     const hasKey = keyIn.value.trim().length > 0;
-    byokState.textContent =
-      pid + ' · ' + (model ? model.label : modelSel.value) + (hasKey ? ' · key ✓' : '');
+    byokState.textContent = pid + ' · ' + modelName + (hasKey ? ' · key ✓' : '');
+    byokState.title = pid + ' · ' + modelName + (hasKey ? ' · key set' : ' · no key');
     byokState.classList.toggle('ch-byok-ready', hasKey);
     byokCta.style.display = hasKey ? 'none' : 'inline';
     byokSum.classList.toggle('ch-byok-missing', !hasKey);
@@ -1245,6 +1423,90 @@ const PRESETS = [
     };
   }
 
+  // ── Chart ↔ evidence-table linking ─────────────────────────────────────
+  // Pure index math lives in chart-link.ts (matchPointToRow / matchRowToPoint);
+  // this half is the DOM/ECharts glue. Nothing here calls the model or mutates
+  // agent state — it only connects a click/hover to the row that backs it.
+
+  function prefersReducedMotion(): boolean {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  // The <tr> elements currently rendered in this turn's evidence table, index
+  // aligned with the first tb.lastRows entries (the table caps at 500 rows).
+  function tableRows(tb: TurnBlock): HTMLTableRowElement[] {
+    return Array.from(tb.tableEl.querySelectorAll<HTMLTableRowElement>('tbody tr[data-row]'));
+  }
+
+  function clearRowHighlight(tb: TurnBlock) {
+    if (tb.activeRowIndex < 0) return;
+    const prev = tb.tableEl.querySelector('tbody tr.ch-row-active');
+    if (prev) prev.classList.remove('ch-row-active');
+    tb.activeRowIndex = -1;
+  }
+
+  // Highlight the evidence row at lastRows[index] and bring it into view.
+  // Toggling: clicking the already-active row's point clears it instead.
+  function highlightRow(tb: TurnBlock, index: number) {
+    if (index < 0) return;
+    if (tb.activeRowIndex === index) { clearRowHighlight(tb); return; }
+    clearRowHighlight(tb);
+    const rows = tableRows(tb);
+    const tr = rows[index];
+    if (!tr) return; // row is past the 500-row table cap — nothing to show
+    tb.dataDetails.open = true; // reveal the collapsed evidence section
+    tr.classList.add('ch-row-active');
+    tb.activeRowIndex = index;
+    tr.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }
+
+  // Chart point → evidence row: the shared body of the chart-click handler,
+  // named so it's one code path whether triggered by a real ECharts click or
+  // an offline harness. Maps the (series,data) index to its backing row and
+  // toggles that row's highlight.
+  function activateChartPoint(tb: TurnBlock, seriesIndex: number, dataIndex: number) {
+    const row = matchPointToRow(tb.lastSpec, seriesIndex, dataIndex, tb.lastRows);
+    if (!row) return;
+    highlightRow(tb, tb.lastRows.indexOf(row));
+  }
+
+  // (Re)bind click + hover linking to tb.chartInstance. Called on every render
+  // (renderChart) and on theme re-init, always after a fresh init or with
+  // `off` first, so listeners never stack across turns.
+  function bindChartLinking(tb: TurnBlock) {
+    const chart = tb.chartInstance;
+    if (!chart) return;
+    chart.off('click');
+    chart.on('click', (params: any) => {
+      if (params?.componentType !== 'series') return;
+      activateChartPoint(tb, params.seriesIndex, params.dataIndex);
+    });
+    // Click on empty chart space (no series target) clears the highlight.
+    const zr = chart.getZr();
+    zr.off('click');
+    zr.on('click', (e: any) => { if (!e.target) clearRowHighlight(tb); });
+  }
+
+  // Table row → chart: highlight + tooltip for the matching point on hover /
+  // keyboard focus; clear on leave / blur. Graceful no-op when the row has no
+  // visible point (e.g. its series is hidden by the legend, or type=scatter).
+  function highlightPointForRow(tb: TurnBlock, row: DataRow) {
+    const chart = tb.chartInstance;
+    if (!chart) return;
+    const p = matchRowToPoint(tb.lastSpec, row);
+    if (!p) return;
+    chart.dispatchAction({ type: 'highlight', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
+    chart.dispatchAction({ type: 'showTip', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
+  }
+  function downplayPointForRow(tb: TurnBlock, row: DataRow) {
+    const chart = tb.chartInstance;
+    if (!chart) return;
+    const p = matchRowToPoint(tb.lastSpec, row);
+    if (!p) return;
+    chart.dispatchAction({ type: 'downplay', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
+    chart.dispatchAction({ type: 'hideTip' });
+  }
+
   async function renderChart(tb: TurnBlock, spec: ChartSpec) {
     tb.lastSpec = spec;
     tb.canvasEl.classList.remove('ch-canvas-pending');
@@ -1262,6 +1524,11 @@ const PRESETS = [
     if (tb.chartInstance) tb.chartInstance.dispose();
     tb.chartInstance = echarts.init(tb.chartEl, null, { renderer: 'canvas' });
     tb.chartInstance.setOption(buildOption(spec));
+    // A fresh chart instance and (soon) a fresh evidence table — drop any
+    // highlight carried over from a previous render/turn, then (re)bind the
+    // click/hover linking to this instance.
+    clearRowHighlight(tb);
+    bindChartLinking(tb);
     tb.chartTitle.textContent = spec.title;
     // Unit/axis description lives in the card header, not as an ECharts
     // y-axis `name` — long unit strings ("deaths per 1,000 live births")
@@ -1283,6 +1550,10 @@ const PRESETS = [
         tb.chartInstance.dispose();
         tb.chartInstance = echartsMod.init(tb.chartEl, null, { renderer: 'canvas' });
         tb.chartInstance.setOption(buildOption(tb.lastSpec));
+        // New instance ⇒ its listeners are gone; re-bind linking. The table
+        // DOM (and any active-row highlight) is untouched by a re-theme, so
+        // don't clear it here — only re-wire the chart-side events.
+        bindChartLinking(tb);
       }
     }
   });
@@ -1306,6 +1577,7 @@ const PRESETS = [
   function renderTable(tb: TurnBlock, rows: DataRow[], csv: string) {
     tb.lastRows = rows;
     tb.lastCSV = csv;
+    tb.activeRowIndex = -1; // fresh table DOM ⇒ no highlight carried over
     if (!rows.length) { tb.dataDetails.style.display = 'none'; return; }
     tb.dataDetails.style.display = 'block';
     tb.dataCount.textContent = String(rows.length);
@@ -1315,8 +1587,8 @@ const PRESETS = [
       '<tbody>' +
       shown
         .map(
-          (r) =>
-            `<tr><td>${esc(r.country)}</td><td>${esc(r.iso3)}</td><td>${r.year}</td><td>${
+          (r, i) =>
+            `<tr data-row="${i}"><td>${esc(r.country)}</td><td>${esc(r.iso3)}</td><td>${r.year}</td><td>${
               r.value === null ? '—' : r.value
             }</td></tr>`
         )
@@ -1324,6 +1596,30 @@ const PRESETS = [
       (rows.length > 500 ? `<tr><td colspan="4" class="ch-table-more">… ${rows.length - 500} more rows (in CSV)</td></tr>` : '') +
       '</tbody>';
     tb.tableEl.innerHTML = head + body;
+    wireTableLinking(tb, shown);
+  }
+
+  // Make every evidence row that corresponds to a visible chart point
+  // interactive: hover/focus highlights the point (+ tooltip), leave/blur
+  // clears it, and the row becomes keyboard-focusable with an aria-label.
+  // Rows with no matching point (chart not built yet, scatter, or a value not
+  // plotted) are left as plain, inert text.
+  function wireTableLinking(tb: TurnBlock, shown: DataRow[]) {
+    if (!tb.lastSpec) return;
+    for (const tr of tb.tableEl.querySelectorAll<HTMLTableRowElement>('tbody tr[data-row]')) {
+      const idx = Number(tr.dataset.row);
+      const row = shown[idx];
+      if (!row || !matchRowToPoint(tb.lastSpec, row)) continue;
+      tr.classList.add('ch-row-linkable');
+      tr.tabIndex = 0;
+      tr.setAttribute('aria-label', 'highlight this point on the chart');
+      const enter = () => highlightPointForRow(tb, row);
+      const leave = () => downplayPointForRow(tb, row);
+      tr.addEventListener('pointerenter', enter);
+      tr.addEventListener('pointerleave', leave);
+      tr.addEventListener('focus', enter);
+      tr.addEventListener('blur', leave);
+    }
   }
 
   function esc(s: string): string {
@@ -1638,6 +1934,51 @@ const PRESETS = [
     composerQ.value = '';
     composerQ.focus();
   });
+
+  // Test-only seam. When the page is opened with ?chittidebug in the URL, the
+  // real render path (createTurnBlock → renderQuestion/renderChart/renderTable)
+  // is exposed so an offline harness can stage a turn through the ACTUAL
+  // functions — same DOM, same chart↔table linking — without an LLM call. The
+  // guard is false in normal use, so nothing is exposed in production; it hands
+  // out render helpers only, never agent/provider/session internals.
+  if (new URLSearchParams(location.search).has('chittidebug')) {
+    const dbg: any = {
+      async stage(question: string, spec: ChartSpec, rows: DataRow[]) {
+        const tb = createTurnBlock();
+        allTurns.push(tb);
+        liveChartTurns.push(tb);
+        consoleEl.style.display = 'none';
+        tb.panel.style.display = 'block';
+        renderQuestion(tb, question);
+        await renderChart(tb, spec);
+        tb.metaSection.style.display = 'block';
+        tb.answerSection.style.display = 'block';
+        renderFinding(tb, 'Staged turn (offline harness).');
+        renderTable(tb, rows, '');
+        tb.dataDetails.open = true;
+        dbg.chart = tb.chartInstance;
+        dbg.tb = tb;
+        return tb.root;
+      },
+      // Run the REAL chart-click activation path (matchPointToRow → highlight)
+      // for a given point. Used by the offline harness because headless
+      // Chromium's synthetic canvas events don't resolve a zrender series-click
+      // target, even though hover does — so the ECharts event is stubbed but
+      // every line of the app's own linking code still runs.
+      activatePoint(seriesIndex: number, dataIndex: number) {
+        if (dbg.tb) activateChartPoint(dbg.tb, seriesIndex, dataIndex);
+      },
+      // Pixel position of a data point, so the harness can issue a real mouse
+      // click on the canvas that flows through the actual ECharts listeners.
+      pointPixel(seriesIndex: number, dataIndex: number, value: number) {
+        const p = dbg.chart?.convertToPixel({ seriesIndex }, [dataIndex, value]);
+        const rect = dbg.chart?.getDom()?.getBoundingClientRect();
+        return p && rect ? { x: rect.left + p[0], y: rect.top + p[1] } : null;
+      },
+    };
+    (window as any).__chittiDebug = dbg;
+    document.documentElement.setAttribute('data-chitti-debug-ready', '1');
+  }
 </script>
 
 <style>
@@ -2040,6 +2381,153 @@ const PRESETS = [
   }
   .ch-sources-hint.is-warn { color: var(--danger); opacity: 1; }
 
+  /* ── Model picker: searchable, scrollable, single-select. Mirrors the
+        database picker's machinery; each row surfaces the model name, a free
+        badge, context length, and prompt/completion pricing. ── */
+  .ch-model-row { padding-top: 4px; }
+  .ch-modelpick {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .ch-modelpick-top { display: flex; align-items: baseline; gap: 10px; }
+  .ch-modelpick-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    margin-left: auto;
+  }
+  .ch-modelpick-search {
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 7px 11px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+  }
+  .ch-modelpick-search::placeholder { color: var(--fg-muted); }
+  .ch-modelpick-search:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+  .ch-modelpick-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+  /* Rows below are built in JS (renderModelPicker), so their selectors must be
+     :global() — Astro's scoped styles only reach server-rendered markup. */
+  :global(.ch-model-group) { display: flex; flex-direction: column; }
+  :global(.ch-model-group[hidden]) { display: none; }
+  :global(.ch-model-cat) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    opacity: 0.7;
+    padding: 8px 2px 3px;
+  }
+  :global(.ch-model-item) {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    padding: 7px 9px;
+    cursor: pointer;
+    min-width: 0;
+    transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  :global(.ch-model-item[hidden]) { display: none; }
+  :global(.ch-model-item:hover) { background: var(--bg-hover); }
+  :global(.ch-model-check) {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    margin-top: 3px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--fg-faint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :global(.ch-model-item.is-on) {
+    border-color: color-mix(in srgb, var(--signal) 30%, transparent);
+    background: color-mix(in srgb, var(--signal) 7%, transparent);
+  }
+  :global(.ch-model-item.is-on .ch-model-check) {
+    border-color: var(--signal);
+    background: var(--signal);
+  }
+  :global(.ch-model-item.is-on .ch-model-check)::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--bg);
+  }
+  :global(.ch-model-text) { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+  :global(.ch-model-namerow) { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  :global(.ch-model-name) {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-model-badge) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 0 7px;
+    line-height: 1.5;
+  }
+  :global(.ch-model-badge-free) {
+    color: var(--signal);
+    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+    background: color-mix(in srgb, var(--signal) 8%, transparent);
+  }
+  :global(.ch-model-meta) {
+    display: flex;
+    align-items: center;
+    gap: 6px 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  :global(.ch-model-id) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-model-fact) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.85;
+  }
+  :global(.ch-model-fact)::before { content: '· '; opacity: 0.6; }
+  .ch-modelpick-empty {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    padding: 8px 2px;
+    margin: 0;
+  }
+  .ch-modelpick-empty[hidden] { display: none; }
+
   .ch-btn {
     background: var(--fg);
     color: var(--bg);
@@ -2083,12 +2571,19 @@ const PRESETS = [
   .ch-byok-sum:hover { color: var(--fg); border-color: color-mix(in srgb, var(--fg) 30%, transparent); }
   .ch-byok-caret::before { content: '▸'; color: var(--fg-muted); font-size: 0.85em; }
   .ch-byok-sum[aria-expanded='true'] .ch-byok-caret::before { content: '▾'; }
+  /* The model is the whole point of this chip, so show it in full: wrap to up
+     to two lines instead of truncating a distinctive slug to "…(f…". Long
+     ids break anywhere so the leading (distinctive) part always survives. */
   .ch-byok-state {
     letter-spacing: 0.02em;
+    text-align: left;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 40ch;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
+    max-width: 52ch;
   }
   .ch-byok-state.ch-byok-ready { color: var(--success); }
   .ch-byok-sum.ch-byok-missing { border-color: color-mix(in srgb, var(--signal) 55%, transparent); }
@@ -2813,6 +3308,27 @@ const PRESETS = [
   }
   :global(.ch-table-more) { color: var(--fg-muted); text-align: center; }
 
+  /* ── Chart ↔ table linking ──
+     Rows that back a visible chart point are interactive: a pointer cursor
+     hints they're clickable-from-the-chart / hoverable-to-the-chart, and a
+     keyboard focus ring keeps them reachable. The amber --signal accent is
+     spent only on the *active* row (the one a chart click selected): a left
+     border plus a whisper of tinted background, no layout shift. */
+  :global(.ch-table tr.ch-row-linkable) { cursor: pointer; }
+  :global(.ch-table tr.ch-row-linkable:hover td) {
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+  }
+  :global(.ch-table tr.ch-row-linkable:focus-visible) {
+    outline: 1px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    outline-offset: -1px;
+  }
+  :global(.ch-table tr.ch-row-active td) {
+    background: color-mix(in srgb, var(--signal) 13%, transparent);
+  }
+  :global(.ch-table tr.ch-row-active td:first-child) {
+    box-shadow: inset 3px 0 0 var(--signal);
+  }
+
   /* ── Citations ── */
   .ch-cite {
     font-family: var(--font-mono);
@@ -2879,7 +3395,10 @@ const PRESETS = [
     .ch-select, .ch-input, .ch-q { font-size: 16px; }
     /* Selects and the key input can't force the panel wider than the bar. */
     .ch-select, .ch-input { width: 100%; max-width: 100%; }
-    .ch-byok-state { max-width: 18ch; }
+    /* Narrow screens: still show the model over up to two wrapped lines
+       (break-anywhere keeps the distinctive leading part visible) rather than
+       a single truncated slug. */
+    .ch-byok-state { max-width: 26ch; -webkit-line-clamp: 2; line-clamp: 2; }
     .ch-keylinks { flex-direction: column; gap: 6px; }
     .ch-ask-foot { flex-direction: column; align-items: stretch; }
     /* Only the top console stacks its button full-width on mobile (its

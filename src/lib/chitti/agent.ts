@@ -442,7 +442,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             tool: 'fallback',
             argSummary: res.servedModel,
             status: 'ok',
-            detail: 'primary model unavailable — OpenRouter routed to a backup free model',
+            // Name both models so the substitution is never silent — Chitti
+            // shows its work. e.g. "nemotron-…:free unavailable → fell back to
+            // nemotron-super-…:free".
+            detail: `${cfg.model} unavailable → fell back to ${res.servedModel}`,
           });
           cb.onModel?.(res.servedModel);
         }
