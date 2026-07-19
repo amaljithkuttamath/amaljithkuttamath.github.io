@@ -46,13 +46,27 @@ const lab = [
 
 <Base
   title="Amaljith Kuttamath"
-  description="AI Engineer. I ship small, sharp tools that make language models legible: tokenizers, PDF parsers, probability views, GGUF inspection."
+  description="AI Engineer. I help teams ship AI they can trust in production — with evaluation, confidence, and verification built in. Small, sharp tools that make language models legible."
 >
   <section class="intro animate-in">
+    <p class="kicker">AI Engineer &middot; Trustworthy AI in production</p>
     <h1 class="tagline">
-      I build small tools to make language models legible &mdash; what they see,
-      how sure they are, and where they break.
+      I help teams ship AI they can trust in production &mdash; and show them
+      why it works.
     </h1>
+    <p class="lede">
+      I build small tools that make language models legible &mdash; what they
+      see, how sure they are, and where they break. The same rigor goes into
+      what I ship for you.
+    </p>
+    <div class="cta-row">
+      <a href="/build" class="cta-primary">See how I work &rarr;</a>
+      <a href="/resume.pdf" class="cta-ghost">R&eacute;sum&eacute; (PDF)</a>
+      <span class="avail">
+        <span class="avail-dot" aria-hidden="true"></span>
+        Open to senior roles &amp; a few project builds
+      </span>
+    </div>
     <p class="cred">
       Everything below runs in your browser. Nothing you paste leaves the page.
     </p>
@@ -129,6 +143,15 @@ const lab = [
     padding: var(--space-2xl) 0 var(--space-xl);
   }
 
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--signal);
+    margin: 0 0 0.6rem;
+  }
+
   .tagline {
     font-family: var(--font-serif);
     font-size: var(--text-section);
@@ -136,8 +159,74 @@ const lab = [
     letter-spacing: -0.02em;
     line-height: 1.35;
     color: var(--fg);
-    max-width: 560px;
-    margin: 0 0 0.75rem;
+    max-width: 580px;
+    margin: 0 0 0.9rem;
+  }
+
+  .lede {
+    font-size: var(--text-body);
+    color: var(--fg-muted);
+    line-height: 1.7;
+    max-width: 60ch;
+    margin: 0 0 var(--space-lg);
+  }
+
+  .cta-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-lg);
+  }
+
+  .cta-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg);
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .cta-primary:hover {
+    border-color: var(--signal);
+    background: var(--bg-hover);
+  }
+
+  .cta-ghost {
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    transition: color var(--duration) var(--ease);
+  }
+
+  .cta-ghost:hover {
+    color: var(--accent-color);
+  }
+
+  .avail {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .avail-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+    display: inline-block;
+    animation: pulse 3s ease-in-out infinite;
+    flex-shrink: 0;
   }
 
   .cred {
