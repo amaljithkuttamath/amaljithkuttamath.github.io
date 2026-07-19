@@ -72,15 +72,6 @@ const trust = [
   },
 ];
 
-// A real reference outweighs any amount of copy — founders judge track record,
-// not code. NOTE (Amal): replace with a genuine quote + attribution, or delete
-// the whole block. An empty/placeholder testimonial live is worse than none.
-const testimonial = {
-  quote: '[[One or two sentences from a client or collaborator, naming the outcome — e.g. "Amal shipped our RAG pipeline in three weeks and it held up in production."]]',
-  name: '[[Name]]',
-  role: '[[Role, Company]]',
-};
-
 // How an engagement actually starts — de-risks the CTO and the founder both.
 const engagementFlow = [
   {
@@ -98,14 +89,9 @@ const engagementFlow = [
 ];
 
 // Proof, written outcome-first. Founders read line 1; recruiters read the tags.
+// Only verifiable proof lives here — a published paper and shipped, working
+// tools anyone can open. No unverifiable claims, no inflated case studies.
 const proof = [
-  {
-    outcome: 'Industrial machines fail without warning, and unplanned downtime is expensive. I co-built digital twins that predicted failures before they happened — turning reactive repairs into scheduled maintenance.',
-    org: 'RadianArc (co-founder)',
-    metric: '[[add one real number — e.g. downtime cut, failures caught early]]',
-    tags: ['digital twins', 'predictive maintenance', 'python · torch · gcp'],
-    href: null,
-  },
   {
     outcome: 'Clinical teams needed answers grounded in the literature, not model guesses. I built and validated a RAG system for healthcare that a peer-reviewed journal published.',
     org: 'MS thesis → published paper',
@@ -189,22 +175,13 @@ const proof = [
 
   <section class="work-section animate-in animate-in-delay-2">
     <div class="section-header"><h2>Proof, not promises</h2></div>
-    {!testimonial.quote.startsWith('[[') && (
-      <figure class="testimonial">
-        <blockquote>{testimonial.quote}</blockquote>
-        <figcaption>
-          <span class="testimonial-name">{testimonial.name}</span>
-          <span class="testimonial-role">{testimonial.role}</span>
-        </figcaption>
-      </figure>
-    )}
     <div class="proof-list">
       {proof.map((p) => (
         <div class="proof-card">
           <p class="proof-outcome">{p.outcome}</p>
           <div class="proof-meta">
             <span class="proof-org">{p.org}</span>
-            {p.metric.startsWith('[[') ? null : p.href ? (
+            {p.href ? (
               <a class="proof-metric" href={p.href} target={p.href.startsWith('http') ? '_blank' : null} rel={p.href.startsWith('http') ? 'noopener noreferrer' : null}>{p.metric} &rarr;</a>
             ) : (
               <span class="proof-metric">{p.metric}</span>
@@ -440,45 +417,6 @@ const proof = [
     font-size: var(--text-small);
     color: var(--fg-muted);
     line-height: 1.55;
-  }
-
-  /* Testimonial / reference */
-  .testimonial {
-    margin: 0 0 var(--space-md);
-    padding: var(--space-md) var(--space-lg);
-    border-left: 2px solid var(--signal);
-    background: var(--bg-elevated);
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  }
-
-  .testimonial blockquote {
-    font-family: var(--font-serif);
-    font-size: var(--text-subsection);
-    font-style: italic;
-    line-height: 1.5;
-    color: var(--fg);
-    margin: 0 0 0.6rem;
-    max-width: 58ch;
-  }
-
-  .testimonial figcaption {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .testimonial-name {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    font-weight: 500;
-    color: var(--fg);
-  }
-
-  .testimonial-role {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
   }
 
   /* Proof */
