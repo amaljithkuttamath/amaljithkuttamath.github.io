@@ -56,6 +56,33 @@ const LLM_DATA_CAP = 20_000;
 const MAX_DELEGATIONS_PER_TURN = 3;
 const MAX_SUBAGENT_CALLS = 6;
 
+// The registry source a fetch id routes to. find_series returns ids that carry
+// their source in the namespace, so the router reads it straight off the id:
+// "owid:<slug>" → OWID, "imf:<code>" → IMF, a bare code (no ':') → World Bank
+// (its ids look like SH.DYN.MORT). A namespaced id whose prefix is neither owid
+// nor imf is 'unknown' — NOT silently treated as a World Bank code, so a bad id
+// surfaces as a clear routing error instead of a confusing downstream API 404.
+// This is the single place fetch source identity is derived (the per-source
+// dispatch branches used to each own it).
+function fetchSourceOf(id: string): 'worldbank' | 'owid' | 'imf' | 'unknown' {
+  const s = id.trim().toLowerCase();
+  if (s.startsWith('owid:')) return 'owid';
+  if (s.startsWith('imf:')) return 'imf';
+  if (s.includes(':')) return 'unknown';
+  return 'worldbank';
+}
+
+// Normalized session-cache key for one fetch: id + resolved country codes +
+// year range. Countries are the RESOLVED codes (so "UK" and "GBR" share a key —
+// honestly the same data) sorted for order-independence; no countries (every-
+// country / OWID-IMF-all) yields an empty country segment, distinct from a
+// specific-country fetch of the same id.
+function fetchCacheKey(id: string, codes: string[], ys?: number, ye?: number): string {
+  const nid = id.trim().toLowerCase();
+  const nc = codes.map((c) => c.trim().toUpperCase()).sort().join(',');
+  return `${nid}|${nc}|${ys ?? ''}:${ye ?? ''}`;
+}
+
 export interface TraceEvent {
   tool: string;
   argSummary: string;
@@ -141,7 +168,7 @@ PIPELINE — one step at a time, about 4-5 calls total:
    ${activeLine}
 ${snippets}
 
-2. FETCH ONCE using the fetch tool named for your chosen id's source (see above): explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; fetch_worldbank_all for "every country" questions (country_ids has no wildcard — never build the full country list yourself).
+2. FETCH ONCE with fetch_series(id, …): pass the id from find_series verbatim — it routes to the right source automatically. Give explicit countries (ISO3 codes or loose names like "UK"; or one aggregate like WLD) for named countries/regions, or OMIT countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself).
 
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
@@ -168,7 +195,7 @@ function buildSubAgentPrompt(src: SourceDef): string {
   return `You are a focused sub-agent. You work with exactly ONE database: ${src.label}.
 ${src.promptSnippet}
 
-Your tools: find_series (searches ${src.label} only), the fetch tool for this source, execute_js (compute over the rows fetched so far — you may also \`await llm(prompt, dataSlice)\` for bounded semantic work), and return_findings.
+Your tools: find_series (searches ${src.label} only), fetch_series (fetch a ${src.label} id it returns — ids from other sources are refused here), execute_js (compute over the rows fetched so far — you may also \`await llm(prompt, dataSlice)\` for bounded semantic work), and return_findings.
 
 Do the minimum needed to answer the sub-question: find the series, fetch it, optionally compute, then call return_findings with a SHORT distilled summary — a few sentences naming the key numbers and what they show. Your fetched rows are automatically merged back to the main agent WITH their citations, so never paste raw rows into the summary. Budget: ${MAX_SUBAGENT_CALLS} tool calls. Call tools; do not narrate a plan in prose.`;
 }
@@ -214,6 +241,22 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     indicators: Map<string, string>;
     finding: string;
   } = { rows: [], chartSpec: null, indicators: new Map(), finding: '' };
+
+  // Session fetch cache (backlog #9), at the fetch_series choke point. Key =
+  // normalized (id + resolved countries + year range); value = the exact
+  // model-facing summary + trace detail from the first successful fetch. Lives
+  // for the whole SESSION and is deliberately NOT invalidated on a new turn:
+  // series like a GDP time-range don't change mid-session, so a repeat fetch of
+  // the same id/countries/range is genuinely the same data. A cache HIT never
+  // touches the network and never re-appends to state.rows — the rows are
+  // already there from the first fetch (invariant: a cache entry implies its
+  // rows were merged into state.rows), so re-appending would double them. The
+  // receipt discloses the hit rather than pretending fresh work happened
+  // (receipts never lie). Shared by the main loop AND delegation sub-agents
+  // (both fetch through routeFetch against this same map), so a sub-agent fetch
+  // populates the cache the main loop can then hit. Only successful fetches are
+  // cached.
+  const fetchCache = new Map<string, { rows: DataRow[]; result: string; detail: string }>();
 
   let turnCount = 0;
 
@@ -398,6 +441,112 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       };
     }
 
+    // routeFetch is the single fetch choke point behind fetch_series (and the
+    // legacy per-source tool names). It (1) reads the source off the id's
+    // namespace, (2) enforces the source hard-filter — an id outside the
+    // caller's allowed sources is refused (this is how a hard-filtered session,
+    // and a source-scoped sub-agent, keep out-of-namespace data out), (3)
+    // resolves loose country inputs ONCE (was duplicated across the three
+    // branches), (4) serves the session cache on a repeat, and only otherwise
+    // (5) calls the underlying per-source fetcher. Country resolution + receipt
+    // style match the pre-router per-source branches exactly. Sets ev.detail and
+    // returns the model-facing result string.
+    async function routeFetch(
+      ev: TraceEvent,
+      id: string,
+      rawCountries: string[] | undefined,
+      ys: number | undefined,
+      ye: number | undefined,
+      allowedSourceIds: string[]
+    ): Promise<string> {
+      const source = fetchSourceOf(id);
+      if (source === 'unknown') {
+        ev.detail = 'unknown source';
+        return (
+          `ERROR: cannot route "${id}" — its source namespace is not recognized. Use an id from ` +
+          'find_series (a plain World Bank code, "owid:<slug>", or "imf:<code>").'
+        );
+      }
+      if (!allowedSourceIds.includes(source)) {
+        ev.detail = 'refused: out-of-source id';
+        return (
+          `ERROR: "${id}" is a ${source} series, not available ${allowedSourceIds.length === 1 ? 'to this sub-agent' : 'in this session'}. ` +
+          `Use a find_series id from: ${allowedSourceIds.join(', ')}.`
+        );
+      }
+
+      // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
+      // ISO3/aggregate codes ONCE, here at the choke point. Unresolved names
+      // pass through unchanged; the receipt surfaces any rewrites.
+      const hasCountries = Array.isArray(rawCountries) && rawCountries.length > 0;
+      const resolved = hasCountries ? resolveCountryList(rawCountries!) : undefined;
+      const codes = resolved?.codes ?? [];
+      const changes = resolved?.changes ?? [];
+      const resNote = changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '';
+      const resDetail = changes.length ? `${formatResolutions(changes)} · ` : '';
+
+      // Cache lookup on the normalized (id + resolved countries + range) key.
+      const key = fetchCacheKey(id, codes, ys, ye);
+      const cached = fetchCache.get(key);
+      if (cached) {
+        // Hit: no network, no re-append (rows already in state.rows). Disclose it.
+        ev.detail = 'cached · ' + cached.detail;
+        return '(cached — fetched earlier this session; not re-fetched)\n' + cached.result;
+      }
+
+      let rows: DataRow[] = [];
+      let body = '';
+      let detail = '';
+      switch (source) {
+        case 'worldbank': {
+          if (hasCountries) {
+            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye));
+            rows = r.rows;
+            body = resNote + summarizeRows(rows);
+            if (r.truncatedFrom) {
+              body +=
+                `\n\nNOTE: you requested ${r.truncatedFrom} countries but only the first 60 were ` +
+                `fetched (per-call limit). Call fetch_series again with the remaining countries and merge results.`;
+            }
+            detail =
+              resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
+          } else {
+            // No countries → every real country, batched internally.
+            const r = await fetchWorldbankAll(id, Number(ys), Number(ye));
+            rows = r.rows;
+            body = summarizeRows(rows);
+            detail = `${rows.length} rows · ${r.countryCount} countries · ${r.batchCount} batch${r.batchCount === 1 ? '' : 'es'}`;
+          }
+          state.indicators.set(id, id);
+          break;
+        }
+        case 'owid': {
+          const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye);
+          rows = r.rows;
+          const nid = 'owid:' + id.replace(/^owid:/, '');
+          state.indicators.set(nid, datasetName(nid) ?? r.metric);
+          body = resNote + summarizeRows(rows);
+          detail = resDetail + `${rows.length} rows · OWID`;
+          break;
+        }
+        case 'imf': {
+          const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye);
+          rows = r.rows;
+          const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
+          state.indicators.set(nid, datasetName(nid) ?? nid);
+          body = resNote + summarizeRows(rows);
+          detail = resDetail + `${rows.length} rows · IMF (incl. forecasts)`;
+          break;
+        }
+      }
+      state.rows = state.rows.concat(rows);
+      // Cache only this successful result (and the rows it merged — the entry is
+      // a faithful record; state.rows already holds them, see the map's header).
+      fetchCache.set(key, { rows, result: body, detail });
+      ev.detail = detail;
+      return body;
+    }
+
     // dispatch runs one tool call. Options let the SAME dispatcher serve both
     // the main loop and a delegation sub-agent, so a sub-agent's fetch merges
     // rows/indicators exactly as a direct fetch would (citations intact):
@@ -452,46 +601,50 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             result = JSON.stringify(list.map((c) => ({ id: c.id, name: c.name, region: c.region })));
             break;
           }
+          case 'fetch_series': {
+            // The router (backlog #7): one fetch tool, routed by the id's source
+            // namespace. Country resolution + session caching happen once, inside
+            // routeFetch, for every source. `sourceIds` is the allowed-source set
+            // (all active sources in the main loop; one source in a sub-agent),
+            // so out-of-namespace ids are refused here.
+            const rawCountries = Array.isArray(a.countries) ? (a.countries as string[]) : undefined;
+            result = await routeFetch(
+              ev,
+              String(a.id ?? ''),
+              rawCountries,
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              sourceIds
+            );
+            break;
+          }
+          // Legacy per-source fetch tool names — retired from the model's schema
+          // surface (it now sees find_series → fetch_series only), but still
+          // dispatched here so a stubborn model that reaches for an old name by
+          // habit keeps working. All route through the SAME fetch_series choke
+          // point (routeFetch: resolution + cache), so behavior/receipts match.
+          // Undocumented on purpose.
           case 'fetch_worldbank': {
             const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
-            // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
-            // ISO3/aggregate codes before the API call; unresolved names pass
-            // through unchanged. The receipt surfaces any rewrites.
-            const { codes: ids, changes } = resolveCountryList(rawIds);
-            const { rows, truncatedFrom } = await fetchWorldbank(
-              String(a.indicator_id),
-              ids,
+            result = await routeFetch(
+              ev,
+              String(a.indicator_id ?? ''),
+              rawIds,
               Number(a.year_start),
-              Number(a.year_end)
+              Number(a.year_end),
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-            result = summarizeRows(rows);
-            if (changes.length) {
-              result = `Resolved countries: ${formatResolutions(changes)}.\n` + result;
-            }
-            if (truncatedFrom) {
-              result +=
-                `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
-                `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
-                `country_ids and merge results if you need full coverage.`;
-            }
-            ev.detail =
-              (changes.length ? `${formatResolutions(changes)} · ` : '') +
-              `${rows.length} rows` +
-              (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
             break;
           }
           case 'fetch_worldbank_all': {
-            const { rows, countryCount, batchCount } = await fetchWorldbankAll(
-              String(a.indicator_id),
+            result = await routeFetch(
+              ev,
+              String(a.indicator_id ?? ''),
+              undefined, // no countries → every-country path
               Number(a.year_start),
-              Number(a.year_end)
+              Number(a.year_end),
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-            result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · ${countryCount} countries · ${batchCount} batch${batchCount === 1 ? '' : 'es'}`;
             break;
           }
           case 'execute_js': {
@@ -544,52 +697,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             result = vfs.read(String(a.path)) || '(empty)';
             break;
           }
-          case 'fetch_owid': {
-            const id = String(a.dataset_id ?? '');
-            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
-            // Same loose-country resolution as fetch_worldbank. OWID's own
-            // special codes (e.g. "OWID_WRL") don't resolve and pass through.
-            const resolvedIds = rawIds ? resolveCountryList(rawIds) : undefined;
-            const { rows, metric } = await fetchOwid(
-              id,
-              resolvedIds?.codes,
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined
-            );
-            state.rows = state.rows.concat(rows);
-            const nid = 'owid:' + id.replace(/^owid:/, '');
-            state.indicators.set(nid, datasetName(nid) ?? metric);
-            result = summarizeRows(rows);
-            const owidChanges = resolvedIds?.changes ?? [];
-            if (owidChanges.length) {
-              result = `Resolved countries: ${formatResolutions(owidChanges)}.\n` + result;
-            }
-            ev.detail =
-              (owidChanges.length ? `${formatResolutions(owidChanges)} · ` : '') +
-              `${rows.length} rows · OWID`;
-            break;
-          }
+          case 'fetch_owid':
           case 'fetch_imf': {
-            const id = String(a.dataset_id ?? '');
+            // Legacy per-source names (see the note above fetch_worldbank).
             const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
-            const resolvedIds = rawIds ? resolveCountryList(rawIds) : undefined;
-            const { rows } = await fetchImf(
-              id,
-              resolvedIds?.codes,
+            result = await routeFetch(
+              ev,
+              String(a.dataset_id ?? ''),
+              rawIds,
               a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
-            state.indicators.set(nid, datasetName(nid) ?? nid);
-            result = summarizeRows(rows);
-            const imfChanges = resolvedIds?.changes ?? [];
-            if (imfChanges.length) {
-              result = `Resolved countries: ${formatResolutions(imfChanges)}.\n` + result;
-            }
-            ev.detail =
-              (imfChanges.length ? `${formatResolutions(imfChanges)} · ` : '') +
-              `${rows.length} rows · IMF (incl. forecasts)`;
             break;
           }
           case 'growth_stats': {
@@ -994,6 +1113,14 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
       return String(a.query ?? '');
     case 'list_countries':
       return String(a.filter ?? 'all');
+    case 'fetch_series': {
+      const ids = Array.isArray(a.countries) ? (a.countries as string[]) : [];
+      const shown = ids.length
+        ? ids.slice(0, 4).join(',') + (ids.length > 4 ? `+${ids.length - 4}` : '')
+        : 'all countries';
+      const hasYears = a.year_start !== undefined || a.year_end !== undefined;
+      return `${a.id} · ${shown}` + (hasYears ? ` · ${a.year_start ?? ''}–${a.year_end ?? ''}` : '');
+    }
     case 'fetch_worldbank': {
       const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
       const shown = ids.slice(0, 4).join(',') + (ids.length > 4 ? `+${ids.length - 4}` : '');

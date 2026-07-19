@@ -467,7 +467,7 @@ export async function fetchOwid(
     resp = await fetch(url);
   } catch (err: any) {
     throw new Error(
-      `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, use fetch_worldbank for this question instead.`
+      `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, fetch a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );
   }
   if (!resp.ok) throw new Error(`OWID API HTTP ${resp.status} for slug "${clean}" — the slug may be wrong; use search_datasets results verbatim.`);
@@ -521,7 +521,7 @@ export async function fetchImf(
     resp = await fetch(url);
   } catch (err: any) {
     throw new Error(
-      `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to fetch_worldbank (no forecasts, but similar historical macro data).`
+      `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series (no forecasts, but similar historical macro data).`
     );
   }
   if (!resp.ok) throw new Error(`IMF API HTTP ${resp.status} for code "${clean}"`);
@@ -742,10 +742,10 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     name: 'find_series',
     description:
       'Search for a data series across ALL your active databases in one call. Returns matches as ' +
-      '{id, name, source}. Use the id verbatim with the fetch tool for its source: plain codes ' +
-      '(e.g. SH.DYN.MORT) → fetch_worldbank / fetch_worldbank_all; "owid:<slug>" → fetch_owid; ' +
-      '"imf:<code>" → fetch_imf. This is the single entry point for finding what to fetch — you do ' +
-      'not choose a database first, the results tell you which source has the series.',
+      '{id, name, source}. Pass the chosen id verbatim to fetch_series — it routes to the right ' +
+      'source automatically (plain codes like SH.DYN.MORT, "owid:<slug>", and "imf:<code>" all go ' +
+      'through the same fetch tool). This is the single entry point for finding what to fetch — you ' +
+      'do not choose a database first, the results tell you which source has the series.',
     parameters: {
       type: 'object',
       properties: {
@@ -767,50 +767,36 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
-    name: 'fetch_worldbank',
+    name: 'fetch_series',
     description:
-      'Fetch time-series data for one indicator across specific countries (by ISO3 code) or one ' +
-      'aggregate (e.g. "WLD" for world, a region aggregate id). Returns rows of ' +
-      '{country, iso3, year, value}. country_ids MUST be an explicit, non-empty list — there is ' +
-      'no wildcard, an empty array returns no data. Max 60 country_ids per call. ' +
-      'Do NOT use this for "every country" questions — call fetch_worldbank_all instead, which ' +
-      'handles the full country list and batching internally in one call.',
+      'Fetch time-series data for ONE series id from find_series — the single fetch tool. It ROUTES ' +
+      'automatically by the id: plain World Bank codes (e.g. SH.DYN.MORT), "owid:<slug>", and ' +
+      '"imf:<code>" each go to their own source. Returns rows of {country, iso3, year, value, ' +
+      'indicator}. Give `countries` (ISO3 codes, or loose names like "UK"/"Korea" which are resolved ' +
+      'for you; one aggregate like ["WLD"] works too) for named countries/regions, or OMIT countries ' +
+      'for EVERY country — World Bank is batched internally, so never build the full country list ' +
+      'yourself. IMF series include projection years beyond today — say "IMF projection" when you use ' +
+      'them. Pass the id verbatim from find_series.',
     parameters: {
       type: 'object',
       properties: {
-        indicator_id: { type: 'string', description: 'World Bank indicator id, e.g. SH.DYN.MORT' },
-        country_ids: {
+        id: {
+          type: 'string',
+          description:
+            'Series id from find_series, verbatim: a plain World Bank code (e.g. "SH.DYN.MORT"), ' +
+            '"owid:<slug>", or "imf:<code>".',
+        },
+        countries: {
           type: 'array',
           items: { type: 'string' },
-          minItems: 1,
           description:
-            'Non-empty array of specific ISO3 codes, e.g. ["IND","CHN","BRA"], or one aggregate ' +
-            'id like ["WLD"] for world. Max 60 per call. For "all countries", use ' +
-            'fetch_worldbank_all instead of building this list yourself.',
+            'ISO3 codes or loose names, e.g. ["IND","CHN","BRA"] or ["UK"]; one aggregate like ' +
+            '["WLD"] works too. Omit for every country (World Bank batches internally).',
         },
         year_start: { type: 'number' },
         year_end: { type: 'number' },
       },
-      required: ['indicator_id', 'country_ids', 'year_start', 'year_end'],
-    },
-  },
-  {
-    name: 'fetch_worldbank_all',
-    description:
-      'Fetch time-series data for one indicator across EVERY real country in one call. Use this ' +
-      'instead of list_countries + fetch_worldbank whenever the question is about "all countries", ' +
-      '"which countries...", "every country", or similar — it resolves the full country list and ' +
-      'batches the underlying requests internally, so you never need to reason about country ' +
-      'counts, batch sizes, or merging results yourself. Returns rows of ' +
-      '{country, iso3, year, value} for every country with data.',
-    parameters: {
-      type: 'object',
-      properties: {
-        indicator_id: { type: 'string', description: 'World Bank indicator id, e.g. SH.DYN.MORT' },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['indicator_id', 'year_start', 'year_end'],
+      required: ['id'],
     },
   },
   {
@@ -869,49 +855,6 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         },
       },
       required: ['code'],
-    },
-  },
-  {
-    name: 'fetch_owid',
-    description:
-      'Fetch an Our World in Data dataset (id from search_datasets, "owid:<slug>"). Returns rows ' +
-      'of {country, iso3, year, value, indicator}. Omit country_ids for every country. Use ' +
-      '"OWID_WRL" as a country id for the world aggregate.',
-    parameters: {
-      type: 'object',
-      properties: {
-        dataset_id: { type: 'string', description: 'e.g. "owid:life-expectancy" (verbatim from search_datasets)' },
-        country_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional ISO3 codes to filter to; omit for all countries.',
-        },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['dataset_id'],
-    },
-  },
-  {
-    name: 'fetch_imf',
-    description:
-      'Fetch an IMF DataMapper series (id from search_datasets, "imf:<code>"). THE source for ' +
-      'forecasts: series extend several years beyond today as IMF projections — say so in the ' +
-      'finding when you use projected years. Returns rows of {country, iso3, year, value, ' +
-      'indicator}. Omit country_ids for all countries.',
-    parameters: {
-      type: 'object',
-      properties: {
-        dataset_id: { type: 'string', description: 'e.g. "imf:NGDP_RPCH" (verbatim from search_datasets)' },
-        country_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional ISO3 codes; omit for all countries.',
-        },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['dataset_id'],
     },
   },
   {
@@ -1073,9 +1016,12 @@ export interface SourceDef {
   // header, so the list stays legible as the registry grows to many sources.
   category: string;
   blurb: string; // one line, shown next to the name in the picker
-  // Tool names (from TOOL_SCHEMAS) this source owns. A tool may be shared by
-  // more than one source (search_datasets serves both OWID and IMF); it is
-  // offered whenever any owning source is selected.
+  // Extra source-specific tool names (from TOOL_SCHEMAS) this source owns, on
+  // top of the always-on core. Fetching is NO LONGER listed here: it goes
+  // through the source-agnostic core `fetch_series`, which routes by the id's
+  // namespace (plain code → World Bank, "owid:" → OWID, "imf:" → IMF) and is
+  // restricted to the active/sub-agent source at dispatch time. So this is
+  // empty for today's sources; kept for a future source that needs its own tool.
   toolNames: string[];
   // How the model should use this source — spliced into the system prompt's
   // "pick a source" step only when this source is active.
@@ -1090,7 +1036,7 @@ export interface SourceDef {
 // Source-agnostic tools: control flow, computation over already-fetched rows,
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
-  'find_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
+  'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file',
 ];
 
@@ -1100,9 +1046,9 @@ export const SOURCES: SourceDef[] = [
     label: 'World Bank',
     category: 'Economics & development',
     blurb: 'Development, economic, health & social indicators for every country.',
-    toolNames: ['fetch_worldbank', 'fetch_worldbank_all'],
+    toolNames: [],
     promptSnippet:
-      'World Bank — the broad default: development, economic, health, and social indicators. Its find_series hits are plain codes (e.g. SH.DYN.MORT); fetch them with fetch_worldbank (explicit ISO3 codes, or one aggregate like WLD), or fetch_worldbank_all for "every country" questions (it batches internally — never build the full country list yourself).',
+      'World Bank — the broad default: development, economic, health, and social indicators. Its find_series hits are plain codes (e.g. SH.DYN.MORT); fetch them with fetch_series — pass explicit countries (ISO3 codes, or one aggregate like WLD), or omit countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself).',
     cite: { name: 'World Bank Open Data', url: 'https://data.worldbank.org' },
   },
   {
@@ -1110,9 +1056,9 @@ export const SOURCES: SourceDef[] = [
     label: 'Our World in Data',
     category: 'Society & environment',
     blurb: 'CO₂ & energy, happiness, HDI, literacy, extreme poverty.',
-    toolNames: ['fetch_owid'],
+    toolNames: [],
     promptSnippet:
-      'Our World in Data — topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty. Its find_series hits look like "owid:<slug>"; fetch them with fetch_owid.',
+      'Our World in Data — topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty. Its find_series hits look like "owid:<slug>"; fetch them with fetch_series.',
     cite: { name: 'Our World in Data', url: 'https://ourworldindata.org' },
     datasetSource: 'owid',
   },
@@ -1121,9 +1067,9 @@ export const SOURCES: SourceDef[] = [
     label: 'IMF',
     category: 'Economics & development',
     blurb: 'Macro data with multi-year forecasts: GDP, inflation, debt.',
-    toolNames: ['fetch_imf'],
+    toolNames: [],
     promptSnippet:
-      'IMF DataMapper — the source for forecasts/projections several years ahead: GDP growth, inflation, unemployment, government debt. Its find_series hits look like "imf:<code>"; fetch them with fetch_imf, and say "IMF projection" when you use projected years.',
+      'IMF DataMapper — the source for forecasts/projections several years ahead: GDP growth, inflation, unemployment, government debt. Its find_series hits look like "imf:<code>"; fetch them with fetch_series, and say "IMF projection" when you use projected years.',
     cite: { name: 'IMF DataMapper', url: 'https://www.imf.org/external/datamapper' },
     datasetSource: 'imf',
   },
@@ -1167,13 +1113,15 @@ export function schemasForSources(ids?: string[]): ToolSchema[] {
 
 // The tool schema set for a depth-1 per-source sub-agent (a delegation target).
 // Scoped to ONE database: find_series (the caller restricts it to this source),
-// execute_js (with the recursive llm() primitive), this source's own fetch
-// tool(s), plus return_findings. delegate_source is structurally absent — a
-// sub-agent can never itself delegate, so recursion is bounded to depth 1.
+// fetch_series (the router refuses out-of-namespace ids for this sub-agent's
+// source at dispatch time), execute_js (with the recursive llm() primitive),
+// plus return_findings. delegate_source is structurally absent — a sub-agent can
+// never itself delegate, so recursion is bounded to depth 1. `sourceId` names
+// the source the dispatcher restricts fetch_series to; the schema itself is the
+// same router tool for every source (routing/restriction happen at runtime).
 export function subAgentSchemasFor(sourceId: string): ToolSchema[] {
-  const src = SOURCES.find((s) => s.id === sourceId);
-  const names = new Set<string>(['find_series', 'execute_js']);
-  if (src) for (const t of src.toolNames) names.add(t);
+  void sourceId; // runtime restriction lives in dispatch (sourceIds); see note above
+  const names = new Set<string>(['find_series', 'fetch_series', 'execute_js']);
   const base = TOOL_SCHEMAS.filter((sch) => names.has(sch.name));
   return [...base, RETURN_FINDINGS_SCHEMA];
 }

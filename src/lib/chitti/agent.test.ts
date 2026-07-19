@@ -29,19 +29,20 @@ describe('finish_explanation tool schema', () => {
 describe('source hard filter', () => {
   const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
 
-  it('World-Bank-only sessions cannot see OWID/IMF fetch tools', () => {
-    const n = names(['worldbank']);
-    expect(n).toContain('fetch_worldbank');
-    expect(n).not.toContain('fetch_owid');
-    expect(n).not.toContain('fetch_imf');
-  });
-
-  it('OWID-only sessions get only their fetch tool', () => {
-    const n = names(['owid']);
-    expect(n).toContain('fetch_owid');
-    expect(n).not.toContain('fetch_imf');
-    expect(n).not.toContain('fetch_worldbank');
-    // The shared catalog is filtered to OWID datasets only.
+  // Fetching is now the source-agnostic router `fetch_series` (backlog #7): the
+  // per-source fetch tools are retired from the model's schema surface entirely,
+  // so the hard filter is enforced at the router (it refuses out-of-namespace
+  // ids), not by withholding a per-source tool from the schema set.
+  it('every session exposes fetch_series and none of the retired per-source fetch tools', () => {
+    for (const sel of [['worldbank'], ['owid'], ['imf'], ['owid', 'imf'], undefined]) {
+      const n = names(sel);
+      expect(n).toContain('fetch_series');
+      expect(n).not.toContain('fetch_worldbank');
+      expect(n).not.toContain('fetch_worldbank_all');
+      expect(n).not.toContain('fetch_owid');
+      expect(n).not.toContain('fetch_imf');
+    }
+    // The shared dataset catalog is still filtered by active source.
     expect(datasetSourcesFor(['owid'])).toEqual(['owid']);
   });
 
@@ -85,28 +86,29 @@ describe('delegate_source gating + depth-1 (schema level)', () => {
     expect(names(undefined)).toContain('delegate_source'); // all sources = >1
   });
 
-  it('sub-agent schema set is depth-1: no delegate_source, only its own source + core', () => {
+  it('sub-agent schema set is depth-1: no delegate_source, only the router + core', () => {
     for (const id of ['worldbank', 'owid', 'imf']) {
       const n = subAgentSchemasFor(id).map((s) => s.name);
       // Depth-1 enforced STRUCTURALLY: a sub-agent literally cannot delegate.
       expect(n).not.toContain('delegate_source');
-      // Its allowed toolset: source-scoped find_series, execute_js (with llm()),
-      // its own fetch tool(s), and the terminal return_findings.
+      // Its allowed toolset: source-scoped find_series, the fetch_series router
+      // (restricted to this source at dispatch), execute_js (with llm()), and
+      // the terminal return_findings.
       expect(n).toContain('find_series');
+      expect(n).toContain('fetch_series');
       expect(n).toContain('execute_js');
       expect(n).toContain('return_findings');
       // No main-loop-only tools leak into a sub-agent.
       expect(n).not.toContain('render_chart');
       expect(n).not.toContain('finish');
       expect(n).not.toContain('finish_explanation');
+      // The retired per-source fetch tools are gone; the router replaces them.
+      // (Cross-source refusal is a runtime check, exercised in the driven tests.)
+      expect(n).not.toContain('fetch_worldbank');
+      expect(n).not.toContain('fetch_worldbank_all');
+      expect(n).not.toContain('fetch_owid');
+      expect(n).not.toContain('fetch_imf');
     }
-    // Each sub-agent gets ONLY its own source's fetch tool.
-    expect(subAgentSchemasFor('owid').map((s) => s.name)).toContain('fetch_owid');
-    expect(subAgentSchemasFor('owid').map((s) => s.name)).not.toContain('fetch_imf');
-    expect(subAgentSchemasFor('owid').map((s) => s.name)).not.toContain('fetch_worldbank');
-    expect(subAgentSchemasFor('worldbank').map((s) => s.name)).toContain('fetch_worldbank');
-    expect(subAgentSchemasFor('worldbank').map((s) => s.name)).toContain('fetch_worldbank_all');
-    expect(subAgentSchemasFor('imf').map((s) => s.name)).toContain('fetch_imf');
   });
 
   it('return_findings is never exposed to the main loop', () => {
@@ -1105,5 +1107,237 @@ describe('country resolution in fetch dispatch (driven)', () => {
     // Rows still merged normally.
     expect(out.rows.length).toBe(1);
     expect(out.rows[0].iso3).toBe('GBR');
+  });
+});
+
+// ── fetch_series router + session cache (backlog #7 + #9) ─────────────────────
+// Driven turns through createSession with complete() mocked and fetch() stubbed
+// (egress is blocked in this environment — live routing against the real APIs is
+// NOT testable, so every fetch here is a stub; the stub's URL and call count are
+// what prove routing and caching). No network, no live model.
+describe('fetch_series router + session cache (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+
+  // A fetch stub that records every URL and answers WB / OWID / IMF shapes.
+  const recordingFetch = () => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('api.worldbank.org'))
+        return { ok: true, json: async () => [{ page: 1, pages: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+      if (u.includes('ourworldindata.org'))
+        return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\n' };
+      if (u.includes('imf.org'))
+        return { ok: true, json: async () => ({ values: { NGDP_RPCH: { IND: { '2020': 5 } } } }) };
+      throw new Error('unexpected url ' + u);
+    });
+    return { fn, urls };
+  };
+
+  // The tool-result string the model saw for a given tool_call_id.
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+
+  it('routes an id to its source by namespace (World Bank / OWID / IMF)', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'wb'),
+        tc('fetch_series', { id: 'owid:life-expectancy', countries: ['IND'] }, 'ow'),
+        tc('fetch_series', { id: 'imf:NGDP_RPCH', countries: ['IND'] }, 'im'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+
+    // Each id reached the correct host, carrying its resolved country.
+    expect(urls.some((u) => u.includes('api.worldbank.org') && u.includes('/country/IND/') && u.includes('SH.DYN.MORT'))).toBe(true);
+    expect(urls.some((u) => u.includes('ourworldindata.org/grapher/life-expectancy.csv'))).toBe(true);
+    expect(urls.some((u) => u.includes('imf.org') && u.includes('NGDP_RPCH'))).toBe(true);
+    // Rows merged with each source's citation intact.
+    const inds = new Set(out.rows.map((r) => r.indicator));
+    expect(inds.has('SH.DYN.MORT')).toBe(true);
+    expect(inds.has('owid:life-expectancy')).toBe(true);
+    expect(inds.has('imf:NGDP_RPCH')).toBe(true);
+  });
+
+  it('an unrecognized namespace is a clear routing error, not a crash or a stray fetch', async () => {
+    const { fn } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'foo:bar', countries: ['IND'] }, 'bad'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(toolMsgById('bad')).toMatch(/not recognized/);
+    expect(fn).not.toHaveBeenCalled(); // refused before any network call
+    expect(out.rows.length).toBe(0);
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.status).toBe('ok'); // a clean refusal, not an error receipt
+    expect(ev?.detail).toBe('unknown source');
+  });
+
+  it('a legacy per-source tool name (fetch_imf) still dispatches through the router', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_imf', { dataset_id: 'imf:NGDP_RPCH', country_ids: ['IND'] }, 'lg'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(urls.some((u) => u.includes('imf.org') && u.includes('NGDP_RPCH'))).toBe(true);
+    expect(out.rows.some((r) => r.indicator === 'imf:NGDP_RPCH')).toBe(true);
+  });
+
+  it('resolves a loose country ("UK" → GBR) through the router and shows it on the receipt', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['UK'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    expect(urls.some((u) => u.includes('/country/GBR/'))).toBe(true);
+    expect(urls.some((u) => u.includes('/country/UK/'))).toBe(false);
+    expect(toolMsgById('f')).toContain('UK → GBR (United Kingdom)');
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toContain('UK → GBR (United Kingdom)');
+  });
+
+  it('refuses an out-of-source id inside a source-scoped sub-agent (runtime hard filter)', async () => {
+    const { fn } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'q' }, 'd1')]));
+    // The OWID sub-agent reaches for a World Bank id — outside its one source.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'nothing usable' }, 'r')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+
+    const msg = toolMsgById('sf');
+    expect(msg).toMatch(/not available/);
+    expect(msg).toContain('SH.DYN.MORT');
+    // Refused before any network call — a World Bank fetch never happened.
+    expect(fn.mock.calls.some((c) => String(c[0]).includes('api.worldbank.org'))).toBe(false);
+    const ev = trace().find((e) => e.nested && e.tool === 'fetch_series');
+    expect(ev?.detail).toBe('refused: out-of-source id');
+    expect(out.finding).toBe('done');
+  });
+
+  it('serves a repeat identical fetch from the session cache — no second network call, receipt says cached', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    // Two IDENTICAL fetch_series calls in the same session.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    // Exactly one real World Bank fetch; the second was served from cache.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(1);
+    expect(toolMsgById('a')).not.toContain('cached');
+    expect(toolMsgById('b')).toContain('cached');
+    // Rows are NOT doubled — the cache hit does not re-append.
+    expect(out.rows.length).toBe(1);
+    const evs = trace().filter((e) => e.tool === 'fetch_series');
+    expect(evs.length).toBe(2);
+    expect(evs[1].detail?.startsWith('cached')).toBe(true);
+  });
+
+  it('keys the cache on countries and range — a different country or range really re-fetches', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['CHN'], year_start: 2020, year_end: 2020 }, 'b'), // diff country
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2000, year_end: 2000 }, 'c'), // diff range
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    await newSession().ask('q', cb);
+
+    // Three distinct keys → three real World Bank fetches, none cached.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(3);
+    for (const id of ['a', 'b', 'c']) expect(toolMsgById(id)).not.toContain('cached');
+  });
+
+  it('a sub-agent fetch populates the shared cache; the main loop then hits it', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'le' }, 'd1')]));
+    // Sub-agent fetches the series, then returns.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r')]));
+    // Main loop asks for the SAME series/countries/range → must hit the cache.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'mf'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+
+    // Exactly one real fetch total — the sub-agent's; the main loop's was cached.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(1);
+    expect(toolMsgById('mf')).toContain('cached');
+    // The sub-agent appended once; the cache hit did not re-append.
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0].indicator).toBe('SP.DYN.LE00.IN');
   });
 });
