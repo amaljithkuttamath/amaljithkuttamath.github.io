@@ -33,6 +33,7 @@ import {
   type DataRow,
   type SearchReceipt,
 } from './tools';
+import { resolveCountryList, formatResolutions } from './countries';
 
 const MAX_TOOL_CALLS = 12;
 
@@ -452,7 +453,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             break;
           }
           case 'fetch_worldbank': {
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
+            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
+            // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
+            // ISO3/aggregate codes before the API call; unresolved names pass
+            // through unchanged. The receipt surfaces any rewrites.
+            const { codes: ids, changes } = resolveCountryList(rawIds);
             const { rows, truncatedFrom } = await fetchWorldbank(
               String(a.indicator_id),
               ids,
@@ -462,13 +467,19 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             state.rows = state.rows.concat(rows);
             state.indicators.set(String(a.indicator_id), String(a.indicator_id));
             result = summarizeRows(rows);
+            if (changes.length) {
+              result = `Resolved countries: ${formatResolutions(changes)}.\n` + result;
+            }
             if (truncatedFrom) {
               result +=
                 `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
                 `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
                 `country_ids and merge results if you need full coverage.`;
             }
-            ev.detail = `${rows.length} rows` + (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
+            ev.detail =
+              (changes.length ? `${formatResolutions(changes)} · ` : '') +
+              `${rows.length} rows` +
+              (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
             break;
           }
           case 'fetch_worldbank_all': {
@@ -535,10 +546,13 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           }
           case 'fetch_owid': {
             const id = String(a.dataset_id ?? '');
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            // Same loose-country resolution as fetch_worldbank. OWID's own
+            // special codes (e.g. "OWID_WRL") don't resolve and pass through.
+            const resolvedIds = rawIds ? resolveCountryList(rawIds) : undefined;
             const { rows, metric } = await fetchOwid(
               id,
-              ids,
+              resolvedIds?.codes,
               a.year_start !== undefined ? Number(a.year_start) : undefined,
               a.year_end !== undefined ? Number(a.year_end) : undefined
             );
@@ -546,15 +560,22 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             const nid = 'owid:' + id.replace(/^owid:/, '');
             state.indicators.set(nid, datasetName(nid) ?? metric);
             result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · OWID`;
+            const owidChanges = resolvedIds?.changes ?? [];
+            if (owidChanges.length) {
+              result = `Resolved countries: ${formatResolutions(owidChanges)}.\n` + result;
+            }
+            ev.detail =
+              (owidChanges.length ? `${formatResolutions(owidChanges)} · ` : '') +
+              `${rows.length} rows · OWID`;
             break;
           }
           case 'fetch_imf': {
             const id = String(a.dataset_id ?? '');
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            const resolvedIds = rawIds ? resolveCountryList(rawIds) : undefined;
             const { rows } = await fetchImf(
               id,
-              ids,
+              resolvedIds?.codes,
               a.year_start !== undefined ? Number(a.year_start) : undefined,
               a.year_end !== undefined ? Number(a.year_end) : undefined
             );
@@ -562,7 +583,13 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
             state.indicators.set(nid, datasetName(nid) ?? nid);
             result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · IMF (incl. forecasts)`;
+            const imfChanges = resolvedIds?.changes ?? [];
+            if (imfChanges.length) {
+              result = `Resolved countries: ${formatResolutions(imfChanges)}.\n` + result;
+            }
+            ev.detail =
+              (imfChanges.length ? `${formatResolutions(imfChanges)} · ` : '') +
+              `${rows.length} rows · IMF (incl. forecasts)`;
             break;
           }
           case 'growth_stats': {

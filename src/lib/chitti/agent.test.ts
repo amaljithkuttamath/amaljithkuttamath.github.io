@@ -1037,3 +1037,73 @@ describe('delegate_source sub-agents (driven)', () => {
     expect(out.finding).toBe('Recovered.');
   });
 });
+
+// ── Fuzzy country resolution wired into the fetch tools ───────────────────────
+// A driven turn where the model requests a loose country code ("UK"). The
+// dispatch must resolve it to the WB ISO3 ("GBR") before the fetch, hit the API
+// with the resolved code, and surface the rewrite on the trace receipt.
+describe('country resolution in fetch dispatch (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+  it('resolves "UK" → GBR before the fetch and shows it on the receipt', async () => {
+    // Capture the URL fetch() was called with, and return a minimal WB payload.
+    let fetchedUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        fetchedUrl = String(url);
+        return {
+          ok: true,
+          json: async () => [
+            { page: 1, pages: 1 },
+            [{ country: { value: 'United Kingdom' }, countryiso3code: 'GBR', date: '2020', value: 80 }],
+          ],
+        };
+      })
+    );
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'SP.DYN.LE00.IN', country_ids: ['UK'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'GBR', data: [[2020, 80]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'done' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] })
+      .ask('life expectancy in the UK', cb);
+
+    // The API was hit with the RESOLVED code, not the raw "UK".
+    expect(fetchedUrl).toContain('/country/GBR/');
+    expect(fetchedUrl).not.toContain('/country/UK/');
+
+    // The trace receipt for the fetch surfaces the resolution.
+    const fetchEv = last.find((e) => e.tool === 'fetch_worldbank');
+    expect(fetchEv?.detail).toContain('UK → GBR (United Kingdom)');
+
+    // The model's tool result also carries the resolution note.
+    const wbMsg = (() => {
+      for (const call of mockComplete.mock.calls) {
+        const msgs = call[1] as any[];
+        if (!Array.isArray(msgs)) continue;
+        for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === 'wf') return m.content as string;
+      }
+      return '';
+    })();
+    expect(wbMsg).toContain('UK → GBR (United Kingdom)');
+
+    // Rows still merged normally.
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0].iso3).toBe('GBR');
+  });
+});
