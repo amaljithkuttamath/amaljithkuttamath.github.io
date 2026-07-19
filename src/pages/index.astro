@@ -78,12 +78,24 @@ const lab = [
     <div class="proof-bar">
       <span class="live-dot" aria-hidden="true"></span>
       <span>running in your browser</span>
-      <span class="proof-meta" id="proof-meta">loading GPT-4o vocabulary…</span>
+      <span class="proof-meta" id="proof-meta">GPT-4o vocabulary</span>
     </div>
     <div class="proof-stage">
       <p class="proof-src" id="proof-src"></p>
-      <div class="proof-tokens" id="proof-tokens" aria-label="The sentence above, split into tokens"></div>
-      <p class="proof-cap" id="proof-cap"></p>
+      {/* Reserves the token row's height so the block does not jump when the
+          real split arrives. aria-live keeps the change announced rather than
+          silently swapped under a screen reader. */}
+      <div
+        class="proof-tokens"
+        id="proof-tokens"
+        aria-live="polite"
+        aria-label="The sentence above, split into tokens"
+      >
+        <span class="tk tk-wait">splitting…</span>
+      </div>
+      <p class="proof-cap" id="proof-cap">
+        Splitting that sentence the way a model does, live on this page.
+      </p>
       <a href="/apps/tokenizer" class="proof-try">Type your own &rarr;</a>
     </div>
   </section>
@@ -155,43 +167,89 @@ const lab = [
   </section>
   <script is:inline type="module">
     // The proof block loads a REAL vocabulary and runs a REAL split, the same
-    // way /apps/tokenizer does. It is hidden until that succeeds: a hardcoded
-    // split shown under the words "running in your browser" would be a lie in
-    // the one place the site is claiming it never fabricates. Failure removes
-    // the block instead of degrading to a plausible fake.
+    // way /apps/tokenizer does. A hardcoded split shown under the words
+    // "running in your browser" would be a lie in the one place the site
+    // claims it never fabricates, so failure clears the block rather than
+    // degrading to a plausible fake.
+    //
+    // The ~217KB tokenizer library is fetched only when the block is actually
+    // scrolled near, not on page load. Someone who reads the hero and leaves
+    // pays nothing for a demo they never saw. The block renders its own
+    // sentence immediately and reserves its height, so nothing shifts when
+    // the tokens arrive.
     const SENTENCE = 'Shipping AI you can trust means being able to show why it works.';
     const el = (id) => document.getElementById(id);
+    const proof = el('proof');
 
-    try {
-      const { AutoTokenizer, env } = await import(
-        'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3'
-      );
-      env.allowLocalModels = false;
-      const tok = await AutoTokenizer.from_pretrained('Xenova/gpt-4o');
-      const ids = tok.encode(SENTENCE);
-      const pieces = ids.map((id) => tok.decode([id]));
+    async function run() {
+      try {
+        const { AutoTokenizer, env } = await import(
+          'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3'
+        );
+        env.allowLocalModels = false;
+        const tok = await AutoTokenizer.from_pretrained('Xenova/gpt-4o');
+        const pieces = tok.encode(SENTENCE).map((id) => tok.decode([id]));
 
+        const box = el('proof-tokens');
+        box.textContent = '';
+        pieces.forEach((p, i) => {
+          const s = document.createElement('span');
+          s.className = 'tk';
+          // Make the leading space visible: token boundaries are the point,
+          // and an invisible one reads as a rendering bug, not a real split.
+          s.textContent = p.replace(/^ /, '·');
+          s.style.animationDelay = i * 45 + 'ms';
+          box.appendChild(s);
+        });
+
+        el('proof-meta').textContent = 'GPT-4o · real vocabulary';
+        el('proof-cap').innerHTML =
+          'That is <b>' + pieces.length + '</b> tokens. Every one is billed, on every ' +
+          'call, and the split changes with the model and the language.';
+      } catch {
+        // Offline, blocked CDN, or an unsupported browser. Remove the block
+        // rather than leave a claim the page cannot back up.
+        proof?.remove();
+      }
+    }
+
+    if (proof) {
+      proof.hidden = false;
       el('proof-src').textContent = SENTENCE;
-      const box = el('proof-tokens');
-      pieces.forEach((p, i) => {
-        const s = document.createElement('span');
-        s.className = 'tk';
-        // Make the leading space visible: token boundaries are the point, and
-        // an invisible one reads as a rendering bug rather than a real split.
-        s.textContent = p.replace(/^ /, '·');
-        s.style.animationDelay = i * 45 + 'ms';
-        box.appendChild(s);
-      });
 
-      el('proof-meta').textContent = 'GPT-4o · real vocabulary';
-      el('proof-cap').innerHTML =
-        'That is <b>' + pieces.length + '</b> tokens. Every one is billed, on every call, ' +
-        'and the split changes with the model and the language.';
-      el('proof').hidden = false;
-    } catch {
-      // Offline, blocked CDN, or an unsupported browser. Say nothing rather
-      // than claim something unverified.
-      el('proof').remove();
+      let started = false;
+      const start = () => {
+        if (started) return;
+        started = true;
+        run();
+      };
+
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver(
+          (entries, obs) => {
+            if (entries.some((e) => e.isIntersecting)) {
+              obs.disconnect();
+              start();
+            }
+          },
+          // Begin the fetch just before the block reaches the viewport, so the
+          // tokens are usually already there by the time it is being read.
+          { rootMargin: '200px' }
+        );
+        io.observe(proof);
+
+        // Backstop. IntersectionObserver can report an element as not
+        // intersecting even when it is on screen (background tabs, some
+        // embedded webviews, and this project's own preview pane all do it),
+        // which would leave the block stuck on its placeholder forever. If the
+        // block is geometrically in view shortly after load, start anyway.
+        setTimeout(() => {
+          const r = proof.getBoundingClientRect();
+          if (r.top < window.innerHeight + 200 && r.bottom > -200) start();
+        }, 1200);
+      } else {
+        start();
+      }
     }
   </script>
 </Base>
@@ -258,6 +316,16 @@ const lab = [
   @keyframes tokIn {
     from { opacity: 0; transform: translateY(3px); }
     to { opacity: 1; transform: none; }
+  }
+
+  /* Placeholder occupying the same line height as a real token, so the block
+     reserves its space before the vocabulary lands. */
+  .proof-tokens .tk-wait {
+    animation: none;
+    opacity: 1;
+    background: transparent;
+    color: var(--fg-muted);
+    padding-left: 0;
   }
 
   .proof-cap {
