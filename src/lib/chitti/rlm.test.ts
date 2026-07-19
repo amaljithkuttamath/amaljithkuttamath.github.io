@@ -9,7 +9,7 @@ import {
   MAX_LLM_DATA_BYTES,
   type RlmCaller,
 } from './rlm';
-import { executeJs, TOOL_SCHEMAS, type DataRow } from './tools';
+import { executeJs, schemasForSources, type DataRow } from './tools';
 
 // Every test here uses a stubbed caller. Nothing in this suite touches the
 // network: the point is to pin the bounds and the provenance tag, which are
@@ -261,7 +261,10 @@ describe('execute_js async contract', () => {
 });
 
 describe('execute_js tool schema documents llm()', () => {
-  const schema = TOOL_SCHEMAS.find((t) => t.name === 'execute_js')!;
+  // The capability is opt-in, so the description the model reads only
+  // documents llm() when the session enabled it. Read the enabled schema:
+  // what this block is about is what an RLM-on model is told.
+  const schema = schemasForSources(undefined, true).find((t) => t.name === 'execute_js')!;
 
   it('tells the model llm() exists and how it is bounded', () => {
     expect(schema.description).toContain('llm');

@@ -160,11 +160,19 @@ export interface SessionOptions {
   // The hard filter: only these sources' tools and prompt guidance reach the
   // model, so it can only answer from the databases the user selected.
   sources?: string[];
+  // Whether execute_js code may call the bounded nested `llm()` (see rlm.ts).
+  // Default false, and deliberately so: every nested call spends the user's
+  // own key, so the capability is opt-in. Off is enforced by withholding, not
+  // by refusing. The execute_js description omits the llm() paragraph and no
+  // caller is passed, so the model never learns the capability exists and
+  // cannot burn a tool call discovering it is disabled.
+  rlm?: boolean;
 }
 
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
   const activeSources = resolveSources(opts?.sources);
-  const toolSchemas = schemasForSources(opts?.sources);
+  const rlmEnabled = opts?.rlm ?? false;
+  const toolSchemas = schemasForSources(opts?.sources, rlmEnabled);
   const messages: ChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(activeSources) },
   ];
@@ -197,17 +205,25 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     let fallbackNoted = false;
     // The 8-calls-per-turn llm() budget, shared by every execute_js run in
     // this turn (including the verifier-FAIL retry pass, which is the same
-    // turn and must not get a fresh allowance).
-    const rlmBudget = createTurnBudget();
+    // turn and must not get a fresh allowance). Built only when RLM is on:
+    // with the flag off there is no budget, no run, and no caller at all.
+    const rlmBudget = rlmEnabled ? createTurnBudget() : null;
     // Depth-1 by construction: the nested completion is issued with an EMPTY
     // tool array, so the inner model cannot call execute_js (or anything
     // else) and cannot recurse. There is no depth counter, because there is
     // no edge for the recursion to follow.
-    const rlmCaller: RlmCaller = async (prompt: string) => {
-      const res = await complete(cfg, [{ role: 'user', content: prompt }], []);
-      totalCost += estimateCost(cfg.model, res.usage);
-      return { text: res.text, usage: res.usage };
-    };
+    const rlmCaller: RlmCaller | null = rlmEnabled
+      ? async (prompt: string) => {
+          const res = await complete(cfg, [{ role: 'user', content: prompt }], []);
+          // Attribute the spend to whatever model actually served THIS nested
+          // call, not to cfg.model. Those coincide today because the nested
+          // call reuses the same cfg, but OpenRouter can serve a fallback
+          // model, and a future sub-agent may deliberately use a cheaper one.
+          // Reading servedModel means the number cannot silently drift.
+          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+          return { text: res.text, usage: res.usage };
+        }
+      : null;
     const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
@@ -299,13 +315,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // same body, and a fresh run would hand that second execution a
             // fresh 4-call allowance, so code calling llm() without returning
             // could spend 8 in what the model wrote as one run.
-            const rlmRun = createRlmRun(rlmCaller, rlmBudget);
-            let out = await executeJs(code, state.rows, rlmRun.llm);
+            //
+            // With RLM off there is no run and executeJs is called with NO
+            // llm argument, so the sandboxed body is handed nothing it could
+            // invoke and code that never calls llm() behaves exactly as it
+            // did before the capability existed.
+            const rlmRun = rlmCaller && rlmBudget ? createRlmRun(rlmCaller, rlmBudget) : null;
+            let out = await executeJs(code, state.rows, rlmRun?.llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = await executeJs('return (' + code + ')', state.rows, rlmRun.llm);
+              out = await executeJs('return (' + code + ')', state.rows, rlmRun?.llm);
             }
-            if (rlmRun.receipts.length) ev.rlmReceipts = [...rlmRun.receipts];
+            if (rlmRun?.receipts.length) ev.rlmReceipts = [...rlmRun.receipts];
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =
                 'Your code ran without error but returned null/undefined. It must END with a ' +
@@ -317,10 +338,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               // State the provenance in the model's own context, not only in
               // the UI: this result is part model judgment, and the model is
               // the thing that decides what to chart and what to claim next.
-              if (rlmRun.receipts.length) result = provenanceNotice(rlmRun.receipts.length) + '\n' + result;
+              if (rlmRun?.receipts.length) result = provenanceNotice(rlmRun.receipts.length) + '\n' + result;
               ev.detail =
                 (out.ok ? 'ok' : 'error: ' + out.error) +
-                (rlmRun.receipts.length
+                (rlmRun?.receipts.length
                   ? ` · ${rlmRun.receipts.length} llm() call${rlmRun.receipts.length === 1 ? '' : 's'} (model-derived)`
                   : '');
             }

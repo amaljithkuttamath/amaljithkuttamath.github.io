@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   TOOL_SCHEMAS,
+  EXECUTE_JS_RLM_PARAGRAPH,
   schemasForSources,
   resolveSources,
   datasetSourcesFor,
@@ -453,5 +454,259 @@ describe('message trimming', () => {
     expect(anyToolMessageHasFullRowDump).toBe(false);
     expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted. A short marker remains
     expect(toolMessages.some((m) => m.content?.includes('trimmed'))).toBe(true);
+  });
+});
+
+// ── The RLM (judgment-call) flag ────────────────────────────────────────
+// The capability spends the user's own key on every nested call, so it ships
+// off and the user opts in. Enforcement is by WITHHOLDING: when off, the
+// model is never told `llm()` exists, so it cannot burn a tool call finding
+// out that it is disabled. These tests pin both halves of that: the schema
+// the model sees, and the caller the sandbox is (not) handed.
+describe('rlm flag: the execute_js description', () => {
+  const execFor = (rlm?: boolean) =>
+    schemasForSources(undefined, rlm).find((s) => s.name === 'execute_js')!;
+
+  it('omits the llm() paragraph by default', () => {
+    const d = execFor().description;
+    expect(d).not.toContain('llm(');
+    expect(d).not.toContain('second argument');
+    expect(d).not.toContain('model_derived');
+  });
+
+  it('omits it when explicitly off', () => {
+    expect(execFor(false).description).not.toContain('llm(');
+  });
+
+  it('reads naturally with no dangling reference to a second argument', () => {
+    const d = execFor(false).description;
+    // The base still documents the one argument the code always gets.
+    expect(d).toContain('one argument, `rows`');
+    expect(d.trimEnd()).toBe(d.trim());
+  });
+
+  it('appends the paragraph verbatim when on, and only to execute_js', () => {
+    const off = execFor(false).description;
+    const on = execFor(true).description;
+    expect(on).toBe(off + EXECUTE_JS_RLM_PARAGRAPH);
+    expect(on).toContain('model_derived');
+    expect(on).toContain('4 calls per run, 8 per turn');
+
+    const otherOff = schemasForSources(undefined, false).filter((s) => s.name !== 'execute_js');
+    const otherOn = schemasForSources(undefined, true).filter((s) => s.name !== 'execute_js');
+    expect(otherOn.map((s) => s.description)).toEqual(otherOff.map((s) => s.description));
+  });
+
+  it('never mutates the shared TOOL_SCHEMAS const', () => {
+    const base = TOOL_SCHEMAS.find((s) => s.name === 'execute_js')!.description;
+    schemasForSources(undefined, true);
+    schemasForSources(['owid'], true);
+    expect(TOOL_SCHEMAS.find((s) => s.name === 'execute_js')!.description).toBe(base);
+    // ...so a later off-session is still clean after an on-session ran.
+    expect(execFor(false).description).not.toContain('llm(');
+  });
+
+  it('leaves the source hard filter untouched', () => {
+    const n = schemasForSources(['worldbank'], true).map((s) => s.name);
+    expect(n).toContain('fetch_worldbank');
+    expect(n).not.toContain('fetch_owid');
+    expect(schemasForSources(undefined, true).length).toBe(TOOL_SCHEMAS.length);
+  });
+});
+
+describe('rlm flag: the caller handed to execute_js', () => {
+  const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+  const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
+
+  // A turn that fetches one row, runs execute_js, then finishes. The js body
+  // reports what `llm` did when invoked, so the assertion is behavioural
+  // rather than a check on a symbol that always exists.
+  const PROBE =
+    'try { await llm("classify", rows); return "CALLED"; } ' +
+    'catch (e) { return "REFUSED: " + e.message; }';
+
+  function queueTurn(mock: ReturnType<typeof vi.fn>, code: string) {
+    mock.mockReset();
+    // 1. fetch, so state.rows is non-empty (execute_js short-circuits otherwise).
+    mock.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        {
+          id: 'f1',
+          name: 'fetch_worldbank',
+          arguments: {
+            indicator_id: 'NY.GDP.MKTP.CD',
+            country_ids: ['USA'],
+            year_start: 2000,
+            year_end: 2001,
+          },
+        },
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    // 2. execute_js with the probe body.
+    mock.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'x1', name: 'execute_js', arguments: { code } }],
+      usage: { input: 10, output: 5 },
+    });
+    // 3. finish_explanation, which skips the verifier so the mock queue stays
+    //    short and any UNEXPECTED extra completion (i.e. a nested llm call)
+    //    fails loudly instead of silently consuming a queued value.
+    mock.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
+      usage: { input: 8, output: 4 },
+    });
+  }
+
+  function execTrace(trace: any[]) {
+    return trace.find((e) => e.tool === 'execute_js');
+  }
+
+  it('passes no caller by default, so llm() is unavailable in the sandbox', async () => {
+    const mock = complete as unknown as ReturnType<typeof vi.fn>;
+    queueTurn(mock, PROBE);
+    let last: any[] = [];
+    const session = createSession(cfg);
+    await session.ask('probe', { ...cb, onTrace: (t: any[]) => { last = t; } });
+
+    const ev = execTrace(last);
+    expect(ev).toBeDefined();
+    expect(ev.detail).toBe('ok');
+    expect(ev.rlmReceipts).toBeUndefined();
+    // Exactly three completions: fetch, execute_js, finish. No nested call.
+    expect(mock.mock.calls.length).toBe(3);
+  });
+
+  it('rlm: false behaves identically to omitting the option', async () => {
+    const mock = complete as unknown as ReturnType<typeof vi.fn>;
+    queueTurn(mock, PROBE);
+    let last: any[] = [];
+    const session = createSession(cfg, { rlm: false });
+    await session.ask('probe', { ...cb, onTrace: (t: any[]) => { last = t; } });
+    expect(execTrace(last).rlmReceipts).toBeUndefined();
+    expect(mock.mock.calls.length).toBe(3);
+  });
+
+  it('code that never calls llm() is unaffected when the flag is off', async () => {
+    const mock = complete as unknown as ReturnType<typeof vi.fn>;
+    queueTurn(mock, 'return rows.length;');
+    let last: any[] = [];
+    const session = createSession(cfg);
+    await session.ask('count', { ...cb, onTrace: (t: any[]) => { last = t; } });
+    const ev = execTrace(last);
+    expect(ev.detail).toBe('ok');
+    expect(ev.rlmReceipts).toBeUndefined();
+  });
+
+  it('enabling restores the nested call, its receipt, and the provenance note', async () => {
+    const mock = complete as unknown as ReturnType<typeof vi.fn>;
+    // Queued by hand rather than via queueTurn: the nested llm() completion
+    // is consumed in call order, so it has to sit between execute_js and
+    // finish. It is stubbed, so the sandbox never reaches a network.
+    mock.mockReset();
+    mock
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          {
+            id: 'f1',
+            name: 'fetch_worldbank',
+            arguments: {
+              indicator_id: 'NY.GDP.MKTP.CD',
+              country_ids: ['USA'],
+              year_start: 2000,
+              year_end: 2001,
+            },
+          },
+        ],
+        usage: { input: 10, output: 5 },
+      })
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          {
+            id: 'x1',
+            name: 'execute_js',
+            arguments: { code: 'const r = await llm("classify", rows); return r.text;' },
+          },
+        ],
+        usage: { input: 10, output: 5 },
+      })
+      // The nested llm() completion, issued from inside execute_js.
+      .mockResolvedValueOnce({ text: 'coastal', toolCalls: [], usage: { input: 3, output: 1 } })
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
+        usage: { input: 8, output: 4 },
+      });
+
+    let last: any[] = [];
+    const session = createSession(cfg, { rlm: true });
+    await session.ask('judge', { ...cb, onTrace: (t: any[]) => { last = t; } });
+
+    const ev = execTrace(last);
+    expect(ev.rlmReceipts).toBeDefined();
+    expect(ev.rlmReceipts.length).toBe(1);
+    expect(ev.rlmReceipts[0].ok).toBe(true);
+    expect(ev.rlmReceipts[0].depth).toBe(1);
+    expect(ev.detail).toContain('1 llm() call');
+    // Four completions: the nested one actually happened.
+    expect(mock.mock.calls.length).toBe(4);
+    // The nested call is issued with an EMPTY tool array (depth-1 by
+    // construction), which is what makes recursion impossible.
+    expect(mock.mock.calls[2][2]).toEqual([]);
+  });
+
+  it('attributes nested cost to the model that served it, not the configured one', async () => {
+    const mock = complete as unknown as ReturnType<typeof vi.fn>;
+    mock.mockReset();
+    mock
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          {
+            id: 'f1',
+            name: 'fetch_worldbank',
+            arguments: {
+              indicator_id: 'NY.GDP.MKTP.CD',
+              country_ids: ['USA'],
+              year_start: 2000,
+              year_end: 2001,
+            },
+          },
+        ],
+        usage: { input: 0, output: 0 },
+      })
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [
+          {
+            id: 'x1',
+            name: 'execute_js',
+            arguments: { code: 'const r = await llm("classify", rows); return r.text;' },
+          },
+        ],
+        usage: { input: 0, output: 0 },
+      })
+      // Served by a :free model, which estimateCost prices at zero. If the
+      // cost still referenced cfg.model this nested call would be billed at
+      // the default rate, so a zero total is what proves the attribution.
+      .mockResolvedValueOnce({
+        text: 'coastal',
+        toolCalls: [],
+        usage: { input: 1_000_000, output: 1_000_000 },
+        servedModel: 'some/model:free',
+      })
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
+        usage: { input: 0, output: 0 },
+      });
+
+    const session = createSession(cfg, { rlm: true });
+    const out = await session.ask('judge', cb);
+    expect(out.cost).toBe(0);
   });
 });

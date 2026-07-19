@@ -717,6 +717,23 @@ function csvCell(s: string): string {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+// The `llm()` half of the execute_js description, kept OUT of the const so
+// that the default schema, the one any path gets when it forgets to ask for
+// RLM, never mentions the capability. Enforcement here is by withholding: a
+// model that is never told `llm` exists cannot waste a tool call discovering
+// it is disabled. Appended verbatim by schemasForSources when rlm is on, so
+// the enabled description is byte-for-byte what it was before the flag.
+export const EXECUTE_JS_RLM_PARAGRAPH =
+  '\n\n' +
+  'Your code also gets a second argument, `llm`, for the parts a computation cannot do with ' +
+  'arithmetic: `const r = await llm("classify each of these as coastal or landlocked, return ' +
+  'JSON", someRows)`. It resolves to {model_derived: true, text, provenance} — read `.text`. ' +
+  'Use it only for judgment (classify, label, extract, bucket), never for numbers you can ' +
+  'compute. Limits: 4 calls per run, 8 per turn, ~20KB of data per call, and the nested call ' +
+  'has no tools of its own, so batch your rows into ONE call rather than looping. ' +
+  'PROVENANCE: anything llm() returns is YOUR OWN judgment, not fetched data. Never chart it ' +
+  'as source data and never state it as a number a database returned.';
+
 // ── Tool schemas exposed to the model ────────────────────────────────────
 export const TOOL_SCHEMAS: ToolSchema[] = [
   {
@@ -827,15 +844,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       'or object you need for the chart or the finding, not intermediate steps. Use this for ' +
       'anything that requires comparing across many rows: top-N by change, percentage change, ' +
       'filtering to the latest year per country, grouping by region, etc. Do not manually rank ' +
-      'or diff more than a couple of countries in your own reasoning — write code instead.\n\n' +
-      'Your code also gets a second argument, `llm`, for the parts a computation cannot do with ' +
-      'arithmetic: `const r = await llm("classify each of these as coastal or landlocked, return ' +
-      'JSON", someRows)`. It resolves to {model_derived: true, text, provenance} — read `.text`. ' +
-      'Use it only for judgment (classify, label, extract, bucket), never for numbers you can ' +
-      'compute. Limits: 4 calls per run, 8 per turn, ~20KB of data per call, and the nested call ' +
-      'has no tools of its own, so batch your rows into ONE call rather than looping. ' +
-      'PROVENANCE: anything llm() returns is YOUR OWN judgment, not fetched data. Never chart it ' +
-      'as source data and never state it as a number a database returned.',
+      'or diff more than a couple of countries in your own reasoning — write code instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -1089,10 +1098,23 @@ export function resolveSources(ids?: string[]): SourceDef[] {
 
 // The tool schemas the model should see for a given source selection: the
 // always-on core plus every selected source's own tools, in original order.
-export function schemasForSources(ids?: string[]): ToolSchema[] {
+//
+// `rlm` is the second hard filter, and it works the same way the source
+// filter does: what the model is not given, it cannot use. When false (the
+// default, including when omitted) the execute_js description carries no
+// mention of `llm()`, so the capability is invisible rather than refused.
+// The schema objects are copied, never mutated, so two sessions with
+// different rlm settings cannot clobber each other through the shared const.
+export function schemasForSources(ids?: string[], rlm: boolean = false): ToolSchema[] {
   const allowed = new Set(CORE_TOOL_NAMES);
   for (const s of resolveSources(ids)) for (const t of s.toolNames) allowed.add(t);
-  return TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
+  const picked = TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
+  if (!rlm) return picked;
+  return picked.map((sch) =>
+    sch.name === 'execute_js'
+      ? { ...sch, description: sch.description + EXECUTE_JS_RLM_PARAGRAPH }
+      : sch
+  );
 }
 
 // The dataset-catalog sources (owid/imf) among a selection — pushed into

@@ -292,6 +292,23 @@ const PRESETS = [
               <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
             </div>
           </div>
+
+          <!-- Judgment calls: off by default. Each one is a second, nested
+               completion billed to the user's own key, so the user opts in.
+               Locks with the database picker on the first ask. -->
+          <div class="ch-byok-row ch-rlm-row">
+            <div class="ch-rlm" id="ch-rlm">
+              <label class="ch-save">
+                <input type="checkbox" id="ch-rlm-toggle" />
+                <span>Let code make judgment calls</span>
+              </label>
+              <p class="ch-rlm-hint" id="ch-rlm-hint">
+                Off by default. When on, computed steps can ask the model to classify or
+                label rows. Each one is an extra call billed to your key, and its output is
+                model judgment, not fetched data.
+              </p>
+            </div>
+          </div>
           </div>
         </div>
       </div>
@@ -946,6 +963,19 @@ const PRESETS = [
   // The hard filter binds when the session is created (first ask), so the
   // picker locks for the rest of the conversation. "+ new conversation" clears
   // the session and calls unlockSources().
+  //
+  // The judgment-call toggle binds at the same moment and for the same
+  // reason: it is read once, when createSession() is called, so letting it
+  // change mid-conversation would show a control that no longer decides
+  // anything. It rides the same lock rather than growing a second mechanism.
+  const rlmBox = $('ch-rlm');
+  const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
+  const rlmHint = $('ch-rlm-hint');
+  const RLM_HINT_DEFAULT = rlmHint?.textContent || '';
+
+  function rlmEnabled(): boolean {
+    return !!rlmToggle?.checked;
+  }
   function lockSources() {
     sourcesLocked = true;
     sourcesBox?.classList.add('is-locked');
@@ -955,6 +985,13 @@ const PRESETS = [
       sourcesHint.textContent = 'Locked for this conversation — start a new one to change.';
       sourcesHint.classList.remove('is-warn');
     }
+    rlmBox?.classList.add('is-locked');
+    if (rlmToggle) rlmToggle.disabled = true;
+    if (rlmHint) {
+      rlmHint.textContent = rlmEnabled()
+        ? 'On for this conversation. Start a new one to turn it off.'
+        : 'Off for this conversation. Start a new one to turn it on.';
+    }
   }
   function unlockSources() {
     sourcesLocked = false;
@@ -962,6 +999,9 @@ const PRESETS = [
     sourceItems.forEach((b) => b.removeAttribute('aria-disabled'));
     if (sourcesSearch) sourcesSearch.disabled = false;
     updateSourcesCount();
+    rlmBox?.classList.remove('is-locked');
+    if (rlmToggle) rlmToggle.disabled = false;
+    if (rlmHint) rlmHint.textContent = RLM_HINT_DEFAULT;
   }
   sourceItems.forEach((b) => {
     b.addEventListener('click', () => {
@@ -1891,7 +1931,7 @@ const PRESETS = [
       // is locked for the rest of the conversation. "+ new conversation" clears
       // `session` and unlocks the picker.
       if (!session) {
-        session = createSession(cfg, { sources: selectedSources() });
+        session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
         lockSources();
       }
       const out = await session.ask(question, {
@@ -2744,6 +2784,18 @@ const PRESETS = [
     cursor: pointer;
   }
   .ch-save input { accent-color: var(--signal); }
+
+  .ch-rlm-row { display: block; }
+  .ch-rlm { display: flex; flex-direction: column; gap: 6px; }
+  .ch-rlm.is-locked { opacity: 0.55; }
+  .ch-rlm.is-locked .ch-save { cursor: not-allowed; }
+  .ch-rlm-hint {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
 
   .ch-keylinks { display: flex; gap: 12px; flex-wrap: wrap; }
   :global(.ch-keylink) {
