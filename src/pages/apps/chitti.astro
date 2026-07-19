@@ -72,26 +72,6 @@ const PRESETS = [
           </div>
         </div>
       </form>
-
-      <!-- Database picker. Hard filter: Chitti answers only from the selected
-           databases. Built from the source registry (tools.ts SOURCES), so a
-           new database appears here automatically. Locked once a conversation
-           starts (this whole setup panel hides); "+ new conversation" resets. -->
-      <div class="ch-sources" id="ch-sources" role="group" aria-label="Databases Chitti can answer from">
-        <span class="ch-sources-label">Databases</span>
-        <div class="ch-sources-chips">
-          {SOURCES.map((s) => (
-            <button
-              type="button"
-              class="ch-source is-on"
-              data-source={s.id}
-              aria-pressed="true"
-              title={s.blurb}
-            >{s.label}</button>
-          ))}
-        </div>
-        <p class="ch-sources-hint">Chitti answers only from the selected databases.</p>
-      </div>
     </section>
 
     <template id="ch-turn-template">
@@ -178,7 +158,7 @@ const PRESETS = [
       <div class="ch-byok" id="ch-byok" hidden>
         <div class="ch-byok-body">
           <div class="ch-byok-head">
-            <span class="ch-byok-title">Model &amp; API key</span>
+            <span class="ch-byok-title">Model, key &amp; databases</span>
             <button type="button" class="ch-byok-close" id="ch-byok-close" aria-label="Close">✕</button>
           </div>
           <div class="ch-byok-row">
@@ -214,6 +194,28 @@ const PRESETS = [
             <div class="ch-keylinks" id="ch-keylinks"></div>
           </div>
           <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+
+          <!-- Database picker. Hard filter: Chitti answers only from the
+               selected databases. Built from the source registry (tools.ts
+               SOURCES), so a new database appears here automatically. Locked
+               once a conversation starts; "+ new conversation" re-enables it. -->
+          <div class="ch-byok-row ch-sources-row">
+            <div class="ch-sources" id="ch-sources" role="group" aria-label="Databases Chitti can answer from">
+              <span class="ch-field-label">Databases</span>
+              <div class="ch-sources-chips">
+                {SOURCES.map((s) => (
+                  <button
+                    type="button"
+                    class="ch-source is-on"
+                    data-source={s.id}
+                    aria-pressed="true"
+                    title={s.blurb}
+                  >{s.label}</button>
+                ))}
+              </div>
+              <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -634,14 +636,33 @@ const PRESETS = [
   // ── Database picker ─────────────────────────────────────────────────────
   // Toggling chips is a hard filter on which databases the session may use.
   // At least one must stay on; trying to turn the last one off is a no-op.
+  const sourcesBox = $('ch-sources');
+  const sourcesHint = $('ch-sources-hint');
   const sourceBtns = Array.from(
     document.querySelectorAll<HTMLButtonElement>('.ch-source')
   );
+  let sourcesLocked = false;
   function selectedSources(): string[] {
     return sourceBtns.filter((b) => b.classList.contains('is-on')).map((b) => b.dataset.source || '');
   }
+  // The hard filter binds when the session is created (first ask), so the
+  // picker locks for the rest of the conversation. "+ new conversation" clears
+  // the session and calls unlockSources().
+  function lockSources() {
+    sourcesLocked = true;
+    sourcesBox?.classList.add('is-locked');
+    sourceBtns.forEach((b) => b.setAttribute('aria-disabled', 'true'));
+    if (sourcesHint) sourcesHint.textContent = 'Locked for this conversation — start a new one to change.';
+  }
+  function unlockSources() {
+    sourcesLocked = false;
+    sourcesBox?.classList.remove('is-locked');
+    sourceBtns.forEach((b) => b.removeAttribute('aria-disabled'));
+    if (sourcesHint) sourcesHint.textContent = 'Chitti answers only from the selected databases.';
+  }
   sourceBtns.forEach((b) => {
     b.addEventListener('click', () => {
+      if (sourcesLocked) return;
       const on = b.classList.contains('is-on');
       // Guard the last-one-standing: an empty selection would leave the agent
       // with no data source at all.
@@ -1285,9 +1306,12 @@ const PRESETS = [
 
     try {
       // Bind the chosen databases to the session on first ask; the selection
-      // is locked for the rest of the conversation (the picker hides with the
-      // setup panel). "+ new conversation" clears `session`, re-enabling it.
-      if (!session) session = createSession(cfg, { sources: selectedSources() });
+      // is locked for the rest of the conversation. "+ new conversation" clears
+      // `session` and unlocks the picker.
+      if (!session) {
+        session = createSession(cfg, { sources: selectedSources() });
+        lockSources();
+      }
       const out = await session.ask(question, {
         onTrace: (events) => renderTrace(tb, events),
         onFiles: (files) => renderFiles(tb, files),
@@ -1373,6 +1397,7 @@ const PRESETS = [
 
   newConvoBtn.addEventListener('click', () => {
     session = null;
+    unlockSources();
     // The latest turn is never collapsed (collapse only runs on prior turns
     // at submit), so its chart is still live here. Dispose before clearing the
     // DOM so ECharts releases its global registry entry and resize listener,
@@ -1651,27 +1676,24 @@ const PRESETS = [
     background: var(--bg-hover);
   }
   /* ── Database picker (hard filter over active sources) ── */
+  .ch-sources-row {
+    border-top: 1px solid var(--fg-faint);
+    padding-top: 12px;
+  }
   .ch-sources {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
-    margin: 20px auto 0;
-    max-width: 32rem;
-  }
-  .ch-sources-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
+    width: 100%;
   }
   .ch-sources-chips {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
     gap: 8px;
   }
+  .ch-sources.is-locked { opacity: 0.55; }
+  .ch-sources.is-locked .ch-source { cursor: not-allowed; }
   .ch-source {
     font-family: var(--font-mono);
     font-size: var(--text-label);
@@ -1705,7 +1727,7 @@ const PRESETS = [
     color: var(--fg-muted);
     opacity: 0.75;
     margin: 0;
-    text-align: center;
+    text-align: left;
   }
 
   .ch-btn {
