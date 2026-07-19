@@ -117,19 +117,24 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-// Query tokens plus any synonym words, so "co2" also searches for "carbon"/
-// "emissions". Original tokens are tracked separately so they can weigh more.
-function expandTerms(qNorm: string): { terms: string[]; base: Set<string> } {
-  const base = new Set(qNorm.split(' ').filter(Boolean));
-  const terms = new Set(base);
-  for (const t of base) for (const syn of SYNONYMS[t] ?? []) for (const w of normalize(syn).split(' ')) terms.add(w);
-  return { terms: [...terms], base };
+// The receipt for one scored series: not just the number, but WHICH query
+// terms and synonym expansions actually landed. The UI surfaces this so the
+// scorer's work ("matched 'gdp' → 'economy'") is visible instead of hidden.
+export interface MatchExplanation {
+  score: number;
+  // Original query tokens that appeared verbatim in the id/name.
+  matchedBase: string[];
+  // Synonym expansions that fired: the original query term and the synonym
+  // word that actually appeared in the haystack. e.g. gdp → economy.
+  matchedSynonyms: { term: string; synonym: string }[];
 }
 
-// Weighted relevance of one series (id + name) to a query. 0 = no match.
-export function scoreSeries(query: string, id: string, name: string): number {
+// Weighted relevance of one series (id + name) to a query, PLUS which terms
+// contributed. Pure and offline-testable. scoreSeries is the thin numeric
+// wrapper, so the number and the explanation can never drift apart.
+export function explainMatch(query: string, id: string, name: string): MatchExplanation {
   const q = normalize(query);
-  if (!q) return 0;
+  if (!q) return { score: 0, matchedBase: [], matchedSynonyms: [] };
   const nName = normalize(name);
   const nId = normalize(id);
   const hay = nName + ' ' + nId;
@@ -137,9 +142,27 @@ export function scoreSeries(query: string, id: string, name: string): number {
   if (hay.includes(q)) score += 10; // exact phrase present
   if (nName.startsWith(q)) score += 6; // name leads with the query
   if (nId === q) score += 8; // id is exactly the query
-  const { terms, base } = expandTerms(q);
-  for (const t of terms) if (hay.includes(t)) score += base.has(t) ? 2 : 1; // original terms outweigh synonyms
-  return score;
+
+  const base = new Set(q.split(' ').filter(Boolean));
+  // Synonym word → the base term it expands from. First writer wins so a word
+  // reachable from two base terms is attributed once (matches the old Set
+  // dedup that kept scoring stable).
+  const synOf = new Map<string, string>();
+  for (const t of base)
+    for (const syn of SYNONYMS[t] ?? [])
+      for (const w of normalize(syn).split(' '))
+        if (w && !base.has(w) && !synOf.has(w)) synOf.set(w, t);
+
+  const matchedBase: string[] = [];
+  const matchedSynonyms: { term: string; synonym: string }[] = [];
+  for (const t of base) if (hay.includes(t)) { score += 2; matchedBase.push(t); } // originals weigh more
+  for (const [w, t] of synOf) if (hay.includes(w)) { score += 1; matchedSynonyms.push({ term: t, synonym: w }); }
+  return { score, matchedBase, matchedSynonyms };
+}
+
+// Weighted relevance of one series (id + name) to a query. 0 = no match.
+export function scoreSeries(query: string, id: string, name: string): number {
+  return explainMatch(query, id, name).score;
 }
 
 // search_indicators: filter the curated list; if <3 hits, hit the WB search API.
@@ -1011,6 +1034,24 @@ export interface SeriesHit {
   source: string; // registry source id: 'worldbank' | 'owid' | 'imf' | …
 }
 
+// Structured metadata for the UI's search-receipt card: how much was searched,
+// how many candidates were considered, and — for the top match — which query
+// terms/synonyms actually fired. UI-only; the model still just gets SeriesHit[].
+export interface SearchReceipt {
+  query: string;
+  sourcesSearched: string[]; // friendly labels of the databases searched
+  candidateCount: number; // scored (>0) candidate series gathered, pre-dedup
+  hitCount: number; // returned hits after dedup + cap
+  topMatch?: {
+    id: string;
+    name: string;
+    source: string; // registry source id
+    sourceLabel: string; // friendly database name for the card
+    matchedBase: string[];
+    matchedSynonyms: { term: string; synonym: string }[];
+  };
+}
+
 // Parse the IMF DataMapper /indicators payload into series entries. Shape:
 // { indicators: { <CODE>: { label, description, ... } } }. Pure + exported so
 // it's unit-testable without the network.
@@ -1059,7 +1100,19 @@ async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
 // catalog; the returned id already carries the namespace the fetch tools
 // route on, and `source` names the database for the model's benefit.
 export async function findSeries(query: string, activeIds?: string[]): Promise<SeriesHit[]> {
-  const active = new Set(resolveSources(activeIds).map((s) => s.id));
+  return (await findSeriesWithReceipt(query, activeIds)).hits;
+}
+
+// findSeries plus the UI receipt: the same hits, alongside structured metadata
+// (databases searched, candidates considered, and the top match's term/synonym
+// provenance) that the trace renders as a search-receipt card. Kept separate so
+// findSeries's SeriesHit[] contract — and everything that calls it — is unchanged.
+export async function findSeriesWithReceipt(
+  query: string,
+  activeIds?: string[]
+): Promise<{ hits: SeriesHit[]; receipt: SearchReceipt }> {
+  const activeSources = resolveSources(activeIds);
+  const active = new Set(activeSources.map((s) => s.id));
   const hits: SeriesHit[] = [];
 
   // World Bank first — it's the broad default, and searchIndicators also falls
@@ -1083,6 +1136,25 @@ export async function findSeries(query: string, activeIds?: string[]): Promise<S
     hits.push(...(await searchImfCatalog(query)));
   }
 
+  // candidateCount is the scored (>0) series gathered across every searched
+  // database, before dedup and the display cap — a faithful "how many the
+  // scorer actually considered" for the receipt.
+  const candidateCount = hits.length;
   const seen = new Set<string>();
-  return hits.filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true))).slice(0, 12);
+  const deduped = hits
+    .filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true)))
+    .slice(0, 12);
+
+  const labelOf = (id: string) => activeSources.find((s) => s.id === id)?.label ?? id;
+  const top = deduped[0];
+  const receipt: SearchReceipt = {
+    query,
+    sourcesSearched: activeSources.map((s) => s.label),
+    candidateCount,
+    hitCount: deduped.length,
+    topMatch: top
+      ? { id: top.id, name: top.name, source: top.source, sourceLabel: labelOf(top.source), ...explainMatch(query, top.id, top.name) }
+      : undefined,
+  };
+  return { hits: deduped, receipt };
 }
