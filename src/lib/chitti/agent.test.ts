@@ -5,7 +5,9 @@ import {
   resolveSources,
   datasetSourcesFor,
   findSeries,
+  findSeriesWithReceipt,
   scoreSeries,
+  explainMatch,
   parseImfIndicators,
   DEFAULT_SOURCE_IDS,
 } from './tools';
@@ -86,6 +88,50 @@ describe('scoreSeries — relevance', () => {
   });
 });
 
+describe('explainMatch — which terms/synonyms fired', () => {
+  it('reports the score identically to scoreSeries (single source of truth)', () => {
+    const cases: [string, string, string][] = [
+      ['carbon', 'co-emissions-per-capita', 'CO2 emissions per capita (tonnes)'],
+      ['gdp per capita', 'NY.GDP.PCAP.CD', 'GDP per capita (current US$)'],
+      ['co2 emissions', 'annual-co2-emissions-per-country', 'Annual CO2 emissions (tonnes)'],
+      ['', 'X', 'Y'],
+    ];
+    for (const [q, id, name] of cases) {
+      expect(explainMatch(q, id, name).score).toBe(scoreSeries(q, id, name));
+    }
+  });
+
+  it('records a base-term hit when the query word appears verbatim', () => {
+    const ex = explainMatch('gdp', 'NY.GDP.PCAP.CD', 'GDP per capita (current US$)');
+    expect(ex.matchedBase).toContain('gdp');
+    // "gdp" is present literally, so no synonym had to fire for it.
+    expect(ex.matchedSynonyms.find((s) => s.term === 'gdp')).toBeUndefined();
+  });
+
+  it('records the synonym expansion that fired — "carbon" → co2/emissions', () => {
+    // The name has no literal "carbon"; the hit comes purely from synonyms.
+    const ex = explainMatch('carbon', 'co-emissions-per-capita', 'CO2 emissions per capita (tonnes)');
+    expect(ex.matchedBase).not.toContain('carbon');
+    const vias = ex.matchedSynonyms.filter((s) => s.term === 'carbon').map((s) => s.synonym);
+    expect(vias).toContain('co2');
+    expect(vias).toContain('emissions');
+  });
+
+  it('reports nothing matched for an unrelated series', () => {
+    const ex = explainMatch('gdp', 'SP.POP.TOTL', 'Population, total');
+    expect(ex.score).toBe(0);
+    expect(ex.matchedBase).toEqual([]);
+    expect(ex.matchedSynonyms).toEqual([]);
+  });
+
+  it('attributes a shared synonym word to a single base term (stable, no double count)', () => {
+    // "co2" and "carbon" both expand to "emissions"; it must be counted once.
+    const ex = explainMatch('co2 carbon', 'x', 'Annual emissions series');
+    const emissionsHits = ex.matchedSynonyms.filter((s) => s.synonym === 'emissions');
+    expect(emissionsHits.length).toBe(1);
+  });
+});
+
 describe('parseImfIndicators — live IMF catalog', () => {
   it('maps the DataMapper /indicators shape to namespaced series', () => {
     const parsed = parseImfIndicators({
@@ -142,6 +188,54 @@ describe('findSeries — cross-source search', () => {
   it('finds IMF forecast series and namespaces the id', async () => {
     const hits = await findSeries('inflation', ['imf']);
     expect(hits.some((h) => h.source === 'imf' && h.id.startsWith('imf:'))).toBe(true);
+  });
+});
+
+describe('findSeriesWithReceipt — search-receipt payload', () => {
+  // Stub fetch offline so the receipt is built purely from the curated catalog
+  // (also proves the card degrades gracefully with no network).
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports databases searched, candidate/hit counts, and hits unchanged from findSeries', async () => {
+    const { hits, receipt } = await findSeriesWithReceipt('carbon emissions', ['owid']);
+    expect(receipt.query).toBe('carbon emissions');
+    // One active database (OWID) → its friendly label, not the id.
+    expect(receipt.sourcesSearched).toEqual(['Our World in Data']);
+    expect(receipt.candidateCount).toBeGreaterThan(0);
+    expect(receipt.hitCount).toBe(hits.length);
+    // The receipt must not change the hits the model receives.
+    expect(hits).toEqual(await findSeries('carbon emissions', ['owid']));
+  });
+
+  it('top match carries its source label and the synonym expansion that fired', async () => {
+    const { receipt } = await findSeriesWithReceipt('carbon', ['owid']);
+    expect(receipt.topMatch).toBeDefined();
+    const tm = receipt.topMatch!;
+    expect(tm.sourceLabel).toBe('Our World in Data');
+    // "carbon" is not literal in the OWID CO2 names — it must surface as a
+    // synonym expansion (carbon → co2 / emissions) in the receipt.
+    const vias = tm.matchedSynonyms.filter((s) => s.term === 'carbon').map((s) => s.synonym);
+    expect(vias.length).toBeGreaterThan(0);
+    expect(['co2', 'emissions'].some((w) => vias.includes(w))).toBe(true);
+  });
+
+  it('counts every active database as searched, even multi-source selections', async () => {
+    const { receipt } = await findSeriesWithReceipt('gdp', ['owid', 'imf']);
+    expect(receipt.sourcesSearched.length).toBe(2);
+    expect(receipt.sourcesSearched).toContain('Our World in Data');
+    expect(receipt.sourcesSearched).toContain('IMF');
+  });
+
+  it('has no topMatch when nothing scores', async () => {
+    const { hits, receipt } = await findSeriesWithReceipt('zzzznotarealmetric', ['owid']);
+    expect(hits.length).toBe(0);
+    expect(receipt.topMatch).toBeUndefined();
+    expect(receipt.candidateCount).toBe(0);
   });
 });
 

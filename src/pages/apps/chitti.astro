@@ -824,6 +824,98 @@ const PRESETS = [
     return val + ' tok';
   }
 
+  // The search-receipt card: find_series streams as a visible receipt of the
+  // scorer's work — how many databases were searched, how many candidates were
+  // weighed, the top match with its source, and which query terms/synonyms
+  // actually fired for it. Built as DOM (not template) so it lives in the
+  // JS-rendered trace; its styles are :global() for the same reason.
+  function buildReceiptCard(r: NonNullable<TraceEvent['receipt']>): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'ch-receipt';
+
+    // Stat line: N databases → K candidates → top match.
+    const stats = document.createElement('div');
+    stats.className = 'ch-receipt-stats';
+    const nDb = r.sourcesSearched.length;
+    const addStat = (n: number, label: string) => {
+      const wrap = document.createElement('span');
+      wrap.className = 'ch-receipt-stat';
+      const num = document.createElement('span');
+      num.className = 'ch-receipt-num';
+      num.textContent = String(n);
+      wrap.appendChild(num);
+      wrap.appendChild(document.createTextNode(' ' + label));
+      stats.appendChild(wrap);
+    };
+    const arrow = () => {
+      const a = document.createElement('span');
+      a.className = 'ch-receipt-arrow';
+      a.textContent = '→';
+      stats.appendChild(a);
+    };
+    addStat(nDb, nDb === 1 ? 'database' : 'databases');
+    arrow();
+    addStat(r.candidateCount, r.candidateCount === 1 ? 'candidate' : 'candidates');
+    if (r.topMatch) {
+      arrow();
+      const tm = document.createElement('span');
+      tm.className = 'ch-receipt-toplabel';
+      tm.textContent = 'top match';
+      stats.appendChild(tm);
+    }
+    card.appendChild(stats);
+
+    if (r.topMatch) {
+      // The match itself: indicator name (Newsreader italic) + source tag.
+      const match = document.createElement('div');
+      match.className = 'ch-receipt-match';
+      const name = document.createElement('span');
+      name.className = 'ch-receipt-name';
+      name.textContent = r.topMatch.name;
+      match.appendChild(name);
+      const src = document.createElement('span');
+      src.className = 'ch-receipt-source';
+      src.textContent = r.topMatch.sourceLabel;
+      match.appendChild(src);
+      card.appendChild(match);
+
+      // Which terms/synonyms fired. Synonym expansions read "gdp → economy"
+      // with the expansion in amber; plain base-term hits are chips.
+      const base = r.topMatch.matchedBase;
+      const syns = r.topMatch.matchedSynonyms;
+      if (base.length || syns.length) {
+        const terms = document.createElement('div');
+        terms.className = 'ch-receipt-terms';
+        const lead = document.createElement('span');
+        lead.className = 'ch-receipt-lead';
+        lead.textContent = 'matched';
+        terms.appendChild(lead);
+        for (const t of base) {
+          const chip = document.createElement('code');
+          chip.className = 'ch-receipt-term';
+          chip.textContent = t;
+          terms.appendChild(chip);
+        }
+        for (const s of syns) {
+          const exp = document.createElement('span');
+          exp.className = 'ch-receipt-syn';
+          const from = document.createElement('code');
+          from.className = 'ch-receipt-term';
+          from.textContent = s.term;
+          const via = document.createElement('code');
+          via.className = 'ch-receipt-term ch-receipt-term-syn';
+          via.textContent = s.synonym;
+          exp.appendChild(from);
+          exp.appendChild(document.createTextNode(' → '));
+          exp.appendChild(via);
+          terms.appendChild(exp);
+        }
+        card.appendChild(terms);
+      }
+    }
+    return card;
+  }
+
   // Keep the collapsed <details> summary honest: while a step is in flight it
   // names that step; once the run settles it becomes a terse step count. The
   // token/cost totals land separately via renderRunningTotal().
@@ -936,7 +1028,11 @@ const PRESETS = [
       } else {
         body.appendChild(head);
       }
-      if (e.detail && e.tool !== 'verify') {
+      // find_series carries a structured receipt — render the dedicated
+      // search-receipt card instead of the plain "N hits" detail line.
+      if (e.tool === 'find_series' && e.receipt) {
+        body.appendChild(buildReceiptCard(e.receipt));
+      } else if (e.detail && e.tool !== 'verify') {
         const d = document.createElement('div');
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
@@ -2301,6 +2397,97 @@ const PRESETS = [
     opacity: 0.8;
   }
   :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+
+  /* ── Search-receipt card ────────────────────────────────────────────────
+     find_series shows its work: a compact card on a darker ground reading
+     "N databases → K candidates → top match: <name> (source) — matched
+     'gdp' → 'economy'". Mono for the machinery, Newsreader italic for the
+     matched indicator's human name, amber (--signal) reserved for the two
+     things that matter most — the counts and the synonym expansions. */
+  :global(.ch-receipt) {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-left: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  :global(.ch-receipt-stats) {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  :global(.ch-receipt-num) {
+    color: var(--signal);
+    font-weight: 600;
+  }
+  :global(.ch-receipt-arrow) {
+    color: var(--fg-muted);
+    opacity: 0.55;
+  }
+  :global(.ch-receipt-toplabel) {
+    color: var(--fg-muted);
+    opacity: 0.75;
+  }
+  :global(.ch-receipt-match) {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  :global(.ch-receipt-name) {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: var(--text-label);
+    color: var(--fg);
+    line-height: 1.25;
+  }
+  :global(.ch-receipt-source) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.75;
+    white-space: nowrap;
+  }
+  :global(.ch-receipt-source)::before { content: '('; }
+  :global(.ch-receipt-source)::after { content: ')'; }
+  :global(.ch-receipt-terms) {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  :global(.ch-receipt-lead) { opacity: 0.7; }
+  :global(.ch-receipt-syn) {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    color: var(--fg-muted);
+    opacity: 0.75;
+  }
+  :global(.ch-receipt-term) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: color-mix(in srgb, var(--fg-faint) 60%, transparent);
+    border-radius: var(--radius-sm);
+    padding: 0 4px;
+  }
+  :global(.ch-receipt-term-syn) {
+    color: var(--signal);
+    background: color-mix(in srgb, var(--signal) 12%, transparent);
+  }
+
   /* Completed steps settle quietly — dimmed, not struck through. The old
      strike-through made every finished line read as an error/cancellation
      and left the whole rail illegible once a run completed. */

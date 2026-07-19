@@ -12,7 +12,7 @@ import {
 } from './providers';
 import {
   VFS,
-  findSeries,
+  findSeriesWithReceipt,
   datasetName,
   listCountries,
   fetchWorldbank,
@@ -29,6 +29,7 @@ import {
   type SourceDef,
   type ChartSpec,
   type DataRow,
+  type SearchReceipt,
 } from './tools';
 
 const MAX_TOOL_CALLS = 12;
@@ -50,6 +51,10 @@ export interface TraceEvent {
   // has returned a verdict. Drives the ink-stamped VERIFIED badge. The UI
   // must only stamp a step where this is true.
   pass?: boolean;
+  // Set only on a 'find_series' step: structured search metadata (databases
+  // searched, candidate count, top match + which terms/synonyms fired) that
+  // the UI renders as a dedicated search-receipt card. UI-only.
+  receipt?: SearchReceipt;
 }
 
 export interface AgentCallbacks {
@@ -197,10 +202,24 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         let result = '';
         switch (tc.name) {
           case 'find_series': {
-            const hits = await findSeries(String(a.query ?? ''), activeSources.map((s) => s.id));
-            result = hits.length
-              ? JSON.stringify(hits)
-              : 'No matching series in the active databases — try different keywords.';
+            const { hits, receipt } = await findSeriesWithReceipt(
+              String(a.query ?? ''),
+              activeSources.map((s) => s.id)
+            );
+            // Attach the structured receipt for the UI's search-receipt card.
+            // The model still receives only the SeriesHit[] JSON (plus a single
+            // orientation line) — no context bloat.
+            ev.receipt = receipt;
+            if (hits.length) {
+              const top = receipt.topMatch;
+              const summary =
+                `searched ${receipt.sourcesSearched.length} database${receipt.sourcesSearched.length === 1 ? '' : 's'} · ` +
+                `${receipt.candidateCount} candidate${receipt.candidateCount === 1 ? '' : 's'}` +
+                (top ? ` · top: ${top.name} (${top.sourceLabel})` : '');
+              result = summary + '\n' + JSON.stringify(hits);
+            } else {
+              result = 'No matching series in the active databases — try different keywords.';
+            }
             ev.detail = `${hits.length} hit${hits.length === 1 ? '' : 's'}`;
             break;
           }
