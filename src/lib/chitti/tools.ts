@@ -871,7 +871,10 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 export interface SourceDef {
   id: string;
   label: string;
-  blurb: string; // one line, shown under the chip in the picker
+  // Grouping axis for the picker — sources sharing a category render under one
+  // header, so the list stays legible as the registry grows to many sources.
+  category: string;
+  blurb: string; // one line, shown next to the name in the picker
   // Tool names (from TOOL_SCHEMAS) this source owns. A tool may be shared by
   // more than one source (search_datasets serves both OWID and IMF); it is
   // offered whenever any owning source is selected.
@@ -897,6 +900,7 @@ export const SOURCES: SourceDef[] = [
   {
     id: 'worldbank',
     label: 'World Bank',
+    category: 'Economics & development',
     blurb: 'Development, economic, health & social indicators for every country.',
     toolNames: ['search_indicators', 'fetch_worldbank', 'fetch_worldbank_all'],
     promptSnippet:
@@ -906,6 +910,7 @@ export const SOURCES: SourceDef[] = [
   {
     id: 'owid',
     label: 'Our World in Data',
+    category: 'Society & environment',
     blurb: 'CO₂ & energy, happiness, HDI, literacy, extreme poverty.',
     toolNames: ['search_datasets', 'fetch_owid'],
     promptSnippet:
@@ -916,6 +921,7 @@ export const SOURCES: SourceDef[] = [
   {
     id: 'imf',
     label: 'IMF',
+    category: 'Economics & development',
     blurb: 'Macro data with multi-year forecasts: GDP, inflation, debt.',
     toolNames: ['search_datasets', 'fetch_imf'],
     promptSnippet:
@@ -926,6 +932,19 @@ export const SOURCES: SourceDef[] = [
 ];
 
 export const DEFAULT_SOURCE_IDS = SOURCES.map((s) => s.id);
+
+// Sources grouped by category, preserving first-seen category order — the
+// shape the picker renders (one header per category). Scales the UI as the
+// registry grows without the picker code needing to know the categories.
+export function sourcesByCategory(): { category: string; sources: SourceDef[] }[] {
+  const order: string[] = [];
+  const byCat = new Map<string, SourceDef[]>();
+  for (const s of SOURCES) {
+    if (!byCat.has(s.category)) { byCat.set(s.category, []); order.push(s.category); }
+    byCat.get(s.category)!.push(s);
+  }
+  return order.map((category) => ({ category, sources: byCat.get(category)! }));
+}
 
 // Normalize an incoming selection: keep only known ids; empty/unknown → all.
 export function resolveSources(ids?: string[]): SourceDef[] {
