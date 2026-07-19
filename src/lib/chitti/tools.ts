@@ -82,21 +82,76 @@ export class VFS {
 // ── Tool implementations ─────────────────────────────────────────────────
 const WB = 'https://api.worldbank.org/v2';
 
+// ── Relevance scoring ────────────────────────────────────────────────────
+// One weighted scorer shared by every catalog. Plain substring term-counting
+// missed real matches — "co2" never hits "CO-emissions…" because it isn't a
+// literal substring — so we normalize punctuation to spaces and expand a small
+// synonym map before scoring. No embeddings: this stays a browser-only static
+// site, and a curated synonym list is both cheap and debuggable.
+const SYNONYMS: Record<string, string[]> = {
+  co2: ['carbon', 'emissions', 'greenhouse'],
+  carbon: ['co2', 'emissions'],
+  emissions: ['co2', 'carbon'],
+  gdp: ['gross domestic product', 'economy', 'output'],
+  gni: ['gross national income'],
+  inflation: ['consumer prices', 'cpi'],
+  unemployment: ['labor force', 'jobless'],
+  population: ['people', 'demographic', 'inhabitants'],
+  mortality: ['death', 'deaths'],
+  fertility: ['births', 'birth rate'],
+  longevity: ['life expectancy'],
+  lifespan: ['life expectancy'],
+  internet: ['online', 'web', 'connectivity'],
+  poverty: ['poor', 'income'],
+  literacy: ['reading', 'education'],
+  renewables: ['renewable', 'solar', 'wind', 'clean energy'],
+  renewable: ['renewables', 'solar', 'wind', 'clean energy'],
+  energy: ['electricity', 'power'],
+  debt: ['borrowing', 'liabilities'],
+  trade: ['exports', 'imports'],
+  happiness: ['life satisfaction', 'wellbeing', 'cantril'],
+  hdi: ['human development'],
+};
+
+function normalize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Query tokens plus any synonym words, so "co2" also searches for "carbon"/
+// "emissions". Original tokens are tracked separately so they can weigh more.
+function expandTerms(qNorm: string): { terms: string[]; base: Set<string> } {
+  const base = new Set(qNorm.split(' ').filter(Boolean));
+  const terms = new Set(base);
+  for (const t of base) for (const syn of SYNONYMS[t] ?? []) for (const w of normalize(syn).split(' ')) terms.add(w);
+  return { terms: [...terms], base };
+}
+
+// Weighted relevance of one series (id + name) to a query. 0 = no match.
+export function scoreSeries(query: string, id: string, name: string): number {
+  const q = normalize(query);
+  if (!q) return 0;
+  const nName = normalize(name);
+  const nId = normalize(id);
+  const hay = nName + ' ' + nId;
+  let score = 0;
+  if (hay.includes(q)) score += 10; // exact phrase present
+  if (nName.startsWith(q)) score += 6; // name leads with the query
+  if (nId === q) score += 8; // id is exactly the query
+  const { terms, base } = expandTerms(q);
+  for (const t of terms) if (hay.includes(t)) score += base.has(t) ? 2 : 1; // original terms outweigh synonyms
+  return score;
+}
+
 // search_indicators: filter the curated list; if <3 hits, hit the WB search API.
 export async function searchIndicators(query: string, topic?: string): Promise<Indicator[]> {
   const q = (query || '').toLowerCase().trim();
-  const terms = q.split(/\s+/).filter(Boolean);
   let pool = INDICATORS;
   if (topic) {
     const t = topic.toLowerCase();
     pool = pool.filter((i) => i.topic.toLowerCase().includes(t));
   }
   const scored = pool
-    .map((i) => {
-      const hay = (i.name + ' ' + i.id).toLowerCase();
-      const score = terms.reduce((s, term) => s + (hay.includes(term) ? 1 : 0), 0);
-      return { i, score };
-    })
+    .map((i) => ({ i, score: scoreSeries(query, i.id, i.name) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((x) => x.i);
@@ -284,13 +339,8 @@ export const DATASETS: Dataset[] = [
 // sees IMF datasets (and vice-versa) even though both share this one tool.
 export function searchDatasets(query: string, allow?: Dataset['source'][]): Dataset[] {
   const allowSet = allow && allow.length ? new Set(allow) : null;
-  const terms = (query || '').toLowerCase().split(/\s+/).filter(Boolean);
   return DATASETS.filter((d) => !allowSet || allowSet.has(d.source))
-    .map((d) => {
-      const hay = (d.name + ' ' + d.id).toLowerCase();
-      const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
-      return { d, score };
-    })
+    .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((x) => x.d)
@@ -961,6 +1011,48 @@ export interface SeriesHit {
   source: string; // registry source id: 'worldbank' | 'owid' | 'imf' | …
 }
 
+// Parse the IMF DataMapper /indicators payload into series entries. Shape:
+// { indicators: { <CODE>: { label, description, ... } } }. Pure + exported so
+// it's unit-testable without the network.
+export function parseImfIndicators(data: unknown): { id: string; name: string }[] {
+  const inds = (data as { indicators?: Record<string, { label?: string }> })?.indicators;
+  if (!inds || typeof inds !== 'object') return [];
+  return Object.keys(inds).map((code) => ({
+    id: 'imf:' + code,
+    name: inds[code]?.label || code,
+  }));
+}
+
+// The full IMF DataMapper indicator catalog (~50+ series), fetched once and
+// cached for the session. The curated IMF_DATASETS list is tiny; this is the
+// live-fallback equivalent of World Bank's search API. Same host Chitti already
+// fetches IMF *data* from, so it shares that host's (browser-open) CORS policy.
+let imfCatalogCache: { id: string; name: string }[] | null = null;
+async function imfCatalog(): Promise<{ id: string; name: string }[]> {
+  if (imfCatalogCache) return imfCatalogCache;
+  const resp = await fetch('https://www.imf.org/external/datamapper/api/v1/indicators');
+  if (!resp.ok) throw new Error('IMF indicators HTTP ' + resp.status);
+  imfCatalogCache = parseImfIndicators(await resp.json());
+  return imfCatalogCache;
+}
+
+// Search the live IMF catalog with the shared scorer. Any failure (offline,
+// CORS, shape change) degrades to an empty list — findSeries then just returns
+// the curated hits, never an error.
+async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
+  try {
+    const cat = await imfCatalog();
+    return cat
+      .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => ({ id: x.d.id, name: x.d.name, source: 'imf' }));
+  } catch {
+    return [];
+  }
+}
+
 // One search across every active database, so the model calls a single tool
 // instead of choosing between per-source search tools and guessing which
 // database holds the metric. Each source contributes hits from its own
@@ -977,11 +1069,18 @@ export async function findSeries(query: string, activeIds?: string[]): Promise<S
     hits.push(...wb.map((i) => ({ id: i.id, name: i.name, source: 'worldbank' })));
   }
 
-  // OWID/IMF share one catalog; filter it to whichever of them is active.
+  // OWID/IMF share one curated catalog; filter it to whichever is active.
   const catalogSources = datasetSourcesFor(activeIds);
   if (catalogSources.length) {
     const ds = searchDatasets(query, catalogSources);
     hits.push(...ds.map((d) => ({ id: d.id, name: d.name, source: d.source })));
+  }
+
+  // IMF live fallback: the curated IMF list is tiny, so when IMF is active and
+  // few curated hits came back, search the full DataMapper catalog. Curated
+  // hits are pushed first, so dedup keeps their friendlier names.
+  if (active.has('imf') && hits.filter((h) => h.source === 'imf').length < 3) {
+    hits.push(...(await searchImfCatalog(query)));
   }
 
   const seen = new Set<string>();
