@@ -72,6 +72,31 @@ const trust = [
   },
 ];
 
+// A real reference outweighs any amount of copy — founders judge track record,
+// not code. NOTE (Amal): replace with a genuine quote + attribution, or delete
+// the whole block. An empty/placeholder testimonial live is worse than none.
+const testimonial = {
+  quote: '[[One or two sentences from a client or collaborator, naming the outcome — e.g. "Amal shipped our RAG pipeline in three weeks and it held up in production."]]',
+  name: '[[Name]]',
+  role: '[[Role, Company]]',
+};
+
+// How an engagement actually starts — de-risks the CTO and the founder both.
+const engagementFlow = [
+  {
+    step: 'Kickoff',
+    body: 'A short call to pin down the problem and what "done" looks like. NDA first if anything is sensitive.',
+  },
+  {
+    step: 'Scope',
+    body: 'You get a one-page scope — fixed price, clear milestones, defined finish line — before I write any code. No open-ended meter.',
+  },
+  {
+    step: 'Milestones',
+    body: 'We ship in checkpoints you sign off on, so there are no surprises at the end and you can stop at any boundary.',
+  },
+];
+
 // Proof, written outcome-first. Founders read line 1; recruiters read the tags.
 const proof = [
   {
@@ -164,13 +189,22 @@ const proof = [
 
   <section class="work-section animate-in animate-in-delay-2">
     <div class="section-header"><h2>Proof, not promises</h2></div>
+    {!testimonial.quote.startsWith('[[') && (
+      <figure class="testimonial">
+        <blockquote>{testimonial.quote}</blockquote>
+        <figcaption>
+          <span class="testimonial-name">{testimonial.name}</span>
+          <span class="testimonial-role">{testimonial.role}</span>
+        </figcaption>
+      </figure>
+    )}
     <div class="proof-list">
       {proof.map((p) => (
         <div class="proof-card">
           <p class="proof-outcome">{p.outcome}</p>
           <div class="proof-meta">
             <span class="proof-org">{p.org}</span>
-            {p.href ? (
+            {p.metric.startsWith('[[') ? null : p.href ? (
               <a class="proof-metric" href={p.href} target={p.href.startsWith('http') ? '_blank' : null} rel={p.href.startsWith('http') ? 'noopener noreferrer' : null}>{p.metric} &rarr;</a>
             ) : (
               <span class="proof-metric">{p.metric}</span>
@@ -186,6 +220,14 @@ const proof = [
 
   <section id="start" class="work-section work-cta animate-in animate-in-delay-2">
     <div class="section-header"><h2>Start a project</h2></div>
+    <div class="steps flow-steps">
+      {engagementFlow.map((f) => (
+        <div class="step-row">
+          <span class="step-label">{f.step}</span>
+          <span class="step-body">{f.body}</span>
+        </div>
+      ))}
+    </div>
     <p>
       Tell me the problem in a few lines &mdash; what you are trying to ship and
       what &ldquo;working&rdquo; looks like. If it is a fit, I will come back
@@ -337,6 +379,50 @@ const proof = [
     line-height: 1.6;
   }
 
+  /* Engagement flow sits above the contact copy */
+  .flow-steps {
+    margin-bottom: var(--space-md);
+  }
+
+  /* Testimonial / reference */
+  .testimonial {
+    margin: 0 0 var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    border-left: 2px solid var(--signal);
+    background: var(--bg-elevated);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  .testimonial blockquote {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-style: italic;
+    line-height: 1.5;
+    color: var(--fg);
+    margin: 0 0 0.6rem;
+    max-width: 58ch;
+  }
+
+  .testimonial figcaption {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .testimonial-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    font-weight: 500;
+    color: var(--fg);
+  }
+
+  .testimonial-role {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+  }
+
   /* Proof */
   .proof-list {
     display: flex;
@@ -411,8 +497,8 @@ const proof = [
     margin: 0 0 var(--space-md);
   }
 
-  .cta-alt {
-    margin-top: var(--space-md) !important;
+  .work-cta .cta-alt {
+    margin-top: var(--space-md);
   }
 
   @media (max-width: 640px) {
