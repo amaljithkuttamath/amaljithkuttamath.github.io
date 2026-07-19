@@ -5,6 +5,7 @@ import {
   resolveSources,
   datasetSourcesFor,
   findSeries,
+  scoreSeries,
   DEFAULT_SOURCE_IDS,
 } from './tools';
 
@@ -62,7 +63,34 @@ describe('source hard filter', () => {
   });
 });
 
+describe('scoreSeries — relevance', () => {
+  it('matches via synonyms — "carbon" finds a CO2/emissions series', () => {
+    // Plain substring scoring returned 0 here (no literal "carbon"); the
+    // synonym expansion is what makes this a hit.
+    expect(scoreSeries('carbon', 'co-emissions-per-capita', 'CO2 emissions per capita (tonnes)')).toBeGreaterThan(0);
+  });
+
+  it('an exact-phrase name outranks incidental overlap', () => {
+    const exact = scoreSeries('gdp per capita', 'NY.GDP.PCAP.CD', 'GDP per capita (current US$)');
+    const incidental = scoreSeries('gdp per capita', 'SP.POP.TOTL', 'Population, total');
+    expect(exact).toBeGreaterThan(incidental);
+  });
+
+  it('normalizes punctuation ("co2" vs "co-emissions")', () => {
+    expect(scoreSeries('co2 emissions', 'annual-co2-emissions-per-country', 'Annual CO2 emissions (tonnes)')).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for an empty query', () => {
+    expect(scoreSeries('', 'X', 'Y')).toBe(0);
+  });
+});
+
 describe('findSeries — cross-source search', () => {
+  it('finds CO2 datasets from the synonym "carbon" (OWID active)', async () => {
+    const hits = await findSeries('carbon emissions', ['owid']);
+    expect(hits.some((h) => h.source === 'owid' && h.id.includes('co'))).toBe(true);
+  });
+
   it('returns only OWID/IMF hits when World Bank is inactive (no network)', async () => {
     // OWID+IMF search is a pure catalog filter (no fetch), so this is offline.
     const hits = await findSeries('co2 emissions', ['owid']);
