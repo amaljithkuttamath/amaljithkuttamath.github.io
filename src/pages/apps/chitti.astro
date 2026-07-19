@@ -29,6 +29,17 @@ const PRESETS = [
   description="Ask about the world, get real numbers — charted, cited, and computed live from World Bank, Our World in Data, and IMF APIs. Browser-only, bring your own key."
   ogImage="/images/chitti-og.png"
 >
+  <!-- PWA: make Chitti installable, scoped to /apps/chitti/ only (not the
+       whole portfolio). Manifest + Apple/standalone metas live in <head>. -->
+  <Fragment slot="head">
+    <link rel="manifest" href="/apps/chitti/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apps/chitti/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Chitti" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  </Fragment>
+
   <div class="ch">
     <!-- Header -->
     <header class="ch-head">
@@ -313,6 +324,23 @@ const PRESETS = [
 
   <!-- Island: curated indicator names for client-side citation enrichment -->
   <script type="application/json" id="ch-indicator-map" set:html={JSON.stringify(indicatorMap)} is:inline></script>
+
+  <!-- PWA service-worker registration. Scoped to /apps/chitti/ so only this
+       app is controlled, never the rest of the portfolio. Feature-detected,
+       registered after load, and wrapped so any failure fails silently and
+       never throws into the app. Skipped on plain file:// or unsupported
+       contexts; localhost/https both count as secure contexts and register. -->
+  <script is:inline>
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      window.addEventListener('load', function () {
+        try {
+          navigator.serviceWorker
+            .register('/apps/chitti/sw.js', { scope: '/apps/chitti/' })
+            .catch(function () { /* silent: registration is best-effort */ });
+        } catch (e) { /* silent */ }
+      });
+    }
+  </script>
 </Base>
 
 <script>

@@ -129,6 +129,9 @@ if (matchedNav) {
     "itemListElement": breadcrumbItems
   })} />
 
+  <!-- Per-page head additions (e.g. a PWA manifest for a specific app). -->
+  <slot name="head" />
+
 </head>
 <body>
   <a href="#main" class="skip-link">Skip to content</a>
