@@ -1011,6 +1011,48 @@ export interface SeriesHit {
   source: string; // registry source id: 'worldbank' | 'owid' | 'imf' | …
 }
 
+// Parse the IMF DataMapper /indicators payload into series entries. Shape:
+// { indicators: { <CODE>: { label, description, ... } } }. Pure + exported so
+// it's unit-testable without the network.
+export function parseImfIndicators(data: unknown): { id: string; name: string }[] {
+  const inds = (data as { indicators?: Record<string, { label?: string }> })?.indicators;
+  if (!inds || typeof inds !== 'object') return [];
+  return Object.keys(inds).map((code) => ({
+    id: 'imf:' + code,
+    name: inds[code]?.label || code,
+  }));
+}
+
+// The full IMF DataMapper indicator catalog (~50+ series), fetched once and
+// cached for the session. The curated IMF_DATASETS list is tiny; this is the
+// live-fallback equivalent of World Bank's search API. Same host Chitti already
+// fetches IMF *data* from, so it shares that host's (browser-open) CORS policy.
+let imfCatalogCache: { id: string; name: string }[] | null = null;
+async function imfCatalog(): Promise<{ id: string; name: string }[]> {
+  if (imfCatalogCache) return imfCatalogCache;
+  const resp = await fetch('https://www.imf.org/external/datamapper/api/v1/indicators');
+  if (!resp.ok) throw new Error('IMF indicators HTTP ' + resp.status);
+  imfCatalogCache = parseImfIndicators(await resp.json());
+  return imfCatalogCache;
+}
+
+// Search the live IMF catalog with the shared scorer. Any failure (offline,
+// CORS, shape change) degrades to an empty list — findSeries then just returns
+// the curated hits, never an error.
+async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
+  try {
+    const cat = await imfCatalog();
+    return cat
+      .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => ({ id: x.d.id, name: x.d.name, source: 'imf' }));
+  } catch {
+    return [];
+  }
+}
+
 // One search across every active database, so the model calls a single tool
 // instead of choosing between per-source search tools and guessing which
 // database holds the metric. Each source contributes hits from its own
@@ -1027,11 +1069,18 @@ export async function findSeries(query: string, activeIds?: string[]): Promise<S
     hits.push(...wb.map((i) => ({ id: i.id, name: i.name, source: 'worldbank' })));
   }
 
-  // OWID/IMF share one catalog; filter it to whichever of them is active.
+  // OWID/IMF share one curated catalog; filter it to whichever is active.
   const catalogSources = datasetSourcesFor(activeIds);
   if (catalogSources.length) {
     const ds = searchDatasets(query, catalogSources);
     hits.push(...ds.map((d) => ({ id: d.id, name: d.name, source: d.source })));
+  }
+
+  // IMF live fallback: the curated IMF list is tiny, so when IMF is active and
+  // few curated hits came back, search the full DataMapper catalog. Curated
+  // hits are pushed first, so dedup keeps their friendlier names.
+  if (active.has('imf') && hits.filter((h) => h.source === 'imf').length < 3) {
+    hits.push(...(await searchImfCatalog(query)));
   }
 
   const seen = new Set<string>();

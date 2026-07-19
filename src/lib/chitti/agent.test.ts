@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   TOOL_SCHEMAS,
   schemasForSources,
@@ -6,6 +6,7 @@ import {
   datasetSourcesFor,
   findSeries,
   scoreSeries,
+  parseImfIndicators,
   DEFAULT_SOURCE_IDS,
 } from './tools';
 
@@ -85,10 +86,49 @@ describe('scoreSeries — relevance', () => {
   });
 });
 
+describe('parseImfIndicators — live IMF catalog', () => {
+  it('maps the DataMapper /indicators shape to namespaced series', () => {
+    const parsed = parseImfIndicators({
+      indicators: {
+        NGDP_RPCH: { label: 'Real GDP growth (annual percent change)' },
+        LUR: { label: 'Unemployment rate' },
+      },
+    });
+    expect(parsed).toContainEqual({ id: 'imf:NGDP_RPCH', name: 'Real GDP growth (annual percent change)' });
+    expect(parsed.find((p) => p.id === 'imf:LUR')?.name).toBe('Unemployment rate');
+  });
+
+  it('is defensive against a malformed payload', () => {
+    expect(parseImfIndicators(null)).toEqual([]);
+    expect(parseImfIndicators({})).toEqual([]);
+    expect(parseImfIndicators({ indicators: 'nope' })).toEqual([]);
+  });
+
+  it('falls back to the code when a label is missing', () => {
+    expect(parseImfIndicators({ indicators: { XYZ: {} } })).toEqual([{ id: 'imf:XYZ', name: 'XYZ' }]);
+  });
+});
+
 describe('findSeries — cross-source search', () => {
+  // The IMF live-catalog fallback calls fetch(); stub it to reject so these
+  // stay offline and deterministic — which also exercises graceful degradation.
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('finds CO2 datasets from the synonym "carbon" (OWID active)', async () => {
     const hits = await findSeries('carbon emissions', ['owid']);
     expect(hits.some((h) => h.source === 'owid' && h.id.includes('co'))).toBe(true);
+  });
+
+  it('still returns curated IMF hits when the live catalog is unreachable', async () => {
+    // fetch rejects → imfCatalog() throws → searchImfCatalog() returns []
+    // → curated IMF hits must still come through (graceful degradation).
+    const hits = await findSeries('inflation', ['imf']);
+    expect(hits.some((h) => h.source === 'imf' && h.id.startsWith('imf:'))).toBe(true);
   });
 
   it('returns only OWID/IMF hits when World Bank is inactive (no network)', async () => {
