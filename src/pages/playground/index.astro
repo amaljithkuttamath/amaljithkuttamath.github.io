@@ -1,105 +1,18 @@
 ---
-import Base from '../../layouts/Base.astro';
-
-const experiments = [
-  {
-    href: '/playground/pdf-lens',
-    title: 'PDF Lens',
-    desc: 'Drop any PDF. LiteParse WASM parses it entirely in your browser, no upload, no server. Get clean per-page text, markdown, and raw JSON with bounding boxes, ready to copy into any pipeline.',
-    tag: 'liteparse wasm',
-    cost: 'runs instantly',
-  },
-  {
-    href: '/playground/microgpt',
-    title: 'microGPT Trainer',
-    desc: 'Train a tiny transformer live and watch every component learn: embeddings, attention heads, MLP activations, the loss curve. Same architecture as GPT-4, four million times smaller.',
-    tag: 'live training',
-    cost: 'runs instantly',
-  },
-  {
-    href: '/playground/tokens',
-    title: 'Tokenizer Arena',
-    desc: 'Type anything and watch five real production tokenizers shred it differently. See why GPT-4o is cheaper per word than GPT-2, and why some languages pay a 10x token tax.',
-    tag: 'real tokenizers',
-    cost: 'runs instantly',
-  },
-  {
-    href: '/playground/chat',
-    title: 'Probability X-ray',
-    desc: 'Chat with a model on your own GPU, then watch the distribution behind every word. Each token is colored by how sure the model was; hover to see what it almost said instead. No server, nothing leaves the page.',
-    tag: 'webgpu · live logits',
-    cost: 'one-time ~120 MB download',
-  },
-  {
-    href: '/work/watch-model-think',
-    title: 'Watch a Model Think',
-    desc: 'Step through a model processing text token by token: prediction confidence, calibration, feature persistence, and interference, visualized from recorded runs.',
-    tag: 'interpretability',
-    cost: 'runs instantly',
-  },
-];
+// The /playground section was retired. Everything migrated to /apps (products)
+// and /lab (experiments). This index used to list the experiments and link to
+// /playground/* paths that are now themselves redirects, so it pointed at a
+// page of redirects while competing with /apps in the sitemap.
 ---
-
-<Base title="Playground | Amaljith Kuttamath" description="Interactive machine learning experiments that run entirely in your browser: train a transformer, compare real tokenizers, chat with a local model on WebGPU.">
-  <div class="ph">
-    <header class="ph-head">
-      <h1>Playground</h1>
-      <p>Interactive experiments about how models actually work. Everything here is real computation running in your browser, no servers, no APIs. Each one demonstrates one idea you can poke at.</p>
-    </header>
-
-    <div class="ph-grid">
-      {experiments.map((ex) => (
-        <a class="ph-card" href={ex.href}>
-          <div class="ph-card-top">
-            <span class="ph-tag">{ex.tag}</span>
-            <span class="ph-cost">{ex.cost}</span>
-          </div>
-          <h2>{ex.title}</h2>
-          <p>{ex.desc}</p>
-        </a>
-      ))}
-    </div>
-  </div>
-</Base>
-
-<style>
-  .ph { max-width: 900px; margin: 0 auto; }
-  .ph-head { margin-bottom: var(--space-lg); }
-  .ph-head h1 { font-size: var(--text-page-title); font-weight: 600; margin-bottom: 4px; }
-  .ph-head p { color: var(--fg-muted); font-size: var(--text-small); line-height: 1.6; max-width: 60ch; }
-
-  .ph-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-  }
-  .ph-card {
-    display: block; text-decoration: none; color: var(--fg);
-    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md); padding: 16px 18px;
-    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
-  }
-  .ph-card:hover { border-color: var(--accent-color); background: var(--bg-hover); }
-  .ph-card-top {
-    display: flex; align-items: baseline; justify-content: space-between;
-    margin-bottom: 10px; gap: 8px;
-  }
-  .ph-tag {
-    font-family: var(--font-mono); font-size: var(--text-tag);
-    text-transform: lowercase; color: var(--accent-color);
-    border: 1px solid var(--fg-faint); border-radius: var(--radius-full);
-    padding: 2px 10px; white-space: nowrap;
-  }
-  .ph-cost {
-    font-family: var(--font-mono); font-size: var(--text-label);
-    color: var(--fg-muted);
-  }
-  .ph-card h2 {
-    font-family: var(--font-serif); font-weight: 500;
-    font-size: var(--text-title); letter-spacing: -0.01em;
-    margin-bottom: 6px;
-  }
-  .ph-card p { font-size: var(--text-small); color: var(--fg-muted); line-height: 1.6; }
-
-  @media (max-width: 700px) {
-    .ph-grid { grid-template-columns: 1fr; }
-  }
-</style>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="0; url=/apps" />
+  <link rel="canonical" href="https://amaljithkuttamath.github.io/apps" />
+  <title>Redirecting to /apps…</title>
+</head>
+<body>
+  <p>The playground moved to <a href="/apps">/apps</a> and <a href="/lab">/lab</a>.</p>
+</body>
+</html>

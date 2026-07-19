@@ -325,7 +325,7 @@ const PRESETS = [
           <button type="button" class="ch-byok-sum" id="ch-byok-sum" aria-expanded="false" aria-controls="ch-byok">
             <span class="ch-byok-caret" aria-hidden="true"></span>
             <span class="ch-byok-state" id="ch-byok-state">openrouter · no key</span>
-            <span class="ch-byok-cta" id="ch-byok-cta">needs an api key</span>
+            <span class="ch-byok-cta" id="ch-byok-cta">Add a free key to run it</span>
           </button>
           <div class="ch-composer-actions">
             <button type="button" class="ch-new-convo" id="ch-new-convo" style="display:none">+ new</button>
@@ -2699,7 +2699,17 @@ const PRESETS = [
   }
   .ch-byok-state.ch-byok-ready { color: var(--success); }
   .ch-byok-sum.ch-byok-missing { border-color: color-mix(in srgb, var(--signal) 55%, transparent); }
-  .ch-byok-cta { color: var(--signal); letter-spacing: 0.02em; }
+  /* This is the one thing standing between a visitor and the product, so it
+     reads as an action rather than a footnote: an outlined amber pill instead
+     of 11px muted text that lost the page to a title already read. */
+  .ch-byok-cta {
+    color: var(--signal);
+    letter-spacing: 0.02em;
+    font-weight: 500;
+    border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+    border-radius: var(--radius-full);
+    padding: 2px 10px;
+  }
   .ch-byok-nudge { animation: ch-nudge 0.35s var(--ease); }
   @keyframes ch-nudge {
     0%, 100% { transform: translateX(0); }
@@ -3543,8 +3553,8 @@ const PRESETS = [
       padding: var(--space-md) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
     }
     /* Keep the config chip a single line: while no key is set, the amber
-       "needs an api key" CTA is the only thing worth the space; once a key
-       exists the CTA hides and the (truncated) state text returns. */
+       "Add a free key to run it" CTA is the only thing worth the space; once a
+       key exists the CTA hides and the (truncated) state text returns. */
     .ch-byok-sum { flex-wrap: nowrap; }
     .ch-byok-sum.ch-byok-missing .ch-byok-state { display: none; }
     /* iOS zooms the page when a focused input's font-size is below 16px —
