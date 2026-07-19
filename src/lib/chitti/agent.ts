@@ -31,6 +31,13 @@ import {
   type DataRow,
   type SearchReceipt,
 } from './tools';
+import {
+  createRlmRun,
+  createTurnBudget,
+  provenanceNotice,
+  type RlmCaller,
+  type RlmReceipt,
+} from './rlm';
 
 const MAX_TOOL_CALLS = 12;
 
@@ -55,6 +62,11 @@ export interface TraceEvent {
   // searched, candidate count, top match + which terms/synonyms fired) that
   // the UI renders as a dedicated search-receipt card. UI-only.
   receipt?: SearchReceipt;
+  // Set only on an 'execute_js' step whose code called llm(): one nested
+  // receipt per bounded judgment call (prompt summary, data size, duration,
+  // tokens, depth). The UI renders these indented under the step, so a
+  // model-derived value is always visibly attributed as one.
+  rlmReceipts?: RlmReceipt[];
 }
 
 export interface AgentCallbacks {
@@ -183,6 +195,19 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     let turnChartSpec: ChartSpec | null = null;
     // Whether the model-fallback trace note was already emitted this turn.
     let fallbackNoted = false;
+    // The 8-calls-per-turn llm() budget, shared by every execute_js run in
+    // this turn (including the verifier-FAIL retry pass, which is the same
+    // turn and must not get a fresh allowance).
+    const rlmBudget = createTurnBudget();
+    // Depth-1 by construction: the nested completion is issued with an EMPTY
+    // tool array, so the inner model cannot call execute_js (or anything
+    // else) and cannot recurse. There is no depth counter, because there is
+    // no edge for the recursion to follow.
+    const rlmCaller: RlmCaller = async (prompt: string) => {
+      const res = await complete(cfg, [{ role: 'user', content: prompt }], []);
+      totalCost += estimateCost(cfg.model, res.usage);
+      return { text: res.text, usage: res.usage };
+    };
     const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
@@ -270,11 +295,17 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev.detail = 'no data';
               break;
             }
-            let out = executeJs(code, state.rows);
+            // ONE RlmRun across both attempts: the retry below re-executes the
+            // same body, and a fresh run would hand that second execution a
+            // fresh 4-call allowance, so code calling llm() without returning
+            // could spend 8 in what the model wrote as one run.
+            const rlmRun = createRlmRun(rlmCaller, rlmBudget);
+            let out = await executeJs(code, state.rows, rlmRun.llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = executeJs('return (' + code + ')', state.rows);
+              out = await executeJs('return (' + code + ')', state.rows, rlmRun.llm);
             }
+            if (rlmRun.receipts.length) ev.rlmReceipts = [...rlmRun.receipts];
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =
                 'Your code ran without error but returned null/undefined. It must END with a ' +
@@ -283,7 +314,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev.detail = 'returned null';
             } else {
               result = out.ok ? JSON.stringify(out.result) : 'ERROR: ' + out.error;
-              ev.detail = out.ok ? 'ok' : 'error: ' + out.error;
+              // State the provenance in the model's own context, not only in
+              // the UI: this result is part model judgment, and the model is
+              // the thing that decides what to chart and what to claim next.
+              if (rlmRun.receipts.length) result = provenanceNotice(rlmRun.receipts.length) + '\n' + result;
+              ev.detail =
+                (out.ok ? 'ok' : 'error: ' + out.error) +
+                (rlmRun.receipts.length
+                  ? ` · ${rlmRun.receipts.length} llm() call${rlmRun.receipts.length === 1 ? '' : 's'} (model-derived)`
+                  : '');
             }
             break;
           }

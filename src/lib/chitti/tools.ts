@@ -652,17 +652,44 @@ export function correlate(
 // the same way a broken tool-calling loop already could; a hard timeout
 // would require moving execution to a Worker, which is more machinery than
 // this risk currently justifies.
+//
+// Async note: the body is compiled as an AsyncFunction, not a plain Function,
+// so model-written code can `await llm(...)` (see rlm.ts) as one step of a
+// computation. Code that never calls llm() behaves identically — an
+// AsyncFunction that never awaits still resolves with whatever it returns —
+// so the null-return guard, the retry-wrap, and every error message at the
+// call site keep working unchanged. The alternative, a two-phase
+// collect-then-resolve pass, would have to execute the body twice and so
+// would double any side effect or non-determinism in the model's code; that
+// is not the boring option, only the one that avoids the `await`.
 export interface ExecuteJsResult {
   ok: boolean;
   result?: unknown;
   error?: string;
 }
 
-export function executeJs(code: string, rows: DataRow[]): ExecuteJsResult {
+// The bounded judgment call injected as `llm` (rlm.ts builds it). Omitted for
+// callers that don't want to expose it; the sandboxed code then sees an `llm`
+// that refuses rather than an undefined identifier, so a model that tries it
+// gets a clear message instead of a ReferenceError.
+export type ExecuteJsLlm = (prompt: unknown, data?: unknown) => Promise<unknown>;
+
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+export async function executeJs(
+  code: string,
+  rows: DataRow[],
+  llm?: ExecuteJsLlm
+): Promise<ExecuteJsResult> {
+  const boundLlm: ExecuteJsLlm =
+    llm ??
+    (async () => {
+      throw new Error('llm() is not available in this run.');
+    });
   try {
     // eslint-disable-next-line no-new-func
-    const fn = new Function('rows', code);
-    const result = fn(rows);
+    const fn = new AsyncFunction('rows', 'llm', code);
+    const result = await fn(rows, boundLlm);
     // Force through JSON so the result is always plain, serializable data —
     // matches every other tool's result shape and guards against the code
     // accidentally returning something (a DOM node, a class instance) that
@@ -800,7 +827,15 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       'or object you need for the chart or the finding, not intermediate steps. Use this for ' +
       'anything that requires comparing across many rows: top-N by change, percentage change, ' +
       'filtering to the latest year per country, grouping by region, etc. Do not manually rank ' +
-      'or diff more than a couple of countries in your own reasoning — write code instead.',
+      'or diff more than a couple of countries in your own reasoning — write code instead.\n\n' +
+      'Your code also gets a second argument, `llm`, for the parts a computation cannot do with ' +
+      'arithmetic: `const r = await llm("classify each of these as coastal or landlocked, return ' +
+      'JSON", someRows)`. It resolves to {model_derived: true, text, provenance} — read `.text`. ' +
+      'Use it only for judgment (classify, label, extract, bucket), never for numbers you can ' +
+      'compute. Limits: 4 calls per run, 8 per turn, ~20KB of data per call, and the nested call ' +
+      'has no tools of its own, so batch your rows into ONE call rather than looping. ' +
+      'PROVENANCE: anything llm() returns is YOUR OWN judgment, not fetched data. Never chart it ' +
+      'as source data and never state it as a number a database returned.',
     parameters: {
       type: 'object',
       properties: {

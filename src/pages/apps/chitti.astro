@@ -1030,6 +1030,11 @@ const PRESETS = [
     return val + ' tok';
   }
 
+  // Compact byte count for the nested llm() receipts: "820 B", "4.1 KB".
+  function formatBytes(n: number): string {
+    return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+  }
+
   // The search-receipt card: find_series streams as a visible receipt of the
   // scorer's work — how many databases were searched, how many candidates were
   // weighed, the top match with its source, and which query terms/synonyms
@@ -1243,6 +1248,39 @@ const PRESETS = [
         d.className = 'ch-trace-detail';
         d.textContent = e.detail;
         body.appendChild(d);
+      }
+      // Nested llm() receipts: one line per bounded judgment call made inside
+      // this execute_js run. Rendered as its own indented block, labelled
+      // model-derived, so a value the model judged is never mistaken on
+      // screen for a value a database returned.
+      if (e.rlmReceipts && e.rlmReceipts.length) {
+        const nest = document.createElement('div');
+        nest.className = 'ch-rlm';
+        const label = document.createElement('div');
+        label.className = 'ch-rlm-label';
+        label.textContent = 'model-derived · llm() judgment, not fetched data';
+        nest.appendChild(label);
+        for (const r of e.rlmReceipts) {
+          const line = document.createElement('div');
+          line.className = 'ch-rlm-line' + (r.ok ? '' : ' ch-rlm-fail');
+          const parts = [
+            'depth ' + r.depth,
+            r.dataBytes ? formatBytes(r.dataBytes) : 'no data',
+            r.durationMs < 1000 ? r.durationMs + 'ms' : (r.durationMs / 1000).toFixed(1) + 's',
+          ];
+          if (r.tokens) parts.push(formatTokens(r.tokens));
+          if (!r.ok && r.error) parts.push(r.error);
+          const q = document.createElement('span');
+          q.className = 'ch-rlm-prompt';
+          q.textContent = r.promptSummary;
+          line.appendChild(q);
+          const m = document.createElement('span');
+          m.className = 'ch-rlm-meta';
+          m.textContent = parts.join(' · ');
+          line.appendChild(m);
+          nest.appendChild(line);
+        }
+        body.appendChild(nest);
       }
       // Ink-stamped VERIFIED badge — only the verify step, only on a genuine pass.
       if (e.tool === 'verify' && e.pass === true) {
@@ -2920,6 +2958,40 @@ const PRESETS = [
     opacity: 0.8;
   }
   :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+
+  /* ── Nested llm() receipts ──────────────────────────────────────────────
+     One indented line per bounded judgment call inside an execute_js run.
+     The left rule and the standing label carry the point: these values are
+     the model's own judgment, never a number a source returned. */
+  :global(.ch-rlm) {
+    margin-top: 6px;
+    padding-left: 10px;
+    border-left: 1px solid var(--fg-faint);
+  }
+  :global(.ch-rlm-label) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    margin-bottom: 3px;
+  }
+  :global(.ch-rlm-line) {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.8;
+  }
+  :global(.ch-rlm-prompt) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.ch-rlm-meta) { flex: none; }
+  :global(.ch-rlm-fail) { color: var(--danger); }
 
   /* ── Search-receipt card ────────────────────────────────────────────────
      find_series shows its work: a compact card on a darker ground reading
