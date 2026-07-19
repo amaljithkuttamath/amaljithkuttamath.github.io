@@ -580,15 +580,17 @@ function csvCell(s: string): string {
 // ── Tool schemas exposed to the model ────────────────────────────────────
 export const TOOL_SCHEMAS: ToolSchema[] = [
   {
-    name: 'search_indicators',
+    name: 'find_series',
     description:
-      'Search World Bank indicators by keyword. Returns matching indicator ids and names. ' +
-      'Prefer the curated set; falls back to a live World Bank search when few curated matches exist.',
+      'Search for a data series across ALL your active databases in one call. Returns matches as ' +
+      '{id, name, source}. Use the id verbatim with the fetch tool for its source: plain codes ' +
+      '(e.g. SH.DYN.MORT) → fetch_worldbank / fetch_worldbank_all; "owid:<slug>" → fetch_owid; ' +
+      '"imf:<code>" → fetch_imf. This is the single entry point for finding what to fetch — you do ' +
+      'not choose a database first, the results tell you which source has the series.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Keywords, e.g. "child mortality" or "GDP per capita"' },
-        topic: { type: 'string', description: 'Optional topic filter, e.g. "Health", "Economy"' },
+        query: { type: 'string', description: 'Keywords, e.g. "child mortality", "co2 emissions", "inflation forecast"' },
       },
       required: ['query'],
     },
@@ -698,23 +700,6 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         },
       },
       required: ['code'],
-    },
-  },
-  {
-    name: 'search_datasets',
-    description:
-      'Search the non-World-Bank catalogs: Our World in Data (health, CO2/energy, happiness, HDI, ' +
-      'poverty, literacy) and IMF DataMapper (macro data INCLUDING FORECASTS several years ahead — ' +
-      'GDP growth, inflation, unemployment, government debt). Returns dataset ids ("owid:<slug>" ' +
-      'or "imf:<code>") and names. Use the returned id verbatim with fetch_owid / fetch_imf. ' +
-      'Prefer World Bank (search_indicators) for standard development indicators; come here for ' +
-      'topics it lacks or when the question needs projections/forecasts.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Keywords, e.g. "co2 emissions", "inflation forecast", "happiness"' },
-      },
-      required: ['query'],
     },
   },
   {
@@ -892,7 +877,7 @@ export interface SourceDef {
 // Source-agnostic tools: control flow, computation over already-fetched rows,
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
-  'list_countries', 'execute_js', 'growth_stats', 'correlate',
+  'find_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file',
 ];
 
@@ -902,9 +887,9 @@ export const SOURCES: SourceDef[] = [
     label: 'World Bank',
     category: 'Economics & development',
     blurb: 'Development, economic, health & social indicators for every country.',
-    toolNames: ['search_indicators', 'fetch_worldbank', 'fetch_worldbank_all'],
+    toolNames: ['fetch_worldbank', 'fetch_worldbank_all'],
     promptSnippet:
-      'World Bank (search_indicators → fetch_worldbank / fetch_worldbank_all): the broad default — development, economic, health, and social indicators. Use fetch_worldbank with explicit ISO3 codes (or one aggregate like WLD); use fetch_worldbank_all for "every country" questions (it batches internally — never build the full country list yourself).',
+      'World Bank — the broad default: development, economic, health, and social indicators. Its find_series hits are plain codes (e.g. SH.DYN.MORT); fetch them with fetch_worldbank (explicit ISO3 codes, or one aggregate like WLD), or fetch_worldbank_all for "every country" questions (it batches internally — never build the full country list yourself).',
     cite: { name: 'World Bank Open Data', url: 'https://data.worldbank.org' },
   },
   {
@@ -912,9 +897,9 @@ export const SOURCES: SourceDef[] = [
     label: 'Our World in Data',
     category: 'Society & environment',
     blurb: 'CO₂ & energy, happiness, HDI, literacy, extreme poverty.',
-    toolNames: ['search_datasets', 'fetch_owid'],
+    toolNames: ['fetch_owid'],
     promptSnippet:
-      'Our World in Data (search_datasets → fetch_owid): topics World Bank lacks — CO2/energy, happiness, HDI, literacy, extreme poverty.',
+      'Our World in Data — topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty. Its find_series hits look like "owid:<slug>"; fetch them with fetch_owid.',
     cite: { name: 'Our World in Data', url: 'https://ourworldindata.org' },
     datasetSource: 'owid',
   },
@@ -923,9 +908,9 @@ export const SOURCES: SourceDef[] = [
     label: 'IMF',
     category: 'Economics & development',
     blurb: 'Macro data with multi-year forecasts: GDP, inflation, debt.',
-    toolNames: ['search_datasets', 'fetch_imf'],
+    toolNames: ['fetch_imf'],
     promptSnippet:
-      'IMF DataMapper (search_datasets → fetch_imf): the source for forecasts/projections several years ahead — GDP growth, inflation, unemployment, government debt. Say "IMF projection" when you use projected years.',
+      'IMF DataMapper — the source for forecasts/projections several years ahead: GDP growth, inflation, unemployment, government debt. Its find_series hits look like "imf:<code>"; fetch them with fetch_imf, and say "IMF projection" when you use projected years.',
     cite: { name: 'IMF DataMapper', url: 'https://www.imf.org/external/datamapper' },
     datasetSource: 'imf',
   },
@@ -968,4 +953,37 @@ export function datasetSourcesFor(ids?: string[]): Dataset['source'][] {
   return resolveSources(ids)
     .map((s) => s.datasetSource)
     .filter((x): x is Dataset['source'] => !!x);
+}
+
+export interface SeriesHit {
+  id: string; // fetch id: plain WB code, "owid:<slug>", or "imf:<code>"
+  name: string;
+  source: string; // registry source id: 'worldbank' | 'owid' | 'imf' | …
+}
+
+// One search across every active database, so the model calls a single tool
+// instead of choosing between per-source search tools and guessing which
+// database holds the metric. Each source contributes hits from its own
+// catalog; the returned id already carries the namespace the fetch tools
+// route on, and `source` names the database for the model's benefit.
+export async function findSeries(query: string, activeIds?: string[]): Promise<SeriesHit[]> {
+  const active = new Set(resolveSources(activeIds).map((s) => s.id));
+  const hits: SeriesHit[] = [];
+
+  // World Bank first — it's the broad default, and searchIndicators also falls
+  // back to the live WB search API when the curated set is thin.
+  if (active.has('worldbank')) {
+    const wb = await searchIndicators(query);
+    hits.push(...wb.map((i) => ({ id: i.id, name: i.name, source: 'worldbank' })));
+  }
+
+  // OWID/IMF share one catalog; filter it to whichever of them is active.
+  const catalogSources = datasetSourcesFor(activeIds);
+  if (catalogSources.length) {
+    const ds = searchDatasets(query, catalogSources);
+    hits.push(...ds.map((d) => ({ id: d.id, name: d.name, source: d.source })));
+  }
+
+  const seen = new Set<string>();
+  return hits.filter((h) => (seen.has(h.id) ? false : (seen.add(h.id), true))).slice(0, 12);
 }

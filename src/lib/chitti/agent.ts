@@ -12,8 +12,7 @@ import {
 } from './providers';
 import {
   VFS,
-  searchIndicators,
-  searchDatasets,
+  findSeries,
   datasetName,
   listCountries,
   fetchWorldbank,
@@ -27,7 +26,6 @@ import {
   INDICATORS,
   resolveSources,
   schemasForSources,
-  datasetSourcesFor,
   type SourceDef,
   type ChartSpec,
   type DataRow,
@@ -85,9 +83,9 @@ function buildSystemPrompt(sources: SourceDef[]): string {
   const many = sources.length > 1;
   const defaultLabel = sources.some((s) => s.id === 'worldbank') ? 'World Bank' : labels[0];
   const snippets = sources.map((s) => '   - ' + s.promptSnippet).join('\n');
-  const step1 = many
-    ? `1. PICK ONE SOURCE (active databases: ${labels.join(', ')}). Choose the one that fits the question; when unsure or more than one fits, prefer ${defaultLabel}.\n${snippets}`
-    : `1. YOUR SOURCE — one active database: ${labels[0]}. Use it for every data question in this pipeline.\n${snippets}`;
+  const activeLine = many
+    ? `Your active databases (find_series searches all of them at once; prefer ${defaultLabel} when more than one fits):`
+    : `Your one active database is ${labels[0]}. find_series searches it:`;
 
   return `You are Chitti, a data analyst agent. You answer questions about the world with real numbers fetched live from free institutional APIs. Your reasoning and every tool call stream to the user as you work — state decisions in your reasoning, never in files.
 
@@ -97,9 +95,11 @@ DECIDE THE SHAPE FIRST, then commit:
 
 PIPELINE — one step at a time, about 4-5 calls total:
 
-${step1}
+1. FIND THE SERIES — call find_series(query) once. It searches all your active databases together and returns matches as {id, name, source}; pick the id that fits.
+   ${activeLine}
+${snippets}
 
-2. FETCH ONCE using the chosen source's fetch tool: explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; a source's "all countries" path for "every country" questions (country_ids has no wildcard — never build the full country list yourself).
+2. FETCH ONCE using the fetch tool named for your chosen id's source (see above): explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; fetch_worldbank_all for "every country" questions (country_ids has no wildcard — never build the full country list yourself).
 
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
@@ -148,7 +148,6 @@ export interface SessionOptions {
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
   const activeSources = resolveSources(opts?.sources);
   const toolSchemas = schemasForSources(opts?.sources);
-  const allowedDatasetSources = datasetSourcesFor(opts?.sources);
   const messages: ChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(activeSources) },
   ];
@@ -197,9 +196,12 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       try {
         let result = '';
         switch (tc.name) {
-          case 'search_indicators': {
-            const hits = await searchIndicators(String(a.query ?? ''), a.topic ? String(a.topic) : undefined);
-            result = JSON.stringify(hits.map((h) => ({ id: h.id, name: h.name })));
+          case 'find_series': {
+            const hits = await findSeries(String(a.query ?? ''), activeSources.map((s) => s.id));
+            result = hits.length
+              ? JSON.stringify(hits)
+              : 'No matching series in the active databases — try different keywords.';
+            ev.detail = `${hits.length} hit${hits.length === 1 ? '' : 's'}`;
             break;
           }
           case 'list_countries': {
@@ -273,13 +275,6 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           }
           case 'read_file': {
             result = vfs.read(String(a.path)) || '(empty)';
-            break;
-          }
-          case 'search_datasets': {
-            const hits = searchDatasets(String(a.query ?? ''), allowedDatasetSources);
-            result = hits.length
-              ? JSON.stringify(hits.map((d) => ({ id: d.id, name: d.name, source: d.source })))
-              : 'No matches in the active dataset catalog(s) for this query.';
             break;
           }
           case 'fetch_owid': {
@@ -651,8 +646,8 @@ async function verify(
 // ── Helpers ──
 function summarizeArgs(tool: string, a: Record<string, unknown>): string {
   switch (tool) {
-    case 'search_indicators':
-      return String(a.query ?? '') + (a.topic ? ` · ${a.topic}` : '');
+    case 'find_series':
+      return String(a.query ?? '');
     case 'list_countries':
       return String(a.filter ?? 'all');
     case 'fetch_worldbank': {

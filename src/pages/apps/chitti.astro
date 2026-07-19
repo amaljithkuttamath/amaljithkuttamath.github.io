@@ -161,34 +161,23 @@ const PRESETS = [
       <div class="ch-byok" id="ch-byok" hidden>
         <div class="ch-byok-body">
           <div class="ch-byok-head">
-            <span class="ch-byok-title">Model, key &amp; databases</span>
+            <span class="ch-byok-title">Connect</span>
             <button type="button" class="ch-byok-close" id="ch-byok-close" aria-label="Close">✕</button>
           </div>
-          <div class="ch-byok-row">
-            <label class="ch-field">
-              <span class="ch-field-label">Provider</span>
-              <select id="ch-provider" class="ch-select">
-                {PROVIDERS.map((p) => (
-                  <option value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </label>
-            <label class="ch-field">
-              <span class="ch-field-label">Model</span>
-              <select id="ch-model" class="ch-select"></select>
-            </label>
-            <label class="ch-field ch-field-grow">
-              <span class="ch-field-label">API key</span>
-              <input
-                type="password"
-                id="ch-key"
-                class="ch-input"
-                placeholder="sk-… (never leaves your browser)"
-                spellcheck="false"
-                autocomplete="off"
-              />
-            </label>
-          </div>
+
+          <!-- Key first: the one required credential sits at the top, so the
+               mobile keyboard opens under it instead of hiding it. -->
+          <label class="ch-field ch-field-grow ch-byok-keyfield">
+            <span class="ch-field-label">API key</span>
+            <input
+              type="password"
+              id="ch-key"
+              class="ch-input"
+              placeholder="sk-… (never leaves your browser)"
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </label>
           <div class="ch-byok-row ch-byok-foot">
             <label class="ch-save">
               <input type="checkbox" id="ch-save" />
@@ -196,7 +185,30 @@ const PRESETS = [
             </label>
             <div class="ch-keylinks" id="ch-keylinks"></div>
           </div>
-          <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+
+          <!-- Model + databases: collapsed by default (keeps the sheet short on
+               mobile), auto-revealed once a key is set; the toggle opens them
+               anytime (e.g. to switch provider before entering a key). -->
+          <button type="button" class="ch-byok-more" id="ch-byok-more" aria-expanded="false" aria-controls="ch-byok-settings">
+            <span class="ch-byok-more-caret" aria-hidden="true"></span>
+            Model &amp; databases
+          </button>
+          <div class="ch-byok-settings" id="ch-byok-settings" hidden>
+            <div class="ch-byok-row">
+              <label class="ch-field">
+                <span class="ch-field-label">Provider</span>
+                <select id="ch-provider" class="ch-select">
+                  {PROVIDERS.map((p) => (
+                    <option value={p.id}>{p.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label class="ch-field">
+                <span class="ch-field-label">Model</span>
+                <select id="ch-model" class="ch-select"></select>
+              </label>
+            </div>
+            <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
 
           <!-- Database picker. Hard filter: Chitti answers only from the
                selected databases. Built from the source registry (tools.ts),
@@ -246,6 +258,7 @@ const PRESETS = [
               </div>
               <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -308,6 +321,34 @@ const PRESETS = [
   const byokSum = $('ch-byok-sum') as HTMLButtonElement;
   const byokState = $('ch-byok-state');
   const byokCta = $('ch-byok-cta');
+  const byokMore = $('ch-byok-more') as HTMLButtonElement;
+  const byokSettings = $('ch-byok-settings') as HTMLDivElement;
+
+  // Model + databases live behind a disclosure so the sheet is short on mobile
+  // (the keyboard-vs-key-field problem). Key-first: collapsed until there's a
+  // key, then auto-revealed; the toggle overrides either way.
+  function setSettingsOpen(open: boolean) {
+    byokSettings.hidden = !open;
+    byokMore.setAttribute('aria-expanded', String(open));
+  }
+  byokMore.addEventListener('click', () => setSettingsOpen(byokSettings.hidden));
+
+  // Keep the fixed bottom sheet above the on-screen keyboard: visualViewport
+  // shrinks when the keyboard opens, and `--kb` lifts the sheet by that much so
+  // the focused field (the key, at the top) is never covered. No-op on desktop.
+  const vv = window.visualViewport;
+  function syncSheetToKeyboard() {
+    if (!vv || byokPanel.hidden) {
+      byokPanel.style.removeProperty('--kb');
+      return;
+    }
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    byokPanel.style.setProperty('--kb', kb + 'px');
+  }
+  if (vv) {
+    vv.addEventListener('resize', syncSheetToKeyboard);
+    vv.addEventListener('scroll', syncSheetToKeyboard);
+  }
 
   // The config panel is a plain div toggled open/closed (not <details>, so the
   // trigger button can live inside the composer form). openByok(true/false)
@@ -316,6 +357,8 @@ const PRESETS = [
     byokPanel.hidden = !open;
     $('ch-byok-backdrop').hidden = !open;
     byokSum.setAttribute('aria-expanded', String(open));
+    if (open) setSettingsOpen(!!keyIn.value.trim()); // key-first: reveal only once connected
+    syncSheetToKeyboard();
   }
   byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
   // Explicit close paths that work everywhere, including iOS where
@@ -1990,6 +2033,28 @@ const PRESETS = [
   .ch-byok-close:hover { color: var(--fg); background: var(--bg-hover); }
   .ch-byok-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .ch-byok-foot { margin-top: 10px; justify-content: space-between; align-items: center; }
+
+  /* Key-first disclosure: model + databases collapse behind this toggle. */
+  .ch-byok-keyfield { margin-top: 2px; }
+  .ch-byok-more {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 4px 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    transition: color var(--duration) var(--ease);
+  }
+  .ch-byok-more:hover { color: var(--fg); }
+  .ch-byok-more-caret::before { content: '▸'; font-size: 0.85em; }
+  .ch-byok-more[aria-expanded='true'] .ch-byok-more-caret::before { content: '▾'; }
+  .ch-byok-settings { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .ch-byok-settings[hidden] { display: none; }
   .ch-field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
   .ch-field-grow { flex: 1; min-width: 220px; }
   .ch-field-label {
@@ -2600,7 +2665,12 @@ const PRESETS = [
       position: fixed;
       left: 0;
       right: 0;
-      bottom: 0;
+      /* --kb is the on-screen keyboard height (set from visualViewport); it
+         lifts the sheet so the focused key field is never hidden. */
+      bottom: var(--kb, 0px);
+      max-height: 85vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       z-index: 20;
       background: color-mix(in srgb, var(--fg) 6%, var(--bg));
       border: 1px solid var(--fg-faint);
