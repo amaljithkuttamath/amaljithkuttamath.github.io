@@ -491,7 +491,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         cb.onStatus(status, 'loading');
 
         const res = await complete(cfg, messages, toolSchemas);
-        totalCost += estimateCost(cfg.model, res.usage);
+        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
         // with a different model — visible in the trace and the rail label.
@@ -564,7 +564,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           ],
           []
         );
-        totalCost += estimateCost(cfg.model, res.usage);
+        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
         state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
       }
     }
@@ -711,7 +711,7 @@ async function verify(
   ];
   try {
     const res = await complete(cfg, messages, []);
-    addCost(estimateCost(cfg.model, res.usage));
+    addCost(estimateCost(res.servedModel ?? cfg.model, res.usage));
     const text = res.text.trim();
     const pass = /^\s*PASS/i.test(text) || (!/^\s*FAIL/i.test(text) && !!spec && !!finding);
     return {

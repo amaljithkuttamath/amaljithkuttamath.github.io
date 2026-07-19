@@ -709,4 +709,22 @@ describe('rlm flag: the caller handed to execute_js', () => {
     const out = await session.ask('judge', cb);
     expect(out.cost).toBe(0);
   });
+
+  // Same attribution rule in the MAIN loop, not just the nested call. This
+  // matters in normal use: the free-model fallback chain means OpenRouter can
+  // serve a different model than the one picked, and pricing the response
+  // against cfg.model would bill the user for a model that never ran.
+  it('prices main-loop turns against the model that actually served them', async () => {
+    (complete as any)
+      .mockResolvedValueOnce({
+        text: '',
+        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
+        usage: { input: 1_000_000, output: 1_000_000 },
+        servedModel: 'some/model:free',
+      });
+
+    const session = createSession(cfg);
+    const out = await session.ask('explain something', cb);
+    expect(out.cost).toBe(0);
+  });
 });
