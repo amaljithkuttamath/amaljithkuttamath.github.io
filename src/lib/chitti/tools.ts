@@ -60,15 +60,31 @@ export const TOPICS = Object.keys(indicatorsData as Record<string, unknown>);
 // ── Virtual filesystem ──────────────────────────────────────────────────
 // An in-memory Record<string,string> the agent writes intermediate artifacts
 // into. The UI mirrors this so the "deep agent" is visible as it works.
+// Provenance marker for a VFS entry. Set when the file's content was produced
+// by a recursive llm() call inside execute_js (semantic labelling/summarizing
+// over data slices) rather than fetched from a data API. Identity-critical:
+// model-derived content must be visibly labelled and must never be presented
+// as fetched data (no citation, never in the evidence table).
+export interface FileMeta {
+  derived?: boolean; // true → content is model-derived, not fetched
+  via?: string; // how it was derived, e.g. 'llm'
+}
+
 export class VFS {
   files: Record<string, string> = {};
+  // Per-path provenance, parallel to `files`. Absent entry = ordinary
+  // (non-derived) file. Kept separate so the string content contract of
+  // `files` is unchanged for every existing reader.
+  meta: Record<string, FileMeta> = {};
   private onChange?: (files: Record<string, string>) => void;
 
   constructor(onChange?: (files: Record<string, string>) => void) {
     this.onChange = onChange;
   }
-  write(path: string, content: string): void {
+  write(path: string, content: string, meta?: FileMeta): void {
     this.files[path] = content;
+    if (meta && (meta.derived || meta.via)) this.meta[path] = { ...meta };
+    else delete this.meta[path]; // a plain re-write clears any stale marker
     this.onChange?.({ ...this.files });
   }
   read(path: string): string {
@@ -652,17 +668,47 @@ export function correlate(
 // the same way a broken tool-calling loop already could; a hard timeout
 // would require moving execution to a Worker, which is more machinery than
 // this risk currently justifies.
+//
+// RLM primitive: the code may also `await llm(prompt, data?)` — a bounded
+// recursive language-model call over a slice of the data (the Recursive
+// Language Model pattern: the context lives as data in this REPL and the
+// model's own code makes small, depth-1 LM calls over pieces of it, keeping
+// the raw data out of the main context). Because of `llm`, the sandboxed
+// function is an AsyncFunction, so the code may use `await`; a plain
+// synchronous `return` still works exactly as before. The caps, receipts,
+// and provenance live in the injected `llm` (see agent.ts); executeJs only
+// wires it in and awaits the result.
 export interface ExecuteJsResult {
   ok: boolean;
   result?: unknown;
   error?: string;
 }
 
-export function executeJs(code: string, rows: DataRow[]): ExecuteJsResult {
+// The recursive LM primitive handed to sandboxed code. Returns text only —
+// no tool access — so it is depth-1 by construction.
+export type LlmFn = (prompt: string, data?: unknown) => Promise<string>;
+
+// The AsyncFunction constructor is not a global binding; reach it off an async
+// function's prototype. Lets the sandboxed body use `await llm(...)`.
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as {
+  new (...args: string[]): (...a: unknown[]) => Promise<unknown>;
+};
+
+// Default `llm` when execute_js is run without a session-provided one (e.g.
+// direct unit tests): calling it is a clear, catchable error rather than a
+// silent undefined.
+const llmUnavailable: LlmFn = async () => {
+  throw new Error('llm() is not available in this context');
+};
+
+export async function executeJs(
+  code: string,
+  rows: DataRow[],
+  llm: LlmFn = llmUnavailable
+): Promise<ExecuteJsResult> {
   try {
-    // eslint-disable-next-line no-new-func
-    const fn = new Function('rows', code);
-    const result = fn(rows);
+    const fn = new AsyncFunction('rows', 'llm', code);
+    const result = await fn(rows, llm);
     // Force through JSON so the result is always plain, serializable data —
     // matches every other tool's result shape and guards against the code
     // accidentally returning something (a DOM node, a class instance) that
@@ -769,12 +815,22 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
   },
   {
     name: 'write_file',
-    description: 'Write an intermediate artifact to the virtual filesystem (visible to the user).',
+    description:
+      'Write an intermediate artifact to the virtual filesystem (visible to the user). ' +
+      'Set derived=true when the content is model-derived — anything produced by an llm() ' +
+      'call inside execute_js (labels, classifications, summaries), not fetched from a data ' +
+      'source. Derived files are labelled "model-derived" and must never be cited as data.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'e.g. plan.md, indicator_shortlist.json' },
         content: { type: 'string' },
+        derived: {
+          type: 'boolean',
+          description:
+            'true if this content was produced via llm() (model-derived, not fetched). ' +
+            'Marks the file model-derived so it is never mistaken for fetched data.',
+        },
       },
       required: ['path', 'content'],
     },

@@ -10,6 +10,10 @@ import {
   explainMatch,
   parseImfIndicators,
   DEFAULT_SOURCE_IDS,
+  VFS,
+  executeJs,
+  type DataRow,
+  type LlmFn,
 } from './tools';
 
 describe('finish_explanation tool schema', () => {
@@ -239,6 +243,66 @@ describe('findSeriesWithReceipt — search-receipt payload', () => {
   });
 });
 
+describe('VFS provenance marker', () => {
+  it('records { derived, via } on a marked write and clears it on a plain re-write', () => {
+    const vfs = new VFS();
+    vfs.write('themes.json', '["rising","falling"]', { derived: true, via: 'llm' });
+    expect(vfs.files['themes.json']).toBe('["rising","falling"]');
+    expect(vfs.meta['themes.json']).toEqual({ derived: true, via: 'llm' });
+    // A subsequent plain write (no meta) must not leave a stale derived marker.
+    vfs.write('themes.json', 'fetched-later');
+    expect(vfs.meta['themes.json']).toBeUndefined();
+  });
+
+  it('leaves no meta entry for an ordinary fetched-data file', () => {
+    const vfs = new VFS();
+    vfs.write('plan.md', '# plan');
+    expect(vfs.meta['plan.md']).toBeUndefined();
+  });
+});
+
+describe('executeJs — RLM llm() primitive wiring', () => {
+  const rows: DataRow[] = [{ country: 'India', iso3: 'IND', year: 2020, value: 100 }];
+
+  it('awaits an injected llm() and returns its text through the result', async () => {
+    const llm: LlmFn = async (prompt) => 'LABEL:' + prompt;
+    const out = await executeJs('return await llm("hi");', rows, llm);
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe('LABEL:hi');
+  });
+
+  it('a thrown llm() is catchable inside the sandboxed code', async () => {
+    const llm: LlmFn = async () => {
+      throw new Error('boom');
+    };
+    const out = await executeJs(
+      'try { await llm("x"); return "no"; } catch (e) { return "caught:" + e.message; }',
+      rows,
+      llm
+    );
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe('caught:boom');
+  });
+
+  it('an uncaught llm() rejection surfaces as ok:false (error-receipt path)', async () => {
+    const llm: LlmFn = async () => {
+      throw new Error('provider down');
+    };
+    const out = await executeJs('await llm("x"); return 1;', rows, llm);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('provider down');
+  });
+
+  it('calling llm() with no session-provided primitive is a clear, catchable error', async () => {
+    const out = await executeJs(
+      'try { await llm("x"); return "no"; } catch (e) { return e.message; }',
+      rows
+    );
+    expect(out.ok).toBe(true);
+    expect(String(out.result)).toContain('not available');
+  });
+});
+
 vi.mock('./providers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./providers')>();
   return {
@@ -453,5 +517,223 @@ describe('message trimming', () => {
     expect(anyToolMessageHasFullRowDump).toBe(false);
     expect(toolMessages.length).toBeGreaterThan(0); // trimmed, not deleted. A short marker remains
     expect(toolMessages.some((m) => m.content?.includes('trimmed'))).toBe(true);
+  });
+});
+
+// ── RLM: bounded recursive llm() inside execute_js ────────────────────────
+// Drive real turns through createSession with complete() mocked. A stubbed
+// fetch seeds state.rows (execute_js refuses to run with none), then the
+// model's code makes llm() calls whose completions are the SAME mocked
+// complete() — so caps, receipts, provenance, and the error path are all
+// exercised without any network or live model.
+describe('RLM llm() inside execute_js', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    // A minimal, valid World Bank response so fetch_worldbank yields rows.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 2 },
+          [
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 },
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 110 },
+          ],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const llmReply = (text: string) => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  const fetchCall = (id = 'fetch1') =>
+    tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, id);
+
+  // All execute_js tool-results the model saw, parsed, deduped by call id.
+  function execResults(): any[] {
+    const out: any[] = [];
+    const seen = new Set<string>();
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) {
+        if (m.role === 'tool' && m.name === 'execute_js' && !seen.has(m.tool_call_id)) {
+          seen.add(m.tool_call_id);
+          try {
+            out.push(JSON.parse(m.content));
+          } catch {
+            out.push(m.content);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  const newSession = () => createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+  const capture = () => {
+    let last: any[] = [];
+    const cb = {
+      onTrace: (ev: any[]) => (last = ev),
+      onFiles: () => {},
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    return { cb, trace: () => last };
+  };
+
+  it('caps at 4 llm() calls per execute_js run; the 5th rejects catchably, and only 4 nested receipts are emitted', async () => {
+    const code =
+      'let ok = 0; let caught = ""; ' +
+      'for (let i = 0; i < 5; i++) { try { await llm("classify " + i, rows[0]); ok++; } catch (e) { caught = e.message; } } ' +
+      'return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    for (let i = 0; i < 4; i++) mockComplete.mockResolvedValueOnce(llmReply('label' + i));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    const llmEvents = trace().filter((e) => e.tool === 'llm');
+    expect(llmEvents.length).toBe(4); // the 5th never ran, so no 5th receipt
+    expect(llmEvents.every((e) => e.status === 'ok')).toBe(true);
+
+    const res = execResults()[0];
+    expect(res.ok).toBe(4);
+    expect(res.caught).toMatch(/per execute_js run/);
+  });
+
+  it('emits nested llm() receipts with prompt summary, data size, duration and tokens, ordered under their execute_js parent', async () => {
+    const code = 'await llm("summarize the slice", rows); return "ok";';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    mockComplete.mockResolvedValueOnce(llmReply('a summary'));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    const events = trace();
+    const ejIdx = events.findIndex((e) => e.tool === 'execute_js');
+    const llmIdx = events.findIndex((e) => e.tool === 'llm');
+    expect(ejIdx).toBeGreaterThanOrEqual(0);
+    // The child receipt is nested and ordered AFTER its execute_js parent.
+    expect(llmIdx).toBeGreaterThan(ejIdx);
+    const llmEv = events[llmIdx];
+    expect(llmEv.nested).toBe(true);
+    expect(llmEv.argSummary).toBe('summarize the slice');
+    expect(llmEv.argSummary.length).toBeLessThanOrEqual(80);
+    expect(typeof llmEv.dataBytes).toBe('number');
+    expect(llmEv.dataBytes).toBeGreaterThan(0);
+    expect(typeof llmEv.durationMs).toBe('number');
+    expect(typeof llmEv.tokens).toBe('number');
+    expect(llmEv.tokens).toBeGreaterThan(0);
+  });
+
+  it('shares an 8-call budget across execute_js runs in one turn; the 9th rejects with a per-turn error', async () => {
+    const loop = (n: number, catchIt = false) =>
+      `let ok = 0; let caught = ""; for (let i = 0; i < ${n}; i++) { ` +
+      (catchIt
+        ? 'try { await llm("c" + i, rows[0]); ok++; } catch (e) { caught = e.message; }'
+        : 'await llm("c" + i, rows[0]); ok++;') +
+      ' } return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        fetchCall(),
+        tc('execute_js', { code: loop(4) }, 'ejA'), // 4 → turn total 4
+        tc('execute_js', { code: loop(3) }, 'ejB'), // 3 → turn total 7
+        tc('execute_js', { code: loop(2, true) }, 'ejC'), // 1 ok (→8), 2nd rejected
+      ])
+    );
+    for (let i = 0; i < 8; i++) mockComplete.mockResolvedValueOnce(llmReply('l' + i)); // 4 + 3 + 1
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    // Exactly 8 successful llm() calls across the three runs; the 9th made no receipt.
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(8);
+    const [a, b, c] = execResults();
+    expect(a.ok).toBe(4);
+    expect(b.ok).toBe(3);
+    expect(c.ok).toBe(1);
+    expect(c.caught).toMatch(/per turn/);
+  });
+
+  it('rejects an over-size data slice before any model call or receipt', async () => {
+    const code =
+      'const big = []; for (let i = 0; i < 6000; i++) big.push({ i, s: "xxxxxxxxxx" }); ' +
+      'let caught = ""; try { await llm("summarize", big); } catch (e) { caught = e.message; } ' +
+      'return { caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    // No llm receipt, and complete() was only called for the two model turns +
+    // verify — never for a recursive llm() call (the size guard fired first).
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(0);
+    expect(execResults()[0].caught).toMatch(/too large/);
+  });
+
+  it('an uncaught llm() failure produces an error receipt and the main loop continues', async () => {
+    const code = 'await llm("x", rows[0]); return 1;';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    // The recursive llm()'s complete() rejects — uncaught in the model's code.
+    mockComplete.mockRejectedValueOnce(new Error('provider exploded'));
+    // A SECOND model turn proves the loop continued past the failed run.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Recovered.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    const llmEv = trace().find((e) => e.tool === 'llm');
+    expect(llmEv?.status).toBe('error');
+    expect(llmEv?.detail).toContain('provider exploded');
+    const ejEv = trace().find((e) => e.tool === 'execute_js');
+    expect(ejEv?.detail).toMatch(/^error:/);
+    expect(ejEv?.detail).toContain('provider exploded');
+    // Loop continued and reached finish.
+    expect(out.finding).toBe('Recovered.');
+  });
+
+  it('marks a model-derived write_file with the provenance flag on its trace event', async () => {
+    let files: Record<string, string> = {};
+    const cb = {
+      onTrace: () => {},
+      onFiles: (f: Record<string, string>) => (files = f),
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    let last: any[] = [];
+    const cb2 = { ...cb, onTrace: (ev: any[]) => (last = ev) };
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('write_file', { path: 'themes.json', content: '["rising","falling"]', derived: true }, 'w1'),
+        tc('write_file', { path: 'plan.md', content: '# plan' }, 'w2'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    await newSession().ask('q', cb2);
+
+    const writes = last.filter((e) => e.tool === 'write_file');
+    const derivedWrite = writes.find((e) => e.argSummary === 'themes.json');
+    const plainWrite = writes.find((e) => e.argSummary === 'plan.md');
+    expect(derivedWrite?.derived).toBe(true);
+    // A plain (fetched) artifact carries no derived marker.
+    expect(plainWrite?.derived).toBeFalsy();
+    expect(files['themes.json']).toBe('["rising","falling"]');
   });
 });

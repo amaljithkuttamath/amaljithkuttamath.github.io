@@ -1175,7 +1175,10 @@ const PRESETS = [
       }
 
       const row = document.createElement('div');
-      row.className = 'ch-trace-row ch-trace-' + e.status;
+      // A recursive llm() step renders as an indented child line-item under the
+      // execute_js step that spawned it, so the RLM recursion is visible.
+      row.className =
+        'ch-trace-row ch-trace-' + e.status + (e.nested ? ' ch-trace-nested' : '');
       const dot = document.createElement('span');
       dot.className = 'ch-trace-dot';
       const body = document.createElement('div');
@@ -1244,6 +1247,14 @@ const PRESETS = [
         d.textContent = e.detail;
         body.appendChild(d);
       }
+      // Provenance: a write_file whose content came from llm() is model-derived,
+      // never fetched data — labelled here so it can never be read as measured.
+      if (e.derived) {
+        const prov = document.createElement('span');
+        prov.className = 'ch-trace-derived';
+        prov.textContent = 'model-derived';
+        body.appendChild(prov);
+      }
       // Ink-stamped VERIFIED badge — only the verify step, only on a genuine pass.
       if (e.tool === 'verify' && e.pass === true) {
         const stampEl = document.createElement('span');
@@ -1261,7 +1272,13 @@ const PRESETS = [
       const meta = document.createElement('span');
       meta.className = 'ch-trace-meta';
       if (e.status === 'ok') {
-        const ms = Math.round(performance.now() - tb.startTimes[i]);
+        // Prefer a measured duration when the event carries one (llm() steps do,
+        // so a staged/offline render still shows a real time); otherwise fall
+        // back to this render's own timer.
+        const ms =
+          typeof e.durationMs === 'number'
+            ? e.durationMs
+            : Math.round(performance.now() - tb.startTimes[i]);
         meta.textContent = ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's';
       } else if (e.status === 'error') {
         meta.textContent = 'error';
@@ -1985,6 +2002,24 @@ const PRESETS = [
         renderTable(tb, rows, '');
         tb.dataDetails.open = true;
         dbg.chart = tb.chartInstance;
+        dbg.tb = tb;
+        return tb.root;
+      },
+      // Stage a trace through the REAL renderTrace path — same DOM, same
+      // receipt/nesting/provenance rendering — from a supplied TraceEvent[]
+      // (and optional VFS snapshot for inline-expandable write_file rows). No
+      // LLM call: the harness hands over a realistic event sequence (e.g. an
+      // execute_js step with nested llm() child receipts) and this drives the
+      // app's own renderer over it.
+      stageTrace(question: string, events: any[], files?: Record<string, string>) {
+        const tb = createTurnBlock();
+        allTurns.push(tb);
+        consoleEl.style.display = 'none';
+        tb.panel.style.display = 'block';
+        (tb.panel as HTMLDetailsElement).open = true;
+        renderQuestion(tb, question);
+        if (files) renderFiles(tb, files);
+        renderTrace(tb, events as TraceEvent[]);
         dbg.tb = tb;
         return tb.root;
       },
@@ -2920,6 +2955,57 @@ const PRESETS = [
     opacity: 0.8;
   }
   :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+
+  /* ── Nested llm() child receipts (RLM recursion) ─────────────────────────
+     A recursive llm() call inside execute_js renders as an indented child
+     line-item under its execute_js parent: same receipt aesthetic (dark,
+     JetBrains Mono), a smaller dot, and a subtle elbow connector back to the
+     rail, so the depth-1 recursion is legible without shouting. Amber stays
+     reserved for the in-flight dot (shared with every other running step). */
+  :global(.ch-trace-nested) {
+    padding: 7px 0 7px 40px;
+    border-top: none;
+  }
+  /* No dashed separator directly above a child — the connector already ties it
+     to the parent; keep the child group visually tight. */
+  :global(.ch-trace-row + .ch-trace-nested) { border-top: none; }
+  :global(.ch-trace-nested)::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: -2px;
+    height: 18px;
+    width: 12px;
+    border-left: 1px solid var(--fg-faint);
+    border-bottom: 1px solid var(--fg-faint);
+    border-bottom-left-radius: 5px;
+  }
+  :global(.ch-trace-nested .ch-trace-dot) {
+    left: 22px;
+    top: 12px;
+    width: 5px;
+    height: 5px;
+  }
+  :global(.ch-trace-nested .ch-trace-name) {
+    font-size: var(--text-tag);
+    opacity: 0.92;
+  }
+  :global(.ch-trace-nested .ch-trace-arg) { font-style: italic; opacity: 0.85; }
+
+  /* Provenance label on a model-derived (llm()-produced) write_file: an
+     amber-dashed chip, deliberately quiet, that keeps derived artifacts from
+     ever reading as fetched data. */
+  :global(.ch-trace-derived) {
+    align-self: flex-start;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    letter-spacing: 0.02em;
+    color: var(--fg-muted);
+    padding: 1px 6px;
+    border: 1px dashed color-mix(in srgb, var(--signal) 45%, var(--fg-faint));
+    border-radius: var(--radius-sm);
+  }
 
   /* ── Search-receipt card ────────────────────────────────────────────────
      find_series shows its work: a compact card on a darker ground reading

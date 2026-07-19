@@ -34,6 +34,17 @@ import {
 
 const MAX_TOOL_CALLS = 12;
 
+// RLM (Recursive Language Model) bounds for the llm() primitive exposed inside
+// execute_js. Hard caps, enforced in code: a run can make at most
+// MAX_LLM_PER_RUN calls, and a whole user turn at most MAX_LLM_PER_TURN across
+// every execute_js run in it (shared counter). Serialized `data` is refused
+// past LLM_DATA_CAP bytes so a single call can't smuggle the whole context
+// back into the model — the code must slice smaller. Exceeding any of these
+// rejects with a clear, catchable error the model's code can handle.
+const MAX_LLM_PER_RUN = 4;
+const MAX_LLM_PER_TURN = 8;
+const LLM_DATA_CAP = 20_000;
+
 export interface TraceEvent {
   tool: string;
   argSummary: string;
@@ -55,6 +66,21 @@ export interface TraceEvent {
   // searched, candidate count, top match + which terms/synonyms fired) that
   // the UI renders as a dedicated search-receipt card. UI-only.
   receipt?: SearchReceipt;
+  // Set on a recursive 'llm' step (an llm() call made from inside execute_js):
+  // renders as an indented child line-item under its execute_js parent, so the
+  // recursion is visible in the trace. The parent execute_js step immediately
+  // precedes this step's run in the event list.
+  nested?: boolean;
+  // Actual measured wall-clock duration (ms) for a step, when known at push
+  // time (the llm() receipts set this). The UI prefers it over its own
+  // render-time timer so a staged/offline render still shows a real duration.
+  durationMs?: number;
+  // Serialized-data size (bytes) attached to an llm() call — the size of the
+  // data slice the recursive call reasoned over. UI shows it on the receipt.
+  dataBytes?: number;
+  // Set true on a write_file step whose content is model-derived (produced via
+  // llm(), not fetched). Drives the subtle "model-derived" provenance label.
+  derived?: boolean;
 }
 
 export interface AgentCallbacks {
@@ -110,6 +136,7 @@ ${snippets}
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
    - correlate → relationship between two fetched indicators.
    - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.
+     Inside execute_js you may also \`await llm(prompt, dataSlice)\` — a bounded recursive model call for SEMANTIC work over data too big or tedious to hold in context: labelling/classifying/summarizing many rows (e.g. tag each country's trend as "rising"/"falling", group indicator names into themes). It returns TEXT only, no tools. Bounds (hard): at most ${MAX_LLM_PER_RUN} llm() calls per execute_js run and ${MAX_LLM_PER_TURN} per turn; the \`data\` you pass must serialize under ~${Math.round(LLM_DATA_CAP / 1000)}KB — slice smaller if it rejects. Over-cap/over-size calls throw a catchable error. Use llm() to reason ABOUT data, never to invent numbers: its output is model-derived, NOT fetched data.
 
 4. render_chart. line = time series · bar = ranking · scatter = two indicators · grouped-bar = a few countries side by side. The call's arguments ARE the spec — build them from step 3's result.
 
@@ -119,6 +146,7 @@ Rules:
 - Hard budget: ${MAX_TOOL_CALLS} tool calls. Never re-fetch data you already have.
 - Use ids from search results verbatim. Years are numbers.
 - Only the active databases listed above are available — do not mention or attempt any other source.
+- PROVENANCE: anything llm() produces is model-derived, not fetched. Never present it as a data value, cite it, or put it in a chart as if measured. If you save an llm()-derived artifact with write_file, set derived=true so it is labelled model-derived.
 - list_countries, write_file, read_file exist but are almost never needed.`;
 }
 
@@ -174,6 +202,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       cb.onFiles({ ...vfsFiles });
     });
     let totalCost = 0;
+    // Shared per-turn counter for recursive llm() calls across every execute_js
+    // run in this turn (the MAX_LLM_PER_TURN cap). Resets each turn by living
+    // here, in ask()'s scope.
+    let turnLlmCalls = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
     let turnKind: 'chart' | 'explanation' = 'chart';
     // The chart rendered during THIS turn only. state.chartSpec persists
@@ -270,10 +302,72 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev.detail = 'no data';
               break;
             }
-            let out = executeJs(code, state.rows);
+            // The bounded recursive llm() primitive for THIS execute_js run.
+            // Per-run cap is a local counter; the per-turn cap is the shared
+            // turnLlmCalls. Each successful/failed call emits a nested receipt
+            // (child line-item under this execute_js step). Text-only, one
+            // complete() call, no tools — depth-1 by construction.
+            let runLlmCalls = 0;
+            const llm = async (prompt: string, data?: unknown): Promise<string> => {
+              const p = String(prompt ?? '');
+              if (runLlmCalls >= MAX_LLM_PER_RUN) {
+                throw new Error(
+                  `llm() limit reached: max ${MAX_LLM_PER_RUN} calls per execute_js run. ` +
+                    'Do fewer, bigger-slice calls, or finish with what you have.'
+                );
+              }
+              if (turnLlmCalls >= MAX_LLM_PER_TURN) {
+                throw new Error(
+                  `llm() limit reached: max ${MAX_LLM_PER_TURN} calls per turn (across all execute_js runs).`
+                );
+              }
+              let serialized = '';
+              if (data !== undefined) {
+                serialized = JSON.stringify(data) ?? '';
+                if (serialized.length > LLM_DATA_CAP) {
+                  throw new Error(
+                    `llm() data too large: ${serialized.length} bytes serialized > ${LLM_DATA_CAP} cap. ` +
+                      'Slice the data smaller (fewer rows/fields per call) and try again.'
+                  );
+                }
+              }
+              // Count the call only once it's past every guard — a rejected
+              // (over-cap or over-size) call must not consume budget.
+              runLlmCalls++;
+              turnLlmCalls++;
+              const childEv = pushTrace({
+                tool: 'llm',
+                argSummary: p.slice(0, 80),
+                status: 'running',
+                nested: true,
+                dataBytes: serialized.length,
+              });
+              const started = Date.now();
+              const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
+              try {
+                const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
+                totalCost += estimateCost(cfg.model, res.usage);
+                childEv.status = 'ok';
+                childEv.durationMs = Date.now() - started;
+                childEv.tokens = res.usage.input + res.usage.output;
+                childEv.detail = serialized ? formatBytes(serialized.length) + ' in' : 'no data';
+                updateTrace();
+                return res.text ?? '';
+              } catch (err: any) {
+                childEv.status = 'error';
+                childEv.durationMs = Date.now() - started;
+                childEv.detail = 'llm() failed: ' + (err?.message ?? String(err));
+                updateTrace();
+                // Reject with a catchable error: user code may try/catch it;
+                // an uncaught rejection fails this execute_js run via the
+                // normal error-receipt path, and the main loop continues.
+                throw new Error('llm() failed: ' + (err?.message ?? String(err)));
+              }
+            };
+            let out = await executeJs(code, state.rows, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = executeJs('return (' + code + ')', state.rows);
+              out = await executeJs('return (' + code + ')', state.rows, llm);
             }
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =
@@ -288,8 +382,17 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             break;
           }
           case 'write_file': {
-            vfs.write(String(a.path), String(a.content ?? ''));
-            result = 'written';
+            // Provenance: a model-derived artifact (produced via llm()) is
+            // marked so the VFS entry carries { derived, via } and the trace
+            // shows a "model-derived" label — it must never read as fetched.
+            const derived = a.derived === true;
+            vfs.write(
+              String(a.path),
+              String(a.content ?? ''),
+              derived ? { derived: true, via: 'llm' } : undefined
+            );
+            if (derived) ev.derived = true;
+            result = derived ? 'written (model-derived)' : 'written';
             break;
           }
           case 'read_file': {
@@ -666,6 +769,11 @@ async function verify(
 }
 
 // ── Helpers ──
+// Compact byte size for the llm() receipt: "812 B", "1.2 KB".
+function formatBytes(n: number): string {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
+}
+
 function summarizeArgs(tool: string, a: Record<string, unknown>): string {
   switch (tool) {
     case 'find_series':
