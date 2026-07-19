@@ -1,6 +1,10 @@
 ---
 import Base from '../../layouts/Base.astro';
 import { PROVIDERS } from '../../lib/chitti/providers';
+import { sourcesByCategory } from '../../lib/chitti/tools';
+
+const SOURCE_GROUPS = sourcesByCategory();
+const SOURCE_COUNT = SOURCE_GROUPS.reduce((n, g) => n + g.sources.length, 0);
 import indicatorsData from '../../data/worldbank/indicators.json';
 
 // Curated indicators flattened for the client-side id → name lookup used in
@@ -157,7 +161,7 @@ const PRESETS = [
       <div class="ch-byok" id="ch-byok" hidden>
         <div class="ch-byok-body">
           <div class="ch-byok-head">
-            <span class="ch-byok-title">Model &amp; API key</span>
+            <span class="ch-byok-title">Model, key &amp; databases</span>
             <button type="button" class="ch-byok-close" id="ch-byok-close" aria-label="Close">✕</button>
           </div>
           <div class="ch-byok-row">
@@ -193,6 +197,56 @@ const PRESETS = [
             <div class="ch-keylinks" id="ch-keylinks"></div>
           </div>
           <p class="ch-provider-note" id="ch-provider-note" style="display:none"></p>
+
+          <!-- Database picker. Hard filter: Chitti answers only from the
+               selected databases. Built from the source registry (tools.ts),
+               grouped by category and searchable so it scales as databases are
+               added. Locked once a conversation starts; "+ new conversation"
+               re-enables it. -->
+          <div class="ch-byok-row ch-sources-row">
+            <div class="ch-sources" id="ch-sources" role="group" aria-label="Databases Chitti can answer from">
+              <div class="ch-sources-top">
+                <span class="ch-field-label">Databases</span>
+                <span class="ch-sources-count" id="ch-sources-count">{SOURCE_COUNT} of {SOURCE_COUNT}</span>
+                <div class="ch-sources-acts">
+                  <button type="button" class="ch-sources-act" id="ch-sources-all">All</button>
+                  <button type="button" class="ch-sources-act" id="ch-sources-none">Clear</button>
+                </div>
+              </div>
+              <input
+                type="search"
+                class="ch-sources-search"
+                id="ch-sources-search"
+                placeholder="Filter databases…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="ch-sources-list" id="ch-sources-list">
+                {SOURCE_GROUPS.map((g) => (
+                  <div class="ch-source-group" data-cat={g.category}>
+                    <div class="ch-source-cat">{g.category}</div>
+                    {g.sources.map((s) => (
+                      <button
+                        type="button"
+                        class="ch-source-item is-on"
+                        data-source={s.id}
+                        data-search={`${s.label} ${s.blurb} ${g.category}`.toLowerCase()}
+                        aria-pressed="true"
+                      >
+                        <span class="ch-source-check" aria-hidden="true"></span>
+                        <span class="ch-source-text">
+                          <span class="ch-source-name">{s.label}</span>
+                          <span class="ch-source-blurb">{s.blurb}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                <p class="ch-sources-empty" id="ch-sources-empty" hidden>No databases match.</p>
+              </div>
+              <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -608,6 +662,86 @@ const PRESETS = [
       qIn.value = b.dataset.q || '';
       askForm.requestSubmit();
     });
+  });
+
+  // ── Database picker ─────────────────────────────────────────────────────
+  // Toggling chips is a hard filter on which databases the session may use.
+  // At least one must stay on; trying to turn the last one off is a no-op.
+  const sourcesBox = $('ch-sources');
+  const sourcesHint = $('ch-sources-hint');
+  const sourcesCount = $('ch-sources-count');
+  const sourcesSearch = $('ch-sources-search') as HTMLInputElement;
+  const sourcesEmpty = $('ch-sources-empty');
+  const sourceItems = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.ch-source-item')
+  );
+  let sourcesLocked = false;
+
+  function selectedSources(): string[] {
+    return sourceItems.filter((b) => b.classList.contains('is-on')).map((b) => b.dataset.source || '');
+  }
+  function setSource(b: HTMLButtonElement, on: boolean) {
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  function updateSourcesCount() {
+    const n = selectedSources().length;
+    if (sourcesCount) sourcesCount.textContent = `${n} of ${sourceItems.length}`;
+    if (!sourcesLocked && sourcesHint) {
+      sourcesHint.textContent = n === 0
+        ? 'Pick at least one database to ask.'
+        : 'Chitti answers only from the selected databases.';
+      sourcesHint.classList.toggle('is-warn', n === 0);
+    }
+  }
+  // The hard filter binds when the session is created (first ask), so the
+  // picker locks for the rest of the conversation. "+ new conversation" clears
+  // the session and calls unlockSources().
+  function lockSources() {
+    sourcesLocked = true;
+    sourcesBox?.classList.add('is-locked');
+    sourceItems.forEach((b) => b.setAttribute('aria-disabled', 'true'));
+    if (sourcesSearch) sourcesSearch.disabled = true;
+    if (sourcesHint) {
+      sourcesHint.textContent = 'Locked for this conversation — start a new one to change.';
+      sourcesHint.classList.remove('is-warn');
+    }
+  }
+  function unlockSources() {
+    sourcesLocked = false;
+    sourcesBox?.classList.remove('is-locked');
+    sourceItems.forEach((b) => b.removeAttribute('aria-disabled'));
+    if (sourcesSearch) sourcesSearch.disabled = false;
+    updateSourcesCount();
+  }
+  sourceItems.forEach((b) => {
+    b.addEventListener('click', () => {
+      if (sourcesLocked) return;
+      setSource(b, !b.classList.contains('is-on'));
+      updateSourcesCount();
+    });
+  });
+  $('ch-sources-all')?.addEventListener('click', () => {
+    if (sourcesLocked) return;
+    sourceItems.forEach((b) => setSource(b, true));
+    updateSourcesCount();
+  });
+  $('ch-sources-none')?.addEventListener('click', () => {
+    if (sourcesLocked) return;
+    sourceItems.forEach((b) => setSource(b, false));
+    updateSourcesCount();
+  });
+  // Live filter: hide non-matching rows and any category group left empty.
+  sourcesSearch?.addEventListener('input', () => {
+    const q = sourcesSearch.value.trim().toLowerCase();
+    sourceItems.forEach((b) => { b.hidden = !!q && !(b.dataset.search || '').includes(q); });
+    let anyVisible = false;
+    document.querySelectorAll<HTMLElement>('.ch-source-group').forEach((g) => {
+      const vis = Array.from(g.querySelectorAll<HTMLElement>('.ch-source-item')).some((it) => !it.hidden);
+      g.hidden = !vis;
+      if (vis) anyVisible = true;
+    });
+    if (sourcesEmpty) sourcesEmpty.hidden = anyVisible;
   });
 
   // ── Status helpers ─────────────────────────────────────────────────────
@@ -1203,6 +1337,15 @@ const PRESETS = [
       return;
     }
 
+    // Hard filter needs at least one database. Only enforced on the first ask,
+    // when the session (and its source set) is created; later turns are locked.
+    if (!session && selectedSources().length === 0) {
+      openByok(true);
+      updateSourcesCount();
+      sourcesSearch?.focus();
+      return;
+    }
+
     const cfg: ProviderConfig = {
       provider: currentProvider(),
       model: modelSel.value,
@@ -1243,7 +1386,13 @@ const PRESETS = [
     tb.railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
 
     try {
-      if (!session) session = createSession(cfg);
+      // Bind the chosen databases to the session on first ask; the selection
+      // is locked for the rest of the conversation. "+ new conversation" clears
+      // `session` and unlocks the picker.
+      if (!session) {
+        session = createSession(cfg, { sources: selectedSources() });
+        lockSources();
+      }
       const out = await session.ask(question, {
         onTrace: (events) => renderTrace(tb, events),
         onFiles: (files) => renderFiles(tb, files),
@@ -1329,6 +1478,7 @@ const PRESETS = [
 
   newConvoBtn.addEventListener('click', () => {
     session = null;
+    unlockSources();
     // The latest turn is never collapsed (collapse only runs on prior turns
     // at submit), so its chart is still live here. Dispose before clearing the
     // DOM so ECharts releases its global registry entry and resize listener,
@@ -1606,6 +1756,151 @@ const PRESETS = [
     border-color: color-mix(in srgb, var(--fg) 30%, transparent);
     background: var(--bg-hover);
   }
+  /* ── Database picker: searchable, grouped, scrollable — scales with the
+        registry (hard filter over active sources) ── */
+  .ch-sources-row {
+    border-top: 1px solid var(--fg-faint);
+    padding-top: 12px;
+  }
+  .ch-sources {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .ch-sources.is-locked { opacity: 0.55; }
+  .ch-sources.is-locked .ch-source-item,
+  .ch-sources.is-locked .ch-sources-act { cursor: not-allowed; }
+
+  .ch-sources-top { display: flex; align-items: center; gap: 10px; }
+  .ch-sources-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  .ch-sources-acts { margin-left: auto; display: flex; gap: 6px; }
+  .ch-sources-act {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 2px 10px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  .ch-sources-act:hover {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--fg) 30%, transparent);
+  }
+
+  .ch-sources-search {
+    width: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 7px 11px;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+  }
+  .ch-sources-search::placeholder { color: var(--fg-muted); }
+  .ch-sources-search:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+
+  .ch-sources-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 210px;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+  .ch-source-group { display: flex; flex-direction: column; }
+  .ch-source-group[hidden] { display: none; }
+  .ch-source-cat {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    opacity: 0.7;
+    padding: 8px 2px 3px;
+  }
+
+  .ch-source-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    padding: 7px 9px;
+    cursor: pointer;
+    transition: background var(--duration) var(--ease), border-color var(--duration) var(--ease);
+  }
+  .ch-source-item[hidden] { display: none; }
+  .ch-source-item:hover { background: var(--bg-hover); }
+  .ch-source-check {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    border-radius: 4px;
+    border: 1px solid var(--fg-faint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ch-source-item.is-on {
+    border-color: color-mix(in srgb, var(--signal) 30%, transparent);
+    background: color-mix(in srgb, var(--signal) 7%, transparent);
+  }
+  .ch-source-item.is-on .ch-source-check {
+    border-color: var(--signal);
+    background: var(--signal);
+  }
+  .ch-source-item.is-on .ch-source-check::after {
+    content: '✓';
+    color: var(--bg);
+    font-size: 10px;
+    line-height: 1;
+  }
+  .ch-source-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ch-source-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg);
+  }
+  .ch-source-blurb {
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    line-height: 1.4;
+  }
+
+  .ch-sources-empty {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    padding: 8px 2px;
+    margin: 0;
+  }
+  .ch-sources-empty[hidden] { display: none; }
+
+  .ch-sources-hint {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    opacity: 0.75;
+    margin: 0;
+    text-align: left;
+  }
+  .ch-sources-hint.is-warn { color: var(--danger); opacity: 1; }
+
   .ch-btn {
     background: var(--fg);
     color: var(--bg);

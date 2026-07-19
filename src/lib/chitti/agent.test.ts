@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { TOOL_SCHEMAS } from './tools';
+import {
+  TOOL_SCHEMAS,
+  schemasForSources,
+  resolveSources,
+  datasetSourcesFor,
+  DEFAULT_SOURCE_IDS,
+} from './tools';
 
 describe('finish_explanation tool schema', () => {
   it('is registered with an explanation string parameter', () => {
@@ -7,6 +13,40 @@ describe('finish_explanation tool schema', () => {
     expect(schema).toBeDefined();
     expect(schema!.parameters.required).toContain('explanation');
     expect(schema!.parameters.properties.explanation).toBeDefined();
+  });
+});
+
+describe('source hard filter', () => {
+  const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
+
+  it('World-Bank-only sessions cannot see OWID/IMF tools', () => {
+    const n = names(['worldbank']);
+    expect(n).toContain('fetch_worldbank');
+    expect(n).not.toContain('fetch_owid');
+    expect(n).not.toContain('fetch_imf');
+    expect(n).not.toContain('search_datasets');
+  });
+
+  it('OWID-only sessions get the shared dataset tool but not IMF fetch', () => {
+    const n = names(['owid']);
+    expect(n).toContain('fetch_owid');
+    expect(n).toContain('search_datasets');
+    expect(n).not.toContain('fetch_imf');
+    expect(n).not.toContain('fetch_worldbank');
+    // The shared catalog is filtered to OWID datasets only.
+    expect(datasetSourcesFor(['owid'])).toEqual(['owid']);
+  });
+
+  it('always includes the source-agnostic core tools', () => {
+    for (const core of ['execute_js', 'render_chart', 'finish', 'finish_explanation']) {
+      expect(names(['worldbank'])).toContain(core);
+    }
+  });
+
+  it('empty or unknown selection falls back to all sources', () => {
+    expect(resolveSources([]).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
+    expect(resolveSources(['nope']).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
+    expect(schemasForSources(undefined).length).toBe(TOOL_SCHEMAS.length);
   });
 });
 
