@@ -48,6 +48,30 @@ const howIWork = [
   },
 ];
 
+// Trust, made concrete. This answers the CTO's flags (data, IP, compliance,
+// verification) — the objections nobody emails you about but everybody has.
+// NOTE (Amal): confirm the specifics before publishing — do you work in a
+// client's cloud, sign NDAs/DPAs, carry any certifications? Edit to match
+// what you'll actually commit to. Don't claim a cert you don't hold.
+const trust = [
+  {
+    step: 'Your data',
+    body: 'Privacy-first by default — on-device or in your own cloud, bring-your-own-key, no third-party retention. The tools on this site already work this way: nothing you paste leaves the page.',
+  },
+  {
+    step: 'Your IP',
+    body: 'You own everything I build — code, prompts, weights, and docs. No lock-in, no black box that only I can run.',
+  },
+  {
+    step: 'Regulated data',
+    body: 'I built and published a RAG system for healthcare, so I work within real data-handling constraints — PII / PHI minimization, access control, audit trails. Comfortable under NDA and with your DPA.',
+  },
+  {
+    step: 'Before it ships',
+    body: 'AI output is verified before it reaches your users: evals, confidence thresholds, and a clear record of how model- and AI-generated code was checked. Uncertainty is surfaced, not hidden.',
+  },
+];
+
 // Proof, written outcome-first. Founders read line 1; recruiters read the tags.
 const proof = [
   {
@@ -116,6 +140,23 @@ const proof = [
         <div class="step-row">
           <span class="step-label">{s.step}</span>
           <span class="step-body">{s.body}</span>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="work-section animate-in animate-in-delay-1">
+    <div class="section-header"><h2>Trust, concretely</h2></div>
+    <p class="section-lede">
+      &ldquo;Trustworthy&rdquo; has to mean something. Here is what it means for
+      your data, your IP, and your users &mdash; the same whether you are a CTO
+      adding to an eng org or a founder shipping solo.
+    </p>
+    <div class="steps">
+      {trust.map((t) => (
+        <div class="step-row">
+          <span class="step-label">{t.step}</span>
+          <span class="step-body">{t.body}</span>
         </div>
       ))}
     </div>
