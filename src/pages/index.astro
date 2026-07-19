@@ -67,9 +67,25 @@ const lab = [
         Open to senior roles &amp; a few project builds
       </span>
     </div>
-    <p class="cred">
-      Everything below runs in your browser. Nothing you paste leaves the page.
-    </p>
+  </section>
+
+  {/* The page used to CLAIM "everything below runs in your browser" and then
+      show cards describing software. This runs a real tokenizer instead, on
+      load, before any click. The claim and the proof are the same object.
+      If the vocabulary cannot be fetched, the block removes itself rather
+      than showing a plausible-looking fake split. */}
+  <section class="proof animate-in animate-in-delay-1" id="proof" hidden>
+    <div class="proof-bar">
+      <span class="live-dot" aria-hidden="true"></span>
+      <span>running in your browser</span>
+      <span class="proof-meta" id="proof-meta">loading GPT-4o vocabulary…</span>
+    </div>
+    <div class="proof-stage">
+      <p class="proof-src" id="proof-src"></p>
+      <div class="proof-tokens" id="proof-tokens" aria-label="The sentence above, split into tokens"></div>
+      <p class="proof-cap" id="proof-cap"></p>
+      <a href="/apps/tokenizer" class="proof-try">Type your own &rarr;</a>
+    </div>
   </section>
 
   <section class="lane animate-in animate-in-delay-1" aria-labelledby="lane-apps">
@@ -77,6 +93,10 @@ const lab = [
       <h2 id="lane-apps" class="lane-label">Apps</h2>
       <span class="lane-hint">things you'll use again</span>
     </div>
+    {/* One lead, then a scannable index. Eleven near-identical cards meant the
+        eye skimmed all of them and the strongest proof competed on equal
+        footing with the rest. Chitti keeps card weight; everything else drops
+        to a row so it can be read in one pass instead of chosen between. */}
     <a href="/apps/chitti" class="featured-card">
       <div class="featured-main">
         <div class="featured-head">
@@ -85,21 +105,18 @@ const lab = [
         </div>
         <p class="featured-tagline">Ask about the world. Get real numbers, cited.</p>
         <p class="featured-sub">
-          A browser-only agent over the World Bank Open Data API &mdash; it
-          plans, fetches, charts, and verifies its own answer. Bring your own
-          key.
+          A browser-only agent over the World Bank Open Data API. It plans,
+          fetches, charts, and verifies its own answer. Bring your own key.
         </p>
       </div>
       <span class="featured-cta">Open Chitti &rarr;</span>
     </a>
-    <div class="apps-grid">
+    <div class="app-index">
       {apps.map((a) => (
-        <a href={a.href} class="app-card">
-          <div class="app-card-head">
-            <span class="app-title">{a.title}</span>
-            <span class="app-tag">{a.tag}</span>
-          </div>
-          <p class="app-tagline">{a.tagline}</p>
+        <a href={a.href} class="app-row">
+          <span class="app-row-title">{a.title}</span>
+          <span class="app-row-desc">{a.tagline}</span>
+          <span class="app-row-tag">{a.tag}</span>
         </a>
       ))}
     </div>
@@ -136,11 +153,194 @@ const lab = [
       ))}
     </div>
   </section>
+  <script is:inline type="module">
+    // The proof block loads a REAL vocabulary and runs a REAL split, the same
+    // way /apps/tokenizer does. It is hidden until that succeeds: a hardcoded
+    // split shown under the words "running in your browser" would be a lie in
+    // the one place the site is claiming it never fabricates. Failure removes
+    // the block instead of degrading to a plausible fake.
+    const SENTENCE = 'Shipping AI you can trust means being able to show why it works.';
+    const el = (id) => document.getElementById(id);
+
+    try {
+      const { AutoTokenizer, env } = await import(
+        'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3'
+      );
+      env.allowLocalModels = false;
+      const tok = await AutoTokenizer.from_pretrained('Xenova/gpt-4o');
+      const ids = tok.encode(SENTENCE);
+      const pieces = ids.map((id) => tok.decode([id]));
+
+      el('proof-src').textContent = SENTENCE;
+      const box = el('proof-tokens');
+      pieces.forEach((p, i) => {
+        const s = document.createElement('span');
+        s.className = 'tk';
+        // Make the leading space visible: token boundaries are the point, and
+        // an invisible one reads as a rendering bug rather than a real split.
+        s.textContent = p.replace(/^ /, '·');
+        s.style.animationDelay = i * 45 + 'ms';
+        box.appendChild(s);
+      });
+
+      el('proof-meta').textContent = 'GPT-4o · real vocabulary';
+      el('proof-cap').innerHTML =
+        'That is <b>' + pieces.length + '</b> tokens. Every one is billed, on every call, ' +
+        'and the split changes with the model and the language.';
+      el('proof').hidden = false;
+    } catch {
+      // Offline, blocked CDN, or an unsupported browser. Say nothing rather
+      // than claim something unverified.
+      el('proof').remove();
+    }
+  </script>
 </Base>
 
 <style>
   .intro {
     padding: var(--space-2xl) 0 var(--space-xl);
+  }
+
+  /* ── Proof block: the signature element ── */
+  .proof {
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    overflow: hidden;
+    margin-bottom: var(--space-3xl);
+  }
+
+  .proof-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem var(--space-md);
+    border-bottom: 1px solid var(--fg-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+
+  .proof-meta {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .proof-stage {
+    padding: var(--space-md);
+  }
+
+  .proof-src {
+    font-family: var(--font-serif);
+    font-size: var(--text-body-lg);
+    color: var(--fg);
+    margin: 0 0 var(--space-md);
+    line-height: 1.5;
+  }
+
+  .proof-tokens {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+  }
+
+  .proof-tokens .tk {
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: var(--fg);
+    opacity: 0;
+    animation: tokIn 0.28s var(--ease) forwards;
+  }
+
+  @keyframes tokIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .proof-cap {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin: var(--space-md) 0 0;
+  }
+
+  .proof-cap :global(b) {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+  .proof-try {
+    display: inline-block;
+    margin-top: var(--space-md);
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--signal);
+    border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+    border-radius: var(--radius-full);
+    padding: 3px 11px;
+    transition: background var(--duration) var(--ease);
+  }
+
+  .proof-try:hover {
+    background: var(--bg-hover);
+  }
+
+  /* Reduced motion: the tokens still arrive, they just do not travel. */
+  @media (prefers-reduced-motion: reduce) {
+    .proof-tokens .tk { animation: none; opacity: 1; }
+  }
+
+  /* ── App index: a list, not a grid of near-identical cards ── */
+  .app-index {
+    margin-top: var(--space-md);
+  }
+
+  .app-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    transition: border-color var(--duration) var(--ease);
+  }
+
+  .app-row:hover {
+    border-color: var(--accent-color);
+  }
+
+  .app-row-title {
+    font-size: var(--text-item-title);
+    font-weight: 500;
+    color: var(--fg);
+    white-space: nowrap;
+    transition: color var(--duration) var(--ease);
+  }
+
+  .app-row:hover .app-row-title {
+    color: var(--signal);
+  }
+
+  .app-row-desc {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+
+  .app-row-tag {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 560px) {
+    .app-row { flex-wrap: wrap; gap: 0.3rem; }
+    .app-row-tag { margin-left: 0; order: 3; flex-basis: 100%; }
   }
 
   .kicker {
@@ -227,14 +427,6 @@ const lab = [
     display: inline-block;
     animation: pulse 3s ease-in-out infinite;
     flex-shrink: 0;
-  }
-
-  .cred {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    letter-spacing: 0.01em;
-    margin: 0;
   }
 
   /* ── Lane ── */
@@ -342,65 +534,6 @@ const lab = [
     flex-shrink: 0;
   }
 
-  /* ── Apps grid ── */
-  .apps-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-  }
-
-  .app-card {
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-md);
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    text-decoration: none;
-    color: var(--fg);
-    transition: border-color var(--duration) var(--ease),
-                background var(--duration) var(--ease);
-  }
-
-  .app-card:hover {
-    border-color: var(--accent-color);
-    background: var(--bg-hover);
-  }
-
-  .app-card-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-    margin-bottom: 0.35rem;
-  }
-
-  .app-title {
-    font-size: var(--text-body);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-
-  .app-tag {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    text-transform: lowercase;
-    letter-spacing: 0.02em;
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    border-radius: 100px;
-    padding: 0.05rem 0.5rem;
-    flex-shrink: 0;
-  }
-
-  .app-tagline {
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-    line-height: 1.5;
-    margin: 0;
-  }
-
   /* ── Radar strip ── */
   .radar-strip {
     display: flex;
@@ -499,9 +632,6 @@ const lab = [
 
   /* ── Responsive ── */
   @media (max-width: 600px) {
-    .apps-grid {
-      grid-template-columns: 1fr;
-    }
 
     .featured-card {
       flex-direction: column;
