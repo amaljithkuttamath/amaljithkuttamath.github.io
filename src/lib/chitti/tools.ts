@@ -379,22 +379,55 @@ export interface Dataset {
   note?: string;
 }
 
-// OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv
+// OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv,
+// so every id here round-trips: a find_series hit fetches through the router's
+// OWID branch unchanged. This is a hand-curated set of long-standing, canonical
+// OWID grapher slugs (the "never fabricate" constraint outweighs raw count — an
+// invented slug would 404 on fetch, breaking the round-trip). Names are worded
+// to avoid stealing World-Bank-preferred queries (e.g. the Gini entry says
+// "income inequality", not "Gini coefficient", so the WB Gini index still wins
+// that phrasing). The live catalog fallback (owidCatalog) widens coverage past
+// this list whenever the network is reachable.
 const OWID_DATASETS: [string, string][] = [
+  // Health & mortality
   ['life-expectancy', 'Life expectancy at birth (years)'],
   ['child-mortality', 'Child mortality rate (under-5, per 100 live births)'],
+  ['maternal-mortality', 'Maternal mortality ratio (per 100,000 live births)'],
+  ['prevalence-of-undernourishment', 'Prevalence of undernourishment (% of population)'],
+  ['death-rates-from-air-pollution', 'Death rate from air pollution (per 100,000 persons)'],
+  ['daily-per-capita-caloric-supply', 'Daily supply of calories per person (kcal)'],
+  // Demographics & population
   ['population', 'Population'],
+  // "persons" not "people": the bare word "people" false-matched colloquial
+  // queries like "how many people are online" (a World Bank internet series).
+  ['population-density', 'Population density (persons per km²)'],
+  ['median-age', 'Median age of the population (years)'],
+  ['children-per-woman', 'Children per woman (total fertility)'],
+  // Economy, poverty & inequality
   ['gdp-per-capita-worldbank', 'GDP per capita (international-$, PPP)'],
   ['human-development-index', 'Human Development Index (HDI)'],
-  ['happiness-cantril-ladder', 'Self-reported life satisfaction (Cantril ladder, 0-10)'],
+  ['share-of-population-in-extreme-poverty', 'Share of population in extreme poverty (%)'],
+  // (Gini/income inequality intentionally omitted here: the World Bank Gini
+  // index already covers it, and the OWID slug's id — "economic-inequality-…" —
+  // false-matched the "economic output" → GDP query. Left out to keep ranking
+  // clean; WB owns that metric.)
+  // Environment & climate
   ['co-emissions-per-capita', 'CO2 emissions per capita (tonnes)'],
   ['annual-co2-emissions-per-country', 'Annual CO2 emissions (tonnes)'],
+  ['cumulative-co2-emissions', 'Cumulative CO2 emissions (tonnes)'],
+  ['consumption-co2-per-capita', 'Consumption-based CO2 emissions per capita (tonnes)'],
+  ['temperature-anomaly', 'Global temperature anomaly (°C vs pre-industrial)'],
+  ['plastic-waste-per-capita', 'Plastic waste generated per person (kg/day)'],
+  // Energy
   ['share-electricity-renewables', 'Share of electricity from renewables (%)'],
+  ['per-capita-energy-use', 'Energy use per person (kWh)'],
+  // Technology
   ['share-of-individuals-using-the-internet', 'Share of population using the internet (%)'],
+  // Society, education & governance
   ['cross-country-literacy-rates', 'Literacy rate (%)'],
+  ['happiness-cantril-ladder', 'Self-reported life satisfaction (Cantril ladder, 0-10)'],
   ['homicide-rate-unodc', 'Homicide rate (per 100,000 people)'],
-  ['share-of-population-in-extreme-poverty', 'Share of population in extreme poverty (%)'],
-  ['daily-per-capita-caloric-supply', 'Daily supply of calories per person (kcal)'],
+  ['political-regime', 'Political regime (democracy classification)'],
 ];
 
 // IMF DataMapper codes — JSON at imf.org/external/datamapper/api/v1/<code>.
@@ -1200,6 +1233,70 @@ async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
   }
 }
 
+// Parse an OWID grapher-catalog listing into namespaced series entries. OWID
+// has no single documented, keyless, CORS-open JSON endpoint that lists every
+// grapher slug, so this stays deliberately defensive about shape: a bare array
+// of chart objects, or an { charts | items | results } wrapper around one, with
+// the human title under any of title/name/chartName and the slug under slug/id.
+// Anything it can't read is skipped rather than thrown. Pure + exported so the
+// live-catalog path is unit-testable from a fixture without the network.
+export function parseOwidCatalog(data: unknown): { id: string; name: string }[] {
+  const root = data as Record<string, unknown> | unknown[];
+  const arr: unknown[] = Array.isArray(root)
+    ? root
+    : Array.isArray((root as any)?.charts) ? (root as any).charts
+    : Array.isArray((root as any)?.items) ? (root as any).items
+    : Array.isArray((root as any)?.results) ? (root as any).results
+    : [];
+  const out: { id: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue;
+    const rec = e as Record<string, unknown>;
+    const slug = String(rec.slug ?? rec.id ?? '').trim().replace(/^owid:/, '');
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const name = String(rec.title ?? rec.name ?? rec.chartName ?? slug).trim() || slug;
+    out.push({ id: 'owid:' + slug, name });
+  }
+  return out;
+}
+
+// The live OWID grapher catalog, fetched once and cached for the session — the
+// graceful widen past the curated OWID_DATASETS list (same idea as the World
+// Bank search API and the live IMF DataMapper catalog). Same host Chitti already
+// pulls OWID *data* from, so it shares that host's browser-open CORS policy.
+// NOTE (offline-honest): OWID publishes no confirmed keyless JSON index of all
+// grapher slugs, so this endpoint is a best-effort candidate. It is EXPECTED to
+// fail for many sessions; when it does, searchOwidCatalog swallows the error and
+// find_series simply returns the (expanded) curated hits. The parser above — not
+// this URL — is the tested contract.
+let owidCatalogCache: { id: string; name: string }[] | null = null;
+async function owidCatalog(): Promise<{ id: string; name: string }[]> {
+  if (owidCatalogCache) return owidCatalogCache;
+  const resp = await fetch('https://ourworldindata.org/charts.json');
+  if (!resp.ok) throw new Error('OWID charts HTTP ' + resp.status);
+  owidCatalogCache = parseOwidCatalog(await resp.json());
+  return owidCatalogCache;
+}
+
+// Search the live OWID catalog with the shared scorer. Any failure (offline,
+// CORS, no such endpoint, shape change) degrades to an empty list — findSeries
+// then just returns the curated OWID hits, never an error.
+async function searchOwidCatalog(query: string): Promise<SeriesHit[]> {
+  try {
+    const cat = await owidCatalog();
+    return cat
+      .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => ({ id: x.d.id, name: x.d.name, source: 'owid' }));
+  } catch {
+    return [];
+  }
+}
+
 // One search across every active database, so the model calls a single tool
 // instead of choosing between per-source search tools and guessing which
 // database holds the metric. Each source contributes hits from its own
@@ -1233,6 +1330,16 @@ export async function findSeriesWithReceipt(
   if (catalogSources.length) {
     const ds = searchDatasets(query, catalogSources);
     hits.push(...ds.map((d) => ({ id: d.id, name: d.name, source: d.source })));
+  }
+
+  // OWID live fallback: the curated OWID list, though expanded, still can't
+  // cover OWID's full grapher catalog, so when OWID is active and few curated
+  // hits came back, widen with the live grapher index. Curated hits are pushed
+  // first, so dedup keeps their friendlier names. Any failure degrades to [] —
+  // the curated hits still stand (OWID has no confirmed keyless catalog endpoint,
+  // so this fallback is expected to be empty in many sessions).
+  if (active.has('owid') && hits.filter((h) => h.source === 'owid').length < 3) {
+    hits.push(...(await searchOwidCatalog(query)));
   }
 
   // IMF live fallback: the curated IMF list is tiny, so when IMF is active and

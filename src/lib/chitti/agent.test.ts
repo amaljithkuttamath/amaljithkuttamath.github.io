@@ -10,6 +10,7 @@ import {
   scoreSeries,
   explainMatch,
   parseImfIndicators,
+  parseOwidCatalog,
   DEFAULT_SOURCE_IDS,
   VFS,
   executeJs,
@@ -208,6 +209,41 @@ describe('parseImfIndicators — live IMF catalog', () => {
   });
 });
 
+describe('parseOwidCatalog — live OWID grapher catalog', () => {
+  it('maps a bare array of grapher charts to namespaced series', () => {
+    const parsed = parseOwidCatalog([
+      { slug: 'life-expectancy', title: 'Life expectancy' },
+      { slug: 'co-emissions-per-capita', title: 'CO₂ emissions per capita' },
+    ]);
+    expect(parsed).toContainEqual({ id: 'owid:life-expectancy', name: 'Life expectancy' });
+    expect(parsed.find((p) => p.id === 'owid:co-emissions-per-capita')?.name).toBe('CO₂ emissions per capita');
+  });
+
+  it('unwraps { charts | items | results } and reads title/name/chartName', () => {
+    expect(parseOwidCatalog({ charts: [{ slug: 'population', name: 'Population' }] }))
+      .toEqual([{ id: 'owid:population', name: 'Population' }]);
+    expect(parseOwidCatalog({ results: [{ slug: 'median-age', chartName: 'Median age' }] }))
+      .toEqual([{ id: 'owid:median-age', name: 'Median age' }]);
+  });
+
+  it('strips an existing owid: prefix, dedupes, and is defensive against junk', () => {
+    expect(parseOwidCatalog(null)).toEqual([]);
+    expect(parseOwidCatalog({})).toEqual([]);
+    expect(parseOwidCatalog({ charts: 'nope' })).toEqual([]);
+    // owid: prefix stripped, blank/duplicate/non-object entries dropped, title
+    // missing → slug becomes the name.
+    expect(
+      parseOwidCatalog([
+        { slug: 'owid:gdp-per-capita-worldbank' },
+        { slug: 'gdp-per-capita-worldbank', title: 'dup' },
+        { id: '' },
+        null,
+        'string',
+      ])
+    ).toEqual([{ id: 'owid:gdp-per-capita-worldbank', name: 'gdp-per-capita-worldbank' }]);
+  });
+});
+
 describe('findSeries — cross-source search', () => {
   // The IMF live-catalog fallback calls fetch(); stub it to reject so these
   // stay offline and deterministic — which also exercises graceful degradation.
@@ -241,6 +277,24 @@ describe('findSeries — cross-source search', () => {
   it('finds IMF forecast series and namespaces the id', async () => {
     const hits = await findSeries('inflation', ['imf']);
     expect(hits.some((h) => h.source === 'imf' && h.id.startsWith('imf:'))).toBe(true);
+  });
+
+  it('still returns curated OWID hits when the live grapher catalog is unreachable', async () => {
+    // fetch rejects → owidCatalog() throws → searchOwidCatalog() returns []
+    // → expanded curated OWID hits must still come through (graceful degradation).
+    const hits = await findSeries('temperature anomaly', ['owid']);
+    expect(hits.some((h) => h.source === 'owid' && h.id === 'owid:temperature-anomaly')).toBe(true);
+  });
+
+  it('surfaces newly-curated OWID topics that the old thin list lacked', async () => {
+    for (const [q, id] of [
+      ['plastic waste per capita', 'owid:plastic-waste-per-capita'],
+      ['political regime', 'owid:political-regime'],
+      ['median age', 'owid:median-age'],
+    ] as const) {
+      const hits = await findSeries(q, ['owid']);
+      expect(hits[0]).toMatchObject({ source: 'owid', id });
+    }
   });
 });
 
@@ -1183,6 +1237,30 @@ describe('fetch_series router + session cache (driven)', () => {
     expect(inds.has('SH.DYN.MORT')).toBe(true);
     expect(inds.has('owid:life-expectancy')).toBe(true);
     expect(inds.has('imf:NGDP_RPCH')).toBe(true);
+  });
+
+  it('round-trips a newly-curated OWID slug: find_series id fetches via the OWID branch', async () => {
+    // A catalog hit's id must be fetchable by the existing OWID fetcher. Take a
+    // slug added in this increment, confirm search surfaces it, then fetch that
+    // exact id and confirm it reaches the grapher CSV endpoint for that slug.
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    // recordingFetch answers OWID URLs with CSV (no .json), so the live-catalog
+    // fallback throws → curated hits stand; the new slug must be among them.
+    const hits = await findSeries('temperature anomaly', ['owid']);
+    const id = hits.find((h) => h.id === 'owid:temperature-anomaly')!.id;
+    expect(id).toBe('owid:temperature-anomaly');
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id, countries: ['IND'], year_start: 2020, year_end: 2020 }, 'ta'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['owid']).ask('q', cb);
+    expect(urls.some((u) => u.includes('ourworldindata.org/grapher/temperature-anomaly.csv'))).toBe(true);
+    expect(new Set(out.rows.map((r) => r.indicator)).has('owid:temperature-anomaly')).toBe(true);
   });
 
   it('an unrecognized namespace is a clear routing error, not a crash or a stray fetch', async () => {

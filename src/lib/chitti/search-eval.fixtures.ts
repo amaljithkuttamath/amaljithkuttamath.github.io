@@ -88,4 +88,15 @@ export const EVAL_CASES: EvalCase[] = [
   { query: 'homicide rate', source: 'owid', id: 'owid:homicide-rate-unodc' },
   { query: 'extreme poverty', source: 'owid', id: 'owid:share-of-population-in-extreme-poverty' },
   { query: 'calories per person', source: 'owid', id: 'owid:daily-per-capita-caloric-supply' },
+
+  // ── Newly covered OWID topics (expanded curated grapher catalog) ──────
+  // All slugs below are real OWID grapher slugs and are absent from the World
+  // Bank curated set, so they win cross-source with every database on.
+  { query: 'global temperature anomaly', source: 'owid', id: 'owid:temperature-anomaly', note: 'climate: not in World Bank catalog' },
+  { query: 'plastic waste per capita', source: 'owid', id: 'owid:plastic-waste-per-capita' },
+  { query: 'cumulative co2 emissions', source: 'owid', id: 'owid:cumulative-co2-emissions', note: 'distinct from annual/per-capita CO2' },
+  { query: 'consumption based co2 emissions', source: 'owid', id: 'owid:consumption-co2-per-capita', note: 'consumption- vs production-based accounting' },
+  { query: 'political regime', source: 'owid', id: 'owid:political-regime', note: 'governance/democracy classification' },
+  { query: 'median age', source: 'owid', id: 'owid:median-age' },
+  { query: 'prevalence of undernourishment', source: 'owid', id: 'owid:prevalence-of-undernourishment', note: 'food security: not in the World Bank curated set' },
 ];
