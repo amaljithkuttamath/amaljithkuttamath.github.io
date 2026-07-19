@@ -220,24 +220,26 @@ const proof = [
 
   <section id="start" class="work-section work-cta animate-in animate-in-delay-2">
     <div class="section-header"><h2>Start a project</h2></div>
-    <div class="steps flow-steps">
-      {engagementFlow.map((f) => (
-        <div class="step-row">
-          <span class="step-label">{f.step}</span>
-          <span class="step-body">{f.body}</span>
-        </div>
+    <ol class="stepper">
+      {engagementFlow.map((f, i) => (
+        <li class="stepper-step">
+          <span class="stepper-badge">{i + 1}</span>
+          <span class="stepper-k">{f.step}</span>
+          <span class="stepper-v">{f.body}</span>
+        </li>
       ))}
-    </div>
+    </ol>
     <p>
       Tell me the problem in a few lines &mdash; what you are trying to ship and
-      what &ldquo;working&rdquo; looks like. If it is a fit, I will come back
-      with a scoped read; if it is not, I will tell you that too.
+      what &ldquo;working&rdquo; looks like. You will get back an honest, scoped
+      read within <strong>two working days</strong>: a clear yes with a plan, or
+      a no with the reason. No pitch, no obligation.
     </p>
-    <a href="mailto:kuttamath.amaljith@gmail.com?subject=Project%20build" class="cta-primary">kuttamath.amaljith@gmail.com</a>
+    <a href="mailto:kuttamath.amaljith@gmail.com?subject=Project%20build&body=What%20I%27m%20trying%20to%20ship%3A%0A%0AWhat%20%22working%22%20looks%20like%3A%0A%0ATimeline%20or%20constraints%3A%0A" class="cta-primary">Send me the problem &rarr;</a>
     <p class="cta-alt">
-      Hiring for a full-time role instead? Here is my
-      <a href="/resume.pdf">résumé (PDF)</a> and
-      <a href="/about">background</a>.
+      Not ready to talk? <a href="/apps">See what I have shipped &rarr;</a>
+      &nbsp;&middot;&nbsp;
+      Hiring for a full-time role? <a href="/resume.pdf">Résumé (PDF)</a>
     </p>
   </section>
 </Base>
@@ -379,9 +381,65 @@ const proof = [
     line-height: 1.6;
   }
 
-  /* Engagement flow sits above the contact copy */
-  .flow-steps {
-    margin-bottom: var(--space-md);
+  /* Engagement flow — a visual stepper: process shown, not just listed */
+  .stepper {
+    list-style: none;
+    margin: 0 0 var(--space-lg);
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-md);
+  }
+
+  .stepper-step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding-top: 2.2rem;
+  }
+
+  .stepper-badge {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    background: color-mix(in srgb, var(--signal) 10%, var(--bg));
+    color: var(--signal);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+
+  /* connector line from each badge to the next */
+  .stepper-step:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    top: 0.8rem;
+    left: 1.6rem;
+    right: calc(-1 * var(--space-md));
+    height: 1px;
+    background: var(--fg-faint);
+  }
+
+  .stepper-k {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg);
+  }
+
+  .stepper-v {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.55;
   }
 
   /* Testimonial / reference */
@@ -510,6 +568,26 @@ const proof = [
     .proof-meta {
       flex-direction: column;
       gap: 0.2rem;
+    }
+
+    /* Stepper stacks; the connector becomes a vertical spine */
+    .stepper {
+      grid-template-columns: 1fr;
+      gap: var(--space-lg);
+    }
+
+    .stepper-step {
+      padding-top: 0;
+      padding-left: 2.4rem;
+    }
+
+    .stepper-step:not(:last-child)::before {
+      top: 1.6rem;
+      left: 0.8rem;
+      right: auto;
+      bottom: calc(-1 * var(--space-lg));
+      width: 1px;
+      height: auto;
     }
   }
 </style>
