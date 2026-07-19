@@ -1,0 +1,388 @@
+---
+import Base from '../layouts/Base.astro';
+
+// ─────────────────────────────────────────────────────────────
+// Single narrative, two reading depths:
+//   • Founders read the outcome line (top of each block).
+//   • Recruiters read the proof underneath (stack, repos, paper).
+// One page serves both — no audience toggle, no second front door.
+//
+// NOTE (Amal): anywhere you see [[ ... ]] is a real fact only you
+// have. Fill those in before publishing — they're what make the
+// case studies land instead of read as generic.
+// ─────────────────────────────────────────────────────────────
+
+// What I take on — bounded, de-risked builds.
+const engagements = [
+  {
+    title: 'Ship an LLM feature that has to work',
+    body: 'Agents, RAG, or model-backed features that need to be right in production — not a demo that falls over on the second prompt.',
+  },
+  {
+    title: 'Make an AI system you can trust',
+    body: 'Evaluation harnesses, confidence and calibration, and verification so you know when the model is guessing — before your users do.',
+  },
+  {
+    title: 'Debug a model that misbehaves',
+    body: 'When outputs are wrong or weird and nobody knows why: interpretability and probing to find the actual cause, not a prompt band-aid.',
+  },
+];
+
+// How I de-risk the engagement (this is what founders are really buying).
+const howIWork = [
+  {
+    step: 'Scope',
+    body: 'We define one bounded problem with a clear finish line. Fixed scope, not an open-ended retainer you have to babysit.',
+  },
+  {
+    step: 'Week one',
+    body: 'You get something real in your hands in the first week — a working slice or a sharp go/no-go read — so you are never paying to wait.',
+  },
+  {
+    step: 'Verify',
+    body: 'Everything ships with a way to check it: evals, confidence, and receipts. If the model is unsure, the system says so.',
+  },
+  {
+    step: 'Hand off',
+    body: 'You get code you own and can maintain, documented — not a black box that only I can touch.',
+  },
+];
+
+// Proof, written outcome-first. Founders read line 1; recruiters read the tags.
+const proof = [
+  {
+    outcome: 'Industrial machines fail without warning, and unplanned downtime is expensive. I co-built digital twins that predicted failures before they happened — turning reactive repairs into scheduled maintenance.',
+    org: 'RadianArc (co-founder)',
+    metric: '[[add one real number — e.g. downtime cut, failures caught early]]',
+    tags: ['digital twins', 'predictive maintenance', 'python · torch · gcp'],
+    href: null,
+  },
+  {
+    outcome: 'Clinical teams needed answers grounded in the literature, not model guesses. I built and validated a RAG system for healthcare that a peer-reviewed journal published.',
+    org: 'MS thesis → published paper',
+    metric: 'Peer-reviewed in Quality Management in Health Care',
+    tags: ['rag', 'retrieval', 'evaluation'],
+    href: 'https://doi.org/10.1097/QMH.0000000000000525',
+  },
+  {
+    outcome: 'Five AI tools shipped and running live in the browser — no backend, no signup, nothing you paste leaves the page. Proof that I ship things people actually use, and that verification is baked in (Chitti checks its own answers; Probability X-ray shows the confidence behind every word).',
+    org: 'Shipped apps',
+    metric: 'Chitti · Tokenizer Arena · PDF Lens · Probability X-ray · GGUF Inspect',
+    tags: ['agents', 'webgpu · wasm', 'live'],
+    href: '/apps',
+  },
+];
+---
+
+<Base
+  title="Work with me · Amaljith Kuttamath"
+  description="I take on bounded project builds: shipping AI features teams can trust in production, with evaluation and verification baked in. Outcomes, proof, and how I work."
+>
+  <section class="page-header animate-in">
+    <p class="kicker">Trustworthy AI in production</p>
+    <h1>Ship AI you can trust</h1>
+    <p class="lede">
+      I help teams put AI features into production and actually trust the output
+      &mdash; with evaluation, confidence, and verification built in, not bolted
+      on. I take on <strong>bounded project builds</strong>: one clear problem, a
+      real result, code you own.
+    </p>
+    <div class="cta-row">
+      <a href="#start" class="cta-primary">Tell me the problem &rarr;</a>
+      <span class="avail"><span class="avail-dot" aria-hidden="true"></span>Open to a few project builds</span>
+    </div>
+  </section>
+
+  <section class="work-section animate-in animate-in-delay-1">
+    <div class="section-header"><h2>What I take on</h2></div>
+    <div class="engagement-list">
+      {engagements.map((e) => (
+        <div class="engagement">
+          <h3 class="engagement-title">{e.title}</h3>
+          <p class="engagement-body">{e.body}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="work-section animate-in animate-in-delay-1">
+    <div class="section-header"><h2>How I work</h2></div>
+    <p class="section-lede">
+      The risk in hiring an AI engineer is paying for a black box that never
+      ships. Here is how I take that off the table.
+    </p>
+    <div class="steps">
+      {howIWork.map((s) => (
+        <div class="step-row">
+          <span class="step-label">{s.step}</span>
+          <span class="step-body">{s.body}</span>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section class="work-section animate-in animate-in-delay-2">
+    <div class="section-header"><h2>Proof, not promises</h2></div>
+    <div class="proof-list">
+      {proof.map((p) => (
+        <div class="proof-card">
+          <p class="proof-outcome">{p.outcome}</p>
+          <div class="proof-meta">
+            <span class="proof-org">{p.org}</span>
+            {p.href ? (
+              <a class="proof-metric" href={p.href} target={p.href.startsWith('http') ? '_blank' : null} rel={p.href.startsWith('http') ? 'noopener noreferrer' : null}>{p.metric} &rarr;</a>
+            ) : (
+              <span class="proof-metric">{p.metric}</span>
+            )}
+          </div>
+          <div class="proof-tags">
+            {p.tags.map((t) => <span class="proof-tag">{t}</span>)}
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section id="start" class="work-section work-cta animate-in animate-in-delay-2">
+    <div class="section-header"><h2>Start a project</h2></div>
+    <p>
+      Tell me the problem in a few lines &mdash; what you are trying to ship and
+      what &ldquo;working&rdquo; looks like. If it is a fit, I will come back
+      with a scoped read; if it is not, I will tell you that too.
+    </p>
+    <a href="mailto:kuttamath.amaljith@gmail.com?subject=Project%20build" class="cta-primary">kuttamath.amaljith@gmail.com</a>
+    <p class="cta-alt">
+      Hiring for a full-time role instead? Here is my
+      <a href="/resume.pdf">résumé (PDF)</a> and
+      <a href="/about">background</a>.
+    </p>
+  </section>
+</Base>
+
+<style>
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--signal);
+    margin: 0 0 0.5rem;
+  }
+
+  .lede {
+    font-size: var(--text-body-lg);
+    color: var(--fg);
+    line-height: 1.75;
+    max-width: 60ch;
+    margin: 0.75rem 0 var(--space-lg);
+  }
+
+  .section-lede {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    max-width: 60ch;
+    margin: 0 0 var(--space-md);
+  }
+
+  .cta-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+  }
+
+  .cta-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fg);
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    transition: border-color var(--duration) var(--ease),
+                background var(--duration) var(--ease);
+  }
+
+  .cta-primary:hover {
+    border-color: var(--signal);
+    background: var(--bg-hover);
+  }
+
+  .avail {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    letter-spacing: 0.02em;
+  }
+
+  .avail-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+    display: inline-block;
+    animation: pulse 3s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  .work-section {
+    margin-bottom: var(--space-xl);
+  }
+
+  /* What I take on */
+  .engagement-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .engagement {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+  }
+
+  .engagement-title {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35rem;
+  }
+
+  .engagement-body {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* How I work */
+  .steps {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .step-row {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    gap: var(--space-md);
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--fg-faint);
+    align-items: baseline;
+  }
+
+  .step-row:first-child {
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  .step-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--signal);
+  }
+
+  .step-body {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    line-height: 1.6;
+  }
+
+  /* Proof */
+  .proof-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .proof-card {
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+  }
+
+  .proof-outcome {
+    font-size: var(--text-body);
+    color: var(--fg);
+    line-height: 1.6;
+    margin: 0 0 0.6rem;
+    max-width: 62ch;
+  }
+
+  .proof-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+  }
+
+  .proof-org {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    font-weight: 500;
+    color: var(--fg);
+  }
+
+  .proof-metric {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+  }
+
+  a.proof-metric:hover {
+    color: var(--signal);
+  }
+
+  .proof-tags {
+    display: flex;
+    gap: 0.375rem;
+    flex-wrap: wrap;
+  }
+
+  .proof-tag {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 0.05rem 0.5rem;
+  }
+
+  /* CTA */
+  .work-cta p {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    max-width: 60ch;
+    margin: 0 0 var(--space-md);
+  }
+
+  .cta-alt {
+    margin-top: var(--space-md) !important;
+  }
+
+  @media (max-width: 640px) {
+    .step-row {
+      grid-template-columns: 1fr;
+      gap: 0.15rem;
+    }
+
+    .proof-meta {
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+  }
+</style>
