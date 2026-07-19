@@ -64,6 +64,9 @@
   /* Transitions */
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   --duration: 0.15s;
+  /* Press feedback only. A press should feel instant; 0.15s reads as lag when
+     the change is meant to land under the finger. */
+  --duration-fast: 0.08s;
 }
 
 /* Light theme: opt-in via the nav toggle. Dark is the default for everyone. */
@@ -283,6 +286,16 @@ nav .theme-toggle {
 
 nav .theme-toggle:hover {
   color: var(--accent-color);
+}
+
+/* Press feedback fires on pointer-down, not on click, so the response is
+   immediate. The press goes to full ink rather than dipping: the resting color
+   is already --fg-muted, so a dip would be invisible to anyone pressing without
+   hovering first, which is every touch user. Color only, no transform, so this
+   needs no reduced-motion variant. */
+nav .theme-toggle:active {
+  color: var(--accent-color);
+  transition-duration: var(--duration-fast);
 }
 
 /* ── Post list ─────────────────────────────────── */
@@ -899,12 +912,33 @@ footer a:hover {
   .hero { padding: 2rem 0; }
 }
 
-/* Respect reduced-motion preference */
+/* Respect reduced-motion preference.
+
+   Reduced motion means "no vestibular motion", not "no feedback". Suppressing
+   every transition also removes the color and opacity changes that tell a user
+   their click landed, which costs comprehension without reducing discomfort.
+   So: kill transforms and the motion they carry, keep color and opacity.
+
+   Transitions are enumerated rather than blanket-disabled because
+   `transition-duration: 0.01ms !important` on `*` would take the color
+   feedback with it. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
+    /* Transform-driven motion is the vestibular trigger; drop it entirely. */
+    transition-property: color, background-color, border-color, opacity,
+      text-decoration-color, fill, stroke !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
+
+  /* Entrance reveals: keep the fade, drop the 8px travel. */
+  .animate-in {
+    animation: fadeInReduced 0.2s var(--ease) both;
+  }
+
   html { scroll-behavior: auto; }
+}
+
+@keyframes fadeInReduced {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
