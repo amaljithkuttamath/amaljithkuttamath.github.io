@@ -93,9 +93,13 @@ const PRESETS = [
         <!-- The user's question, shown chat-style at the top of the turn. -->
         <p class="ch-turn-q" style="display:none"></p>
 
-        <!-- Status line (loading/error only; success reads from the answer) -->
-        <div class="ch-status" style="display:none">
-          <span class="ch-status-dot"></span>
+        <!-- Status line (loading/error only; success reads from the answer).
+             role="status" (polite live region) so the run's progress and its
+             final "Done"/error is announced without a screen-reader user
+             watching the screen. The streaming trace below is NOT a live
+             region — it re-renders wholesale each frame and would spam. -->
+        <div class="ch-status" style="display:none" role="status" aria-live="polite" aria-atomic="true">
+          <span class="ch-status-dot" aria-hidden="true"></span>
           <span class="ch-status-msg">Planning…</span>
         </div>
 
@@ -122,7 +126,7 @@ const PRESETS = [
         <!-- The answer, after the reasoning. A <div>, not <p>, because
              explanation answers render markdown (paragraphs/lists) as
              block elements. -->
-        <section class="ch-answer" style="display:none">
+        <section class="ch-answer" style="display:none" role="region" aria-label="Answer">
           <div class="ch-finding"></div>
           <!-- Answer-level verification cue: hidden on a genuine pass (the amber
                VERIFIED stamp lives in the trace receipt), a muted dashed tag on
@@ -139,14 +143,22 @@ const PRESETS = [
               <span class="ch-chart-title"></span>
               <span class="ch-chart-unit"></span>
             </figcaption>
-            <div class="ch-chart"></div>
+            <!-- Canvas is opaque to assistive tech; role="img" + a computed
+                 aria-label (set in renderChart) give it a text summary. -->
+            <div class="ch-chart" role="img"></div>
           </figure>
         </div>
 
         <!-- Supporting evidence: raw data + citations, below the chart. -->
         <section class="ch-meta" style="display:none">
           <details class="ch-data" style="display:none">
-            <summary>Raw data (<span class="ch-data-count">0</span> rows) · <button type="button" class="ch-csv">Download CSV</button></summary>
+            <!-- The CSV button lives in the disclosure body, not the <summary>:
+                 an interactive control nested inside another (the summary is
+                 itself a button) is invalid and unreachable for some AT. -->
+            <summary>Raw data (<span class="ch-data-count">0</span> rows)</summary>
+            <div class="ch-data-actions">
+              <button type="button" class="ch-csv">Download CSV</button>
+            </div>
             <div class="ch-table-scroll">
               <table class="ch-table"></table>
             </div>
@@ -169,10 +181,10 @@ const PRESETS = [
            click events from non-interactive page areas to document, so
            outside-tap-to-close needs a real element with its own listener. -->
       <div class="ch-byok-backdrop" id="ch-byok-backdrop" hidden></div>
-      <div class="ch-byok" id="ch-byok" hidden>
+      <div class="ch-byok" id="ch-byok" hidden role="dialog" aria-modal="true" aria-labelledby="ch-byok-title" tabindex="-1">
         <div class="ch-byok-body">
           <div class="ch-byok-head">
-            <span class="ch-byok-title">Connect</span>
+            <span class="ch-byok-title" id="ch-byok-title">Connect</span>
             <button type="button" class="ch-byok-close" id="ch-byok-close" aria-label="Close">✕</button>
           </div>
 
@@ -226,7 +238,7 @@ const PRESETS = [
             <div class="ch-byok-row ch-model-row">
               <div class="ch-modelpick" id="ch-modelpick">
                 <div class="ch-modelpick-top">
-                  <span class="ch-field-label">Model</span>
+                  <span class="ch-field-label" id="ch-modelpick-label">Model</span>
                   <span class="ch-modelpick-count" id="ch-modelpick-count"></span>
                 </div>
                 <input
@@ -234,10 +246,11 @@ const PRESETS = [
                   class="ch-modelpick-search"
                   id="ch-model-search"
                   placeholder="Search models…"
+                  aria-label="Search models"
                   autocomplete="off"
                   spellcheck="false"
                 />
-                <div class="ch-modelpick-list" id="ch-modelpick-list"></div>
+                <div class="ch-modelpick-list" id="ch-modelpick-list" role="group" aria-labelledby="ch-modelpick-label"></div>
                 <p class="ch-modelpick-empty" id="ch-modelpick-empty" hidden>No models match.</p>
                 <select id="ch-model" class="ch-select" hidden aria-hidden="true" tabindex="-1"></select>
               </div>
@@ -263,6 +276,7 @@ const PRESETS = [
                 class="ch-sources-search"
                 id="ch-sources-search"
                 placeholder="Filter databases…"
+                aria-label="Filter databases"
                 autocomplete="off"
                 spellcheck="false"
               />
@@ -319,6 +333,7 @@ const PRESETS = [
           class="ch-q"
           rows="1"
           placeholder="Ask about the world…"
+          aria-label="Ask about the world"
           spellcheck="false"
         ></textarea>
         <div class="ch-composer-foot">
@@ -376,6 +391,13 @@ const PRESETS = [
   import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
   import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
+  import {
+    chartAriaLabel,
+    verificationCueText,
+    verificationStampLabel,
+    focusTrapTarget,
+    FOCUSABLE_SELECTOR,
+  } from '../../lib/chitti/a11y';
 
   // ── Elements ──────────────────────────────────────────────────────────
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -427,11 +449,24 @@ const PRESETS = [
   // The config panel is a plain div toggled open/closed (not <details>, so the
   // trigger button can live inside the composer form). openByok(true/false)
   // is the single entry point; the chip button and outside-click drive it.
+  // The sheet is a modal dialog: opening moves focus into it and closing
+  // returns focus to the chip that opened it, so a keyboard user never loses
+  // their place. Focus is only pulled back to the trigger when it was still
+  // inside the sheet at close time (an explicit close), never when a run has
+  // already moved focus elsewhere.
   function openByok(open: boolean) {
+    const wasOpen = !byokPanel.hidden;
     byokPanel.hidden = !open;
     $('ch-byok-backdrop').hidden = !open;
     byokSum.setAttribute('aria-expanded', String(open));
-    if (open) setSettingsOpen(!!keyIn.value.trim()); // key-first: reveal only once connected
+    if (open) {
+      setSettingsOpen(!!keyIn.value.trim()); // key-first: reveal only once connected
+      // Move focus into the dialog so its label is announced and Tab is
+      // trapped. The container is focusable (tabindex=-1) but not a tab stop.
+      if (!wasOpen) requestAnimationFrame(() => byokPanel.focus());
+    } else if (wasOpen && byokPanel.contains(document.activeElement)) {
+      byokSum.focus();
+    }
     syncSheetToKeyboard();
   }
   byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
@@ -447,6 +482,23 @@ const PRESETS = [
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !byokPanel.hidden) openByok(false);
+  });
+  // Focus trap: while the sheet is open, Tab cycles within it. The pure
+  // focusTrapTarget() decides when to wrap (at an edge) vs. let the browser
+  // handle a natural in-bounds Tab; querying focusables at each keystroke keeps
+  // the collapsed model/database disclosure (hidden ⇒ not focusable) correct.
+  byokPanel.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || byokPanel.hidden) return;
+    const items = Array.from(
+      byokPanel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+    ).filter((el) => el.getClientRects().length > 0 || el === document.activeElement);
+    const active = document.activeElement as HTMLElement | null;
+    const idx = active ? items.indexOf(active) : -1;
+    const target = focusTrapTarget(idx, items.length, e.shiftKey);
+    if (target !== null) {
+      e.preventDefault();
+      items[target]?.focus();
+    }
   });
 
   const consoleEl = $('ch-console');
@@ -1351,6 +1403,10 @@ const PRESETS = [
           const stampEl = document.createElement('span');
           stampEl.className = 'ch-stamp';
           stampEl.textContent = 'verified';
+          // The rubber-stamp styling carries the "passed a check" meaning
+          // visually; role="img" + aria-label speak it in plain words.
+          stampEl.setAttribute('role', 'img');
+          stampEl.setAttribute('aria-label', verificationStampLabel());
           body.appendChild(stampEl);
           if (e.confidence && e.confidence !== 'none') {
             const c = document.createElement('div');
@@ -1801,6 +1857,9 @@ const PRESETS = [
     clearRowHighlight(tb);
     bindChartLinking(tb);
     tb.chartTitle.textContent = spec.title;
+    // The canvas reads as nothing to a screen reader, so the container carries
+    // a text summary of what it plots (type + title + unit + series).
+    tb.chartEl.setAttribute('aria-label', chartAriaLabel(spec));
     // Unit/axis description lives in the card header, not as an ECharts
     // y-axis `name` — long unit strings ("deaths per 1,000 live births")
     // were clipping against the container's left edge when rendered inside
@@ -1852,7 +1911,7 @@ const PRESETS = [
     if (!rows.length) { tb.dataDetails.style.display = 'none'; return; }
     tb.dataDetails.style.display = 'block';
     tb.dataCount.textContent = String(rows.length);
-    const head = '<thead><tr><th>Country</th><th>ISO3</th><th>Year</th><th>Value</th></tr></thead>';
+    const head = '<thead><tr><th scope="col">Country</th><th scope="col">ISO3</th><th scope="col">Year</th><th scope="col">Value</th></tr></thead>';
     const shown = rows.slice(0, 500);
     const body =
       '<tbody>' +
@@ -1984,19 +2043,15 @@ const PRESETS = [
     const el = tb.verifyEl;
     el.textContent = '';
     el.className = 'ch-verify';
-    if (!v || v.status === 'verified') { el.style.display = 'none'; return; }
+    const text = verificationCueText(v);
+    if (!text) { el.style.display = 'none'; return; }
     el.style.display = 'block';
     const tag = document.createElement('span');
     tag.className = 'ch-verify-tag';
-    if (v.status === 'unavailable') {
-      el.classList.add('ch-verify-unavailable');
-      tag.textContent = 'verification unavailable — provider error';
-    } else {
-      // could-not-verify: name the first concrete doubt when we have one.
-      el.classList.add('ch-verify-unverified');
-      const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
-      tag.textContent = 'could not verify — ' + reason;
-    }
+    // The tag's own text is the full screen-reader equivalent — the dashed vs.
+    // dotted border only tints the two states apart visually.
+    el.classList.add(v!.status === 'unavailable' ? 'ch-verify-unavailable' : 'ch-verify-unverified');
+    tag.textContent = text;
     el.appendChild(tag);
   }
 
@@ -2123,7 +2178,9 @@ const PRESETS = [
     // Bring the just-created turn up to the top of the scroll area so the
     // active exchange sits under the header and reads top-to-bottom down to
     // the pinned composer, instead of the answer landing far from the input.
-    requestAnimationFrame(() => tb.root.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    requestAnimationFrame(() =>
+      tb.root.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+    );
     renderFiles(tb, {});
 
     const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
@@ -2360,6 +2417,26 @@ const PRESETS = [
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* Accessible second-tier muted text. The base --fg-muted only just clears
+       AA on the dark ground (≈4.5:1), so the app's habit of dimming small mono
+       text further with `opacity` dropped receipt meta, hints, and category
+       labels to ~2–3:1. This nudges --fg-muted a hair toward --fg (theme-aware:
+       toward the light ink in light mode) for a genuine ≈5.5:1, and the rules
+       that used opacity now use this colour with no opacity instead. */
+    --ch-meta: color-mix(in srgb, var(--fg-muted) 85%, var(--fg));
+    /* AA-safe danger for error text on the elevated trace ground, where the
+       base --danger lands at ~4.3:1. Brightened toward --fg (theme-aware);
+       still unmistakably the error red. */
+    --ch-danger: color-mix(in srgb, var(--danger) 80%, var(--fg));
+  }
+  /* Keyboard focus is a consistent thin amber ring, offset, on every
+     interactive element in the app — including the JS-built picker rows (hence
+     :global). Never removed without this replacement. Pointer focus stays
+     ring-free: focus-visible only fires for keyboard/AT, so a mouse user at
+     100% zoom sees no change. */
+  .ch :global(:is(a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])):focus-visible) {
+    outline: 2px solid color-mix(in srgb, var(--signal) 65%, transparent);
+    outline-offset: 2px;
   }
   /* Two-register type system, matching the rest of the site: prose (the
      question, the finding, the welcome copy) in the site's sans/serif so
@@ -2501,10 +2578,20 @@ const PRESETS = [
   .ch-send-working svg { animation: ch-spin 0.8s linear infinite; }
   @keyframes ch-spin { to { transform: rotate(360deg); } }
   /* The only rotation on the site. Under reduced motion, swap the spin for an
-     opacity pulse: still reads as "working", without the rotating glyph. */
+     opacity pulse: still reads as "working", without the rotating glyph. The
+     rest of the app's motion is swept here too: the CTA shake goes, the panel
+     /answer/evidence reveals keep their fade but drop the 4px travel, and the
+     rubber-stamp rotation flattens. Colour/opacity feedback is untouched (the
+     site-wide reduced-motion rule in global.css keeps those transitions). */
   @media (prefers-reduced-motion: reduce) {
     .ch-send-working svg { animation: ch-pulse 1.2s ease-in-out infinite; }
     @keyframes ch-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    /* Horizontal shake on the "add a key" nudge — pure vestibular motion. */
+    .ch-byok-nudge { animation: none; }
+    /* Entrance reveals: fadeInReduced (global) is opacity-only, no translateY. */
+    .ch-panel, .ch-answer, .ch-meta { animation-name: fadeInReduced; }
+    /* The stamp's rubber-stamp tilt is decorative motion-adjacent flair. */
+    :global(.ch-stamp) { transform: none; }
   }
   /* Empty state: a centered welcome that fills the space between the header
      and the docked composer. No card/box, it's an invitation, not a form. */
@@ -2552,7 +2639,10 @@ const PRESETS = [
     resize: none;
     min-height: 68px;
   }
-  .ch-q:focus { outline: none; }
+  /* Suppress the UA outline only for pointer focus; keyboard focus keeps the
+     amber focus-visible ring above, and the whole bar shows a border shift via
+     .ch-inputbar:focus-within either way. */
+  .ch-q:focus:not(:focus-visible) { outline: none; }
   .ch-q::placeholder { color: var(--fg-muted); opacity: 0.55; }
 
   .ch-ask-foot {
@@ -2578,7 +2668,7 @@ const PRESETS = [
     font-family: var(--font-sans);
     font-size: var(--text-body);
     background: var(--bg-elevated);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-md);
     padding: 10px 16px;
@@ -2641,10 +2731,8 @@ const PRESETS = [
     font-size: var(--text-label);
   }
   .ch-sources-search::placeholder { color: var(--fg-muted); }
-  .ch-sources-search:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
-  }
+  .ch-sources-search:focus { border-color: color-mix(in srgb, var(--signal) 45%, transparent); }
+  .ch-sources-search:focus:not(:focus-visible) { outline: none; }
 
   .ch-sources-list {
     display: flex;
@@ -2661,8 +2749,7 @@ const PRESETS = [
     font-size: var(--text-tag);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    opacity: 0.7;
+    color: var(--ch-meta);
     padding: 8px 2px 3px;
   }
 
@@ -2713,7 +2800,7 @@ const PRESETS = [
   }
   .ch-source-blurb {
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     line-height: 1.4;
   }
 
@@ -2729,8 +2816,7 @@ const PRESETS = [
   .ch-sources-hint {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.75;
+    color: var(--ch-meta);
     margin: 0;
     text-align: left;
   }
@@ -2764,10 +2850,8 @@ const PRESETS = [
     font-size: var(--text-label);
   }
   .ch-modelpick-search::placeholder { color: var(--fg-muted); }
-  .ch-modelpick-search:focus {
-    outline: none;
-    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
-  }
+  .ch-modelpick-search:focus { border-color: color-mix(in srgb, var(--signal) 45%, transparent); }
+  .ch-modelpick-search:focus:not(:focus-visible) { outline: none; }
   .ch-modelpick-list {
     display: flex;
     flex-direction: column;
@@ -2785,8 +2869,7 @@ const PRESETS = [
     font-size: var(--text-tag);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    opacity: 0.7;
+    color: var(--ch-meta);
     padding: 8px 2px 3px;
   }
   :global(.ch-model-item) {
@@ -2870,8 +2953,7 @@ const PRESETS = [
   :global(.ch-model-fact) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.85;
+    color: var(--ch-meta);
   }
   :global(.ch-model-fact)::before { content: '· '; opacity: 0.6; }
   .ch-modelpick-empty {
@@ -2918,7 +3000,7 @@ const PRESETS = [
     border-radius: var(--radius-full);
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     cursor: pointer;
     min-width: 0;
     transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
@@ -3030,7 +3112,8 @@ const PRESETS = [
     font-size: var(--text-small);
     transition: border-color var(--duration) var(--ease);
   }
-  .ch-select:focus, .ch-input:focus { outline: none; border-color: var(--accent-color); }
+  .ch-select:focus, .ch-input:focus { border-color: var(--accent-color); }
+  .ch-select:focus:not(:focus-visible), .ch-input:focus:not(:focus-visible) { outline: none; }
   .ch-input::placeholder { color: var(--fg-muted); opacity: 0.6; }
 
   .ch-save {
@@ -3131,7 +3214,7 @@ const PRESETS = [
     list-style: none;
     font-family: var(--font-mono);
     font-size: var(--text-label);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     min-width: 0;
   }
   .ch-panel-sum::-webkit-details-marker { display: none; }
@@ -3161,7 +3244,7 @@ const PRESETS = [
     align-items: baseline;
     gap: 10px;
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3244,11 +3327,10 @@ const PRESETS = [
   :global(.ch-trace-ts) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.55;
+    color: var(--ch-meta);
     flex-shrink: 0;
   }
-  :global(.ch-trace-sep) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); opacity: 0.5; }
+  :global(.ch-trace-sep) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--ch-meta); }
   :global(.ch-trace-name) {
     font-family: var(--font-mono);
     font-size: var(--text-label);
@@ -3259,16 +3341,15 @@ const PRESETS = [
   :global(.ch-trace-arg) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     overflow-wrap: break-word;
   }
   :global(.ch-trace-detail) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.8;
+    color: var(--ch-meta);
   }
-  :global(.ch-trace-error .ch-trace-detail) { color: var(--danger); }
+  :global(.ch-trace-error .ch-trace-detail) { color: var(--ch-danger); }
 
   /* ── Nested llm() child receipts (RLM recursion) ─────────────────────────
      A recursive llm() call inside execute_js renders as an indented child
@@ -3304,7 +3385,7 @@ const PRESETS = [
     font-size: var(--text-tag);
     opacity: 0.92;
   }
-  :global(.ch-trace-nested .ch-trace-arg) { font-style: italic; opacity: 0.85; }
+  :global(.ch-trace-nested .ch-trace-arg) { font-style: italic; }
 
   /* Provenance label on a model-derived (llm()-produced) write_file: an
      amber-dashed chip, deliberately quiet, that keeps derived artifacts from
@@ -3345,19 +3426,17 @@ const PRESETS = [
     gap: 6px;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
   }
   :global(.ch-receipt-num) {
     color: var(--signal);
     font-weight: 600;
   }
   :global(.ch-receipt-arrow) {
-    color: var(--fg-muted);
-    opacity: 0.55;
+    color: var(--ch-meta);
   }
   :global(.ch-receipt-toplabel) {
-    color: var(--fg-muted);
-    opacity: 0.75;
+    color: var(--ch-meta);
   }
   :global(.ch-receipt-match) {
     display: flex;
@@ -3375,8 +3454,7 @@ const PRESETS = [
   :global(.ch-receipt-source) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.75;
+    color: var(--ch-meta);
     white-space: nowrap;
   }
   :global(.ch-receipt-source)::before { content: '('; }
@@ -3388,20 +3466,21 @@ const PRESETS = [
     gap: 6px;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
   }
-  :global(.ch-receipt-lead) { opacity: 0.7; }
+  :global(.ch-receipt-lead) { color: var(--ch-meta); }
   :global(.ch-receipt-syn) {
     display: inline-flex;
     align-items: baseline;
     gap: 4px;
-    color: var(--fg-muted);
-    opacity: 0.75;
+    color: var(--ch-meta);
   }
   :global(.ch-receipt-term) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    /* A hair stronger than --ch-meta: the term sits on a lighter chip fill, so
+       the plain meta tone would land at ~4.4:1 against it. */
+    color: color-mix(in srgb, var(--fg-muted) 65%, var(--fg));
     background: color-mix(in srgb, var(--fg-faint) 60%, transparent);
     border-radius: var(--radius-sm);
     padding: 0 4px;
@@ -3414,8 +3493,11 @@ const PRESETS = [
   /* Completed steps settle quietly — dimmed, not struck through. The old
      strike-through made every finished line read as an error/cancellation
      and left the whole rail illegible once a run completed. */
-  :global(.ch-trace-ok .ch-trace-name),
-  :global(.ch-trace-ok .ch-trace-arg) {
+  /* Dim the (bright --fg) tool name so a finished row recedes; the arg is
+     already muted and dimming it too dropped it below AA on the panel ground,
+     so it keeps its --ch-meta colour and the settled look still reads from the
+     name fading back toward the muted register. */
+  :global(.ch-trace-ok .ch-trace-name) {
     opacity: 0.65;
   }
   /* Error/retry line-items: restyled to read as a torn/crossed-out receipt
@@ -3443,8 +3525,7 @@ const PRESETS = [
     text-decoration: line-through;
     text-decoration-color: var(--danger);
     text-decoration-thickness: 1.5px;
-    color: var(--danger);
-    opacity: 0.75;
+    color: var(--ch-danger);
   }
   :global(.ch-trace-meta-col) {
     display: flex;
@@ -3455,15 +3536,14 @@ const PRESETS = [
   :global(.ch-trace-meta) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     white-space: nowrap;
   }
   /* Per-step token count, receipt-style, right-aligned under the duration. */
   :global(.ch-trace-tokens) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
-    opacity: 0.6;
+    color: var(--ch-meta);
     white-space: nowrap;
   }
 
@@ -3501,23 +3581,24 @@ const PRESETS = [
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted));
+    /* AA-safe on the elevated trace ground (the danger/muted mix landed at
+       ~4.3:1); still the muted honest-counterpart red, never amber. */
+    color: var(--ch-danger);
   }
   :global(.ch-trace-unavailable) {
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     font-style: italic;
   }
   :global(.ch-verify-issues) {
     margin-top: 3px;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
   }
   :global(.ch-verify-issues > summary) {
     cursor: pointer;
     list-style: none;
-    color: var(--fg-muted);
-    opacity: 0.85;
+    color: var(--ch-meta);
   }
   :global(.ch-verify-issues > summary)::-webkit-details-marker { display: none; }
   :global(.ch-verify-issues > summary)::before { content: '▸ '; color: var(--fg-muted); }
@@ -3552,7 +3633,7 @@ const PRESETS = [
   :global(.ch-trace-thinking) {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     line-height: 1.6;
     padding: 6px 0 6px 18px;
     margin: 0;
@@ -3562,7 +3643,7 @@ const PRESETS = [
     font-size: var(--text-tag);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     border: 1px solid var(--fg-faint);
     border-radius: var(--radius-full);
     padding: 0 7px;
@@ -3717,7 +3798,7 @@ const PRESETS = [
   .ch-chart-unit {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
-    color: var(--fg-muted);
+    color: var(--ch-meta);
   }
   .ch-chart-unit:empty { display: none; }
   .ch-chart { width: 100%; height: 380px; }
@@ -3735,7 +3816,7 @@ const PRESETS = [
     font-size: var(--text-label);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     cursor: pointer;
     padding: 5px 0;
     list-style: none;
@@ -3756,11 +3837,13 @@ const PRESETS = [
     letter-spacing: 0;
     padding: 0;
   }
+  /* CSV action, top of the expanded raw-data panel (moved out of <summary>). */
+  .ch-data-actions { display: flex; justify-content: flex-end; padding: 4px 0 0; }
   .ch-table-scroll { max-height: 340px; overflow: auto; margin-top: 8px; }
   .ch-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-tag); }
   :global(.ch-table th) {
     text-align: left;
-    color: var(--fg-muted);
+    color: var(--ch-meta);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 5px 8px;
@@ -3774,7 +3857,7 @@ const PRESETS = [
     color: var(--fg);
     border-bottom: 1px solid var(--fg-faint);
   }
-  :global(.ch-table-more) { color: var(--fg-muted); text-align: center; }
+  :global(.ch-table-more) { color: var(--ch-meta); text-align: center; }
 
   /* ── Chart ↔ table linking ──
      Rows that back a visible chart point are interactive: a pointer cursor
