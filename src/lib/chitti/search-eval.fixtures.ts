@@ -14,9 +14,10 @@
 
 export interface EvalCase {
   query: string;
-  // Expected registry source id ('worldbank' | 'owid' | 'imf') and the fetch
-  // id the search should return (plain WB code, "owid:<slug>", or "imf:<code>").
-  source: 'worldbank' | 'owid' | 'imf';
+  // Expected registry source id ('worldbank' | 'owid' | 'imf' | 'who') and the
+  // fetch id the search should return (plain WB code, "owid:<slug>", "imf:<code>",
+  // or "who:<IndicatorCode>").
+  source: 'worldbank' | 'owid' | 'imf' | 'who';
   id: string;
   // Active databases for this query (mirrors the user's DB selection). Omit for
   // "all sources on" — the common case and the harder cross-source ranking test.
@@ -99,4 +100,18 @@ export const EVAL_CASES: EvalCase[] = [
   { query: 'political regime', source: 'owid', id: 'owid:political-regime', note: 'governance/democracy classification' },
   { query: 'median age', source: 'owid', id: 'owid:median-age' },
   { query: 'prevalence of undernourishment', source: 'owid', id: 'owid:prevalence-of-undernourishment', note: 'food security: not in the World Bank curated set' },
+
+  // ── Health, disease & immunization (WHO Global Health Observatory) ─────
+  // WHO-distinctive phrasings the curated GHO catalog genuinely wins with every
+  // database on. Worded to NOT collide with the World Bank series the eval above
+  // already assigns to WB (e.g. plain "life expectancy", "measles vaccination",
+  // "maternal mortality" all stay with the World Bank — WHO wins only the
+  // health-specific phrasings below).
+  { query: 'healthy life expectancy', source: 'who', id: 'who:WHOSIS_000015', note: 'HALE: WHO-only; WB owns the plain "life expectancy"' },
+  { query: 'dtp3 immunization coverage', source: 'who', id: 'who:WHS4_100', note: 'immunization coverage by vaccine acronym: WHO EPI' },
+  { query: 'polio immunization coverage', source: 'who', id: 'who:WHS4_543', note: 'Pol3 coverage among 1-year-olds (WHO EPI)' },
+  { query: 'obesity prevalence in adults', source: 'who', id: 'who:NCD_BMI_30A', note: 'NCD risk factor: not in the World Bank curated set' },
+  { query: 'malaria incidence', source: 'who', id: 'who:MALARIA_EST_INCIDENCE', note: 'communicable disease: WHO-distinctive' },
+  { query: 'tuberculosis incidence', source: 'who', id: 'who:TB_e_inc_100k', note: 'communicable disease: WHO-distinctive (mixed-case code)' },
+  { query: 'safely managed drinking water', source: 'who', id: 'who:WSH_WATER_SAFELY_MANAGED', note: 'WASH: WHO/UNICEF JMP indicator' },
 ];

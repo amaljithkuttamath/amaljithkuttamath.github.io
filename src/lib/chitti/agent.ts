@@ -19,6 +19,7 @@ import {
   fetchWorldbankAll,
   fetchOwid,
   fetchImf,
+  fetchWho,
   growthStats,
   correlate,
   executeJs,
@@ -68,10 +69,11 @@ const MAX_SUBAGENT_CALLS = 6;
 // surfaces as a clear routing error instead of a confusing downstream API 404.
 // This is the single place fetch source identity is derived (the per-source
 // dispatch branches used to each own it).
-function fetchSourceOf(id: string): 'worldbank' | 'owid' | 'imf' | 'unknown' {
+function fetchSourceOf(id: string): 'worldbank' | 'owid' | 'imf' | 'who' | 'unknown' {
   const s = id.trim().toLowerCase();
   if (s.startsWith('owid:')) return 'owid';
   if (s.startsWith('imf:')) return 'imf';
+  if (s.startsWith('who:')) return 'who';
   if (s.includes(':')) return 'unknown';
   return 'worldbank';
 }
@@ -636,6 +638,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           detail = resDetail + `${rows.length} rows · IMF (incl. forecasts)`;
           break;
         }
+        case 'who': {
+          // GHO IndicatorCodes are case-sensitive, so the code is kept verbatim
+          // (never upper-cased) — the id from find_series is used as-is.
+          const r = await fetchWho(id, hasCountries ? codes : undefined, ys, ye);
+          rows = r.rows;
+          requestUrl = r.requestUrl;
+          nid = 'who:' + id.replace(/^who:/i, '');
+          state.indicators.set(nid, datasetName(nid) ?? nid);
+          body = resNote + summarizeRows(rows);
+          detail = resDetail + `${rows.length} rows · WHO GHO`;
+          break;
+        }
       }
       state.rows = state.rows.concat(rows);
       // Cache only this successful result (and the rows it merged — the entry is
@@ -660,7 +674,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     // identical record, so the ledger stays one-entry-per-distinct-fetch.
     function recordCitation(
       key: string,
-      source: 'worldbank' | 'owid' | 'imf',
+      source: 'worldbank' | 'owid' | 'imf' | 'who',
       nid: string,
       codes: string[],
       ys: number | undefined,

@@ -5,12 +5,16 @@ import {
   subAgentSchemasFor,
   resolveSources,
   datasetSourcesFor,
+  SOURCES,
+  sourcesByCategory,
   findSeries,
   findSeriesWithReceipt,
   scoreSeries,
   explainMatch,
   parseImfIndicators,
   parseOwidCatalog,
+  parseWhoIndicators,
+  fetchWho,
   DEFAULT_SOURCE_IDS,
   VFS,
   executeJs,
@@ -73,6 +77,39 @@ describe('source hard filter', () => {
   });
 });
 
+describe('WHO GHO source registration (registry-driven picker + routing)', () => {
+  it('is present in the SOURCES registry with a Health category and who datasetSource', () => {
+    const who = SOURCES.find((s) => s.id === 'who');
+    expect(who).toBeDefined();
+    expect(who!.label).toBe('WHO Global Health Observatory');
+    expect(who!.category).toBe('Health');
+    expect(who!.datasetSource).toBe('who');
+    expect(who!.blurb.length).toBeGreaterThan(0);
+    expect(who!.promptSnippet).toMatch(/health/i);
+    expect(who!.cite.url).toContain('who.int');
+  });
+
+  it('the registry-driven picker groups WHO under a Health category header', () => {
+    const groups = sourcesByCategory();
+    const health = groups.find((g) => g.category === 'Health');
+    expect(health).toBeDefined();
+    expect(health!.sources.map((s) => s.id)).toContain('who');
+  });
+
+  it('WHO participates in the shared dataset-catalog filter and default source set', () => {
+    expect(DEFAULT_SOURCE_IDS).toContain('who');
+    expect(datasetSourcesFor(['who'])).toEqual(['who']);
+    // A hard filter keeps WHO out when it is not selected.
+    expect(datasetSourcesFor(['owid'])).not.toContain('who');
+  });
+
+  it('a WHO-scoped sub-agent gets the depth-1 router toolset (scoping accepts who)', () => {
+    const n = subAgentSchemasFor('who').map((s) => s.name);
+    expect(n).toEqual(expect.arrayContaining(['find_series', 'fetch_series', 'execute_js', 'return_findings']));
+    expect(n).not.toContain('delegate_source');
+  });
+});
+
 describe('delegate_source gating + depth-1 (schema level)', () => {
   const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
 
@@ -88,7 +125,7 @@ describe('delegate_source gating + depth-1 (schema level)', () => {
   });
 
   it('sub-agent schema set is depth-1: no delegate_source, only the router + core', () => {
-    for (const id of ['worldbank', 'owid', 'imf']) {
+    for (const id of ['worldbank', 'owid', 'imf', 'who']) {
       const n = subAgentSchemasFor(id).map((s) => s.name);
       // Depth-1 enforced STRUCTURALLY: a sub-agent literally cannot delegate.
       expect(n).not.toContain('delegate_source');
@@ -241,6 +278,99 @@ describe('parseOwidCatalog — live OWID grapher catalog', () => {
         'string',
       ])
     ).toEqual([{ id: 'owid:gdp-per-capita-worldbank', name: 'gdp-per-capita-worldbank' }]);
+  });
+});
+
+describe('parseWhoIndicators — live WHO GHO catalog', () => {
+  it('maps the GHO /Indicator shape to namespaced series', () => {
+    const parsed = parseWhoIndicators({
+      value: [
+        { IndicatorCode: 'WHOSIS_000001', IndicatorName: 'Life expectancy at birth (years)' },
+        { IndicatorCode: 'WHS4_544', IndicatorName: 'Measles (MCV1) immunization coverage among 1-year-olds (%)' },
+      ],
+    });
+    expect(parsed).toContainEqual({ id: 'who:WHOSIS_000001', name: 'Life expectancy at birth (years)' });
+    expect(parsed.find((p) => p.id === 'who:WHS4_544')?.name).toContain('Measles');
+  });
+
+  it('is defensive against a malformed payload and dedupes', () => {
+    expect(parseWhoIndicators(null)).toEqual([]);
+    expect(parseWhoIndicators({})).toEqual([]);
+    expect(parseWhoIndicators({ value: 'nope' })).toEqual([]);
+    // duplicate code kept once (first wins), non-object/blank entries dropped,
+    // missing name falls back to the code.
+    expect(
+      parseWhoIndicators({
+        value: [
+          { IndicatorCode: 'WHOSIS_000001', IndicatorName: 'first' },
+          { IndicatorCode: 'WHOSIS_000001', IndicatorName: 'dup' },
+          { IndicatorCode: '' },
+          null,
+          'string',
+          { IndicatorCode: 'NCDMORT3070' },
+        ],
+      })
+    ).toEqual([
+      { id: 'who:WHOSIS_000001', name: 'first' },
+      { id: 'who:NCDMORT3070', name: 'NCDMORT3070' },
+    ]);
+  });
+});
+
+describe('fetchWho — GHO OData URL + row parsing', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('builds the OData $filter (country-level + countries + year window) and preserves code case', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen = String(url);
+      return { ok: true, json: async () => ({ value: [] }) };
+    }));
+    await fetchWho('who:TB_e_inc_100k', ['ind', 'CHN'], 2000, 2010);
+    // Endpoint carries the exact IndicatorCode, case preserved (never upper-cased).
+    expect(seen).toContain('ghoapi.azureedge.net/api/TB_e_inc_100k');
+    // Decode the $filter to assert its clauses.
+    const filter = decodeURIComponent(seen.split('$filter=')[1] ?? '');
+    expect(filter).toContain("SpatialDimType eq 'COUNTRY'");
+    expect(filter).toContain("SpatialDim in ('IND','CHN')");
+    expect(filter).toContain('TimeDim ge 2000');
+    expect(filter).toContain('TimeDim le 2010');
+    expect(filter).toContain(' and ');
+  });
+
+  it('omits the country and year clauses when not given', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen = String(url);
+      return { ok: true, json: async () => ({ value: [] }) };
+    }));
+    await fetchWho('WHOSIS_000001');
+    const filter = decodeURIComponent(seen.split('$filter=')[1] ?? '');
+    expect(filter).toBe("SpatialDimType eq 'COUNTRY'");
+    expect(filter).not.toContain('SpatialDim in');
+    expect(filter).not.toContain('TimeDim');
+  });
+
+  it('parses rows and SKIPS rows with a null NumericValue (no fabricated values)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        value: [
+          { SpatialDim: 'IND', TimeDim: 2019, NumericValue: 69.7 },
+          { SpatialDim: 'IND', TimeDim: 2020, NumericValue: null },
+          { SpatialDim: 'USA', TimeDim: 2019, NumericValue: 78.5 },
+          { SpatialDim: '', TimeDim: 2019, NumericValue: 1 },
+        ],
+      }),
+    })));
+    const { rows, requestUrl } = await fetchWho('who:WHOSIS_000001');
+    expect(requestUrl).toContain('ghoapi.azureedge.net/api/WHOSIS_000001');
+    // null-value row dropped, blank-code row dropped → 2 rows.
+    expect(rows.length).toBe(2);
+    expect(rows.every((r) => r.value !== null)).toBe(true);
+    expect(rows.every((r) => r.indicator === 'who:WHOSIS_000001')).toBe(true);
+    // ISO3 resolves to a display name where known.
+    expect(rows.find((r) => r.iso3 === 'IND')?.country).toBe('India');
   });
 });
 
@@ -1418,6 +1548,8 @@ describe('fetch_series router + session cache (driven)', () => {
         return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\n' };
       if (u.includes('imf.org'))
         return { ok: true, json: async () => ({ values: { NGDP_RPCH: { IND: { '2020': 5 } } } }) };
+      if (u.includes('ghoapi.azureedge.net'))
+        return { ok: true, json: async () => ({ value: [{ SpatialDim: 'IND', TimeDim: 2020, NumericValue: 70 }] }) };
       throw new Error('unexpected url ' + u);
     });
     return { fn, urls };
@@ -1481,6 +1613,51 @@ describe('fetch_series router + session cache (driven)', () => {
     const out = await newSession(['owid']).ask('q', cb);
     expect(urls.some((u) => u.includes('ourworldindata.org/grapher/temperature-anomaly.csv'))).toBe(true);
     expect(new Set(out.rows.map((r) => r.indicator)).has('owid:temperature-anomaly')).toBe(true);
+  });
+
+  it('round-trips a curated WHO indicator: find_series id fetches via the WHO branch', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    // recordingFetch answers the live GHO /Indicator catalog fetch too (it 200s
+    // with a single unrelated row and no matching code), so the live fallback
+    // contributes nothing here and the curated hit must stand.
+    const hits = await findSeries('healthy life expectancy', ['who']);
+    const id = hits.find((h) => h.id === 'who:WHOSIS_000015')!.id;
+    expect(id).toBe('who:WHOSIS_000015');
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id, countries: ['IND'], year_start: 2015, year_end: 2020 }, 'wh'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['who']).ask('q', cb);
+    expect(urls.some((u) => u.includes('ghoapi.azureedge.net/api/WHOSIS_000015'))).toBe(true);
+    expect(new Set(out.rows.map((r) => r.indicator)).has('who:WHOSIS_000015')).toBe(true);
+    // Citation: correct source/label, links to the stable GHO portal, keeps the
+    // exact OData request URL, and invents NO vintage (GHO provides none).
+    const c = out.citations.find((x) => x.indicatorId === 'who:WHOSIS_000015')!;
+    expect(c.source).toBe('who');
+    expect(c.sourceLabel).toBe('WHO Global Health Observatory');
+    expect(c.url).toBe('https://www.who.int/data/gho');
+    expect(c.requestUrl).toContain('ghoapi.azureedge.net/api/WHOSIS_000015');
+    expect('sourceUpdated' in c).toBe(false);
+  });
+
+  it('a WHO id is refused in a session where WHO is not active (out-of-source guard)', async () => {
+    const { fn } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'who:WHOSIS_000001', countries: ['IND'] }, 'no'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    expect(toolMsgById('no')).toMatch(/who series, not available/);
+    expect(out.rows.length).toBe(0);
   });
 
   it('an unrecognized namespace is a clear routing error, not a crash or a stray fetch', async () => {

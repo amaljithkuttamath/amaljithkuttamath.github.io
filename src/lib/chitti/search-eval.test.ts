@@ -37,7 +37,7 @@ describe('find_series offline eval', () => {
     // and so every registered source stays represented.
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(25);
     const sources = new Set(EVAL_CASES.map((c) => c.source));
-    expect(sources).toEqual(new Set(['worldbank', 'owid', 'imf']));
+    expect(sources).toEqual(new Set(['worldbank', 'owid', 'imf', 'who']));
   });
 
   it('meets the top-1 and top-3 hit-rate floors', async () => {
