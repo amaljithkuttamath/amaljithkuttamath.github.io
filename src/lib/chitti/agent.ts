@@ -156,7 +156,7 @@ export interface AgentOutput {
 // The system prompt is assembled per session from the active databases, so a
 // hard-filtered session is never told about — and never reaches for — a source
 // it isn't allowed to use.
-function buildSystemPrompt(sources: SourceDef[]): string {
+export function buildSystemPrompt(sources: SourceDef[], rlm: boolean = false): string {
   const labels = sources.map((s) => s.label);
   const many = sources.length > 1;
   const defaultLabel = sources.some((s) => s.id === 'worldbank') ? 'World Bank' : labels[0];
@@ -164,6 +164,16 @@ function buildSystemPrompt(sources: SourceDef[]): string {
   const activeLine = many
     ? `Your active databases (find_series searches all of them at once; prefer ${defaultLabel} when more than one fits):`
     : `Your one active database is ${labels[0]}. find_series searches it:`;
+  // The recursive llm() capability is opt-in and OFF by default. When off, the
+  // prompt never mentions it — the model cannot reach for what it is not told
+  // exists (withholding, the same discipline as the source filter). When on,
+  // the execute_js guidance gains the llm() paragraph and the provenance rule.
+  const llmLine = rlm
+    ? `\n     Inside execute_js you may also \`await llm(prompt, dataSlice)\` — a bounded recursive model call for SEMANTIC work over data too big or tedious to hold in context: labelling/classifying/summarizing many rows (e.g. tag each country's trend as "rising"/"falling", group indicator names into themes). It returns TEXT only, no tools. Bounds (hard): at most ${MAX_LLM_PER_RUN} llm() calls per execute_js run and ${MAX_LLM_PER_TURN} per turn; the \`data\` you pass must serialize under ~${Math.round(LLM_DATA_CAP / 1000)}KB — slice smaller if it rejects. Over-cap/over-size calls throw a catchable error. Use llm() to reason ABOUT data, never to invent numbers: its output is model-derived, NOT fetched data.`
+    : '';
+  const provenanceRule = rlm
+    ? `- PROVENANCE: anything llm() produces is model-derived, not fetched. Never present it as a data value, cite it, or put it in a chart as if measured. If you save an llm()-derived artifact with write_file, set derived=true so it is labelled model-derived.\n`
+    : '';
 
   return `You are Chitti, a data analyst agent. You answer questions about the world with real numbers fetched live from free institutional APIs. Your reasoning and every tool call stream to the user as you work — state decisions in your reasoning, never in files.
 
@@ -182,8 +192,7 @@ ${snippets}
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
    - correlate → relationship between two fetched indicators.
-   - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.
-     Inside execute_js you may also \`await llm(prompt, dataSlice)\` — a bounded recursive model call for SEMANTIC work over data too big or tedious to hold in context: labelling/classifying/summarizing many rows (e.g. tag each country's trend as "rising"/"falling", group indicator names into themes). It returns TEXT only, no tools. Bounds (hard): at most ${MAX_LLM_PER_RUN} llm() calls per execute_js run and ${MAX_LLM_PER_TURN} per turn; the \`data\` you pass must serialize under ~${Math.round(LLM_DATA_CAP / 1000)}KB — slice smaller if it rejects. Over-cap/over-size calls throw a catchable error. Use llm() to reason ABOUT data, never to invent numbers: its output is model-derived, NOT fetched data.
+   - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.${llmLine}
 
 4. render_chart. line = time series · bar = ranking · scatter = two indicators · grouped-bar = a few countries side by side. The call's arguments ARE the spec — build them from step 3's result.
 
@@ -193,18 +202,24 @@ Rules:
 - Hard budget: ${MAX_TOOL_CALLS} tool calls. Never re-fetch data you already have.
 - Use ids from search results verbatim. Years are numbers.
 - Only the active databases listed above are available — do not mention or attempt any other source.
-- PROVENANCE: anything llm() produces is model-derived, not fetched. Never present it as a data value, cite it, or put it in a chart as if measured. If you save an llm()-derived artifact with write_file, set derived=true so it is labelled model-derived.
-${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- list_countries, write_file, read_file exist but are almost never needed.`;
+${provenanceRule}${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- list_countries, write_file, read_file exist but are almost never needed.`;
 }
 
 // The system prompt for a depth-1 per-source sub-agent — scoped to ONE
 // database. It fetches and distils; it never charts, verifies, or delegates
 // (those belong to the main loop, and delegate_source is not in its schema).
-function buildSubAgentPrompt(src: SourceDef): string {
+export function buildSubAgentPrompt(src: SourceDef, rlm: boolean = false): string {
+  // Sub-agents obey the same llm() toggle as the main loop: when RLM is off,
+  // their execute_js guidance never mentions llm() either, and their
+  // execute_js runs get no llm argument (the shared dispatch gates on the same
+  // rlmEnabled). So a delegation cannot become a back door to the capability.
+  const execLine = rlm
+    ? 'execute_js (compute over the rows fetched so far — you may also `await llm(prompt, dataSlice)` for bounded semantic work)'
+    : 'execute_js (compute over the rows fetched so far)';
   return `You are a focused sub-agent. You work with exactly ONE database: ${src.label}.
 ${src.promptSnippet}
 
-Your tools: find_series (searches ${src.label} only), fetch_series (fetch a ${src.label} id it returns — ids from other sources are refused here), execute_js (compute over the rows fetched so far — you may also \`await llm(prompt, dataSlice)\` for bounded semantic work), and return_findings.
+Your tools: find_series (searches ${src.label} only), fetch_series (fetch a ${src.label} id it returns — ids from other sources are refused here), ${execLine}, and return_findings.
 
 Do the minimum needed to answer the sub-question: find the series, fetch it, optionally compute, then call return_findings with a SHORT distilled summary — a few sentences naming the key numbers and what they show. Your fetched rows are automatically merged back to the main agent WITH their citations, so never paste raw rows into the summary. Budget: ${MAX_SUBAGENT_CALLS} tool calls. Call tools; do not narrate a plan in prose.`;
 }
@@ -235,13 +250,22 @@ export interface SessionOptions {
   // The hard filter: only these sources' tools and prompt guidance reach the
   // model, so it can only answer from the databases the user selected.
   sources?: string[];
+  // Whether execute_js code may call the bounded recursive `llm()` primitive.
+  // Default false, and deliberately so: every nested call spends the user's
+  // own key, so the capability is opt-in. Off is enforced by withholding, not
+  // by refusing. When off, the system prompt omits the llm() guidance (main
+  // loop AND sub-agent) and execute_js is run with no llm argument, so the
+  // sandbox binding is the throw-on-call default — the model never learns the
+  // capability exists and cannot burn a tool call discovering it is disabled.
+  rlm?: boolean;
 }
 
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
   const activeSources = resolveSources(opts?.sources);
+  const rlmEnabled = opts?.rlm ?? false;
   const toolSchemas = schemasForSources(opts?.sources);
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(activeSources) },
+    { role: 'system', content: buildSystemPrompt(activeSources, rlmEnabled) },
   ];
   const vfsFiles: Record<string, string> = {};
   const state: {
@@ -357,7 +381,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
         try {
           const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
-          totalCost += estimateCost(cfg.model, res.usage);
+          // Price against the model that actually served the nested call, not
+          // cfg.model — OpenRouter's free-fallback chain can serve a different
+          // one (matches the main-loop attribution).
+          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
           childEv.status = 'ok';
           childEv.durationMs = Date.now() - started;
           childEv.tokens = res.usage.input + res.usage.output;
@@ -392,7 +419,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     ): Promise<{ ok: boolean; summary: string; detail: string }> {
       const subSchemas = subAgentSchemasFor(src.id);
       const subMessages: ChatMessage[] = [
-        { role: 'system', content: buildSubAgentPrompt(src) },
+        { role: 'system', content: buildSubAgentPrompt(src, rlmEnabled) },
         { role: 'user', content: question || `Fetch and distil the relevant ${src.label} data.` },
       ];
       let steps = 0;
@@ -401,7 +428,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       try {
         while (steps < MAX_SUBAGENT_CALLS) {
           const res = await complete(cfg, subMessages, subSchemas);
-          totalCost += estimateCost(cfg.model, res.usage);
+          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
           if (!res.toolCalls.length) {
             // No tool call — nudge once toward acting, counting it against the
             // step budget so a silent model can't loop forever.
@@ -735,7 +762,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // Shared between the main loop and delegation sub-agents (makeLlm),
             // so every llm() call — wherever it originates — draws from the same
             // per-turn budget and emits the same nested receipt.
-            const llm = makeLlm();
+            //
+            // Gated off by default (opts.rlm, see rlmEnabled): when RLM is
+            // disabled we pass NO llm to executeJs, so the sandbox's `llm`
+            // binding is the default that throws on call and the model was
+            // never told the capability exists (buildSystemPrompt omits it).
+            // Enforcement is by withholding, exactly like the source filter.
+            // One llm closure is reused across BOTH executeJs attempts so the
+            // retry shares the per-run 4-call allowance, not a fresh one.
+            const llm = rlmEnabled ? makeLlm() : undefined;
             let out = await executeJs(code, state.rows, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
@@ -941,7 +976,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         cb.onStatus(status, 'loading');
 
         const res = await complete(cfg, messages, toolSchemas);
-        totalCost += estimateCost(cfg.model, res.usage);
+        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
         // with a different model — visible in the trace and the rail label.
@@ -1014,7 +1049,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           ],
           []
         );
-        totalCost += estimateCost(cfg.model, res.usage);
+        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
         state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
       }
     }
@@ -1177,7 +1212,7 @@ async function verify(
   ];
   try {
     const res = await complete(cfg, messages, []);
-    addCost(estimateCost(cfg.model, res.usage));
+    addCost(estimateCost(res.servedModel ?? cfg.model, res.usage));
     const text = res.text.trim();
     const pass = /^\s*PASS/i.test(text) || (!/^\s*FAIL/i.test(text) && !!spec && !!finding);
     return {

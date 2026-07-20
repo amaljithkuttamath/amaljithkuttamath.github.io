@@ -738,7 +738,9 @@ export function correlate(
 // function is an AsyncFunction, so the code may use `await`; a plain
 // synchronous `return` still works exactly as before. The caps, receipts,
 // and provenance live in the injected `llm` (see agent.ts); executeJs only
-// wires it in and awaits the result.
+// wires it in and awaits the result. When execute_js is run WITHOUT a
+// session-provided llm (RLM off, or a direct unit test), the default is a
+// function that throws on call — withholding, not a silent undefined.
 export interface ExecuteJsResult {
   ok: boolean;
   result?: unknown;
@@ -755,9 +757,10 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
   new (...args: string[]): (...a: unknown[]) => Promise<unknown>;
 };
 
-// Default `llm` when execute_js is run without a session-provided one (e.g.
-// direct unit tests): calling it is a clear, catchable error rather than a
-// silent undefined.
+// Default `llm` when execute_js is run without a session-provided one — RLM
+// off (the model was never told llm() exists) or a direct unit test. Calling
+// it is a clear, catchable error rather than a silent undefined: withholding
+// by refusal-on-call, so the sandbox never sees an undefined identifier.
 const llmUnavailable: LlmFn = async () => {
   throw new Error('llm() is not available in this context');
 };

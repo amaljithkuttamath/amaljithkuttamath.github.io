@@ -415,7 +415,7 @@ vi.mock('./providers', async (importOriginal) => {
 });
 
 import { complete } from './providers';
-import { createSession } from './agent';
+import { createSession, buildSystemPrompt, buildSubAgentPrompt } from './agent';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -679,7 +679,10 @@ describe('RLM llm() inside execute_js', () => {
     return out;
   }
 
-  const newSession = () => createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+  // These tests exercise the llm() capability, which is now opt-in and OFF by
+  // default (see the gating tests below), so this block enables it explicitly.
+  const newSession = () =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { rlm: true });
   const capture = () => {
     let last: any[] = [];
     const cb = {
@@ -857,8 +860,10 @@ describe('delegate_source sub-agents (driven)', () => {
   const llmReply = (text: string) => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
   const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
 
-  const newSession = (sources?: string[]) =>
-    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  // `rlm` defaults off (the shipping default); only the llm()-budget test opts
+  // in, since the capability is now off by default and withheld otherwise.
+  const newSession = (sources?: string[], rlm?: boolean) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources, rlm });
   const capture = () => {
     let last: any[] = [];
     const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
@@ -1053,7 +1058,7 @@ describe('delegate_source sub-agents (driven)', () => {
     mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
 
     const { cb, trace } = capture();
-    await newSession(['worldbank', 'owid']).ask('q', cb);
+    await newSession(['worldbank', 'owid'], true).ask('q', cb);
 
     // 6 main + 2 sub = exactly the 8-per-turn cap of llm() receipts.
     expect(trace().filter((e) => e.tool === 'llm').length).toBe(8);
@@ -1667,5 +1672,199 @@ describe('citation ledger (driven)', () => {
     expect('sourceUpdated' in byId['owid:life-expectancy']).toBe(false);
     expect(byId['imf:NGDP_RPCH'].url).toBe('https://www.imf.org/external/datamapper/NGDP_RPCH');
     expect('sourceUpdated' in byId['imf:NGDP_RPCH']).toBe(false);
+  });
+});
+
+// ── The RLM (judgment-call) flag: off by default ──────────────────────────
+// Ported and adapted from main's off-by-default gating (commit 73f554e). The
+// branch's llm() plumbing lives INLINE in agent.ts (not a separate rlm.ts) and
+// is gated in the SYSTEM PROMPT rather than the execute_js tool-schema where
+// main put it — so the prompt assertions target buildSystemPrompt /
+// buildSubAgentPrompt. The product semantics are identical to main's: the
+// capability ships OFF, the user opts in, and "off" is enforced by
+// WITHHOLDING (the model is never told llm() exists), for the main loop AND
+// for delegation sub-agents.
+describe('rlm flag: the system prompt withholds llm() when off', () => {
+  const sources = resolveSources(['worldbank', 'owid']);
+
+  it('omits every llm() mention by default (flag off)', () => {
+    const p = buildSystemPrompt(sources);
+    expect(p).not.toContain('llm(');
+    expect(p).not.toMatch(/model-derived/i);
+    // The base guidance the code always gets is still there and reads cleanly.
+    expect(p).toContain('execute_js → anything else');
+  });
+
+  it('omits it when explicitly off, identical to omitting the flag', () => {
+    expect(buildSystemPrompt(sources, false)).toBe(buildSystemPrompt(sources));
+  });
+
+  it('includes the bounded llm() guidance and the provenance rule when on', () => {
+    const p = buildSystemPrompt(sources, true);
+    expect(p).toContain('await llm(');
+    expect(p).toContain('model-derived');
+    expect(p).toContain('4 llm() calls per execute_js run'); // MAX_LLM_PER_RUN
+    expect(p).toContain('8 per turn'); // MAX_LLM_PER_TURN
+  });
+
+  it('sub-agent prompts inherit the same toggle', () => {
+    expect(buildSubAgentPrompt(sources[0])).not.toContain('llm(');
+    expect(buildSubAgentPrompt(sources[0], false)).not.toContain('llm(');
+    expect(buildSubAgentPrompt(sources[0], true)).toContain('await llm(');
+  });
+});
+
+describe('rlm flag: the llm() primitive in the execute_js sandbox', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 1 },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const fetchCall = (id = 'wf') =>
+    tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, id);
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  // The probe reports whether llm() ran or refused, so the assertion is
+  // behavioural — a check on what the sandbox binding actually did, not on a
+  // symbol that always exists.
+  const PROBE =
+    'try { const r = await llm("classify", rows[0]); return "CALLED:" + r; } ' +
+    'catch (e) { return "REFUSED:" + e.message; }';
+
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (e: any[]) => (last = e), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const execResultFor = (id: string) => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs)
+        if (m.role === 'tool' && m.name === 'execute_js' && m.tool_call_id === id) {
+          try {
+            return JSON.parse(m.content);
+          } catch {
+            return m.content;
+          }
+        }
+    }
+    return null;
+  };
+
+  it('off by default: llm() is withheld in the sandbox and no nested call is billed', async () => {
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb, trace } = capture();
+    await createSession(cfg).ask('probe', cb);
+
+    const res = execResultFor('ej');
+    expect(String(res)).toContain('REFUSED');
+    expect(String(res)).toContain('not available');
+    // No nested 'llm' trace event, and exactly three completions (turn, finish,
+    // verify) — the nested call never happened.
+    expect(trace().some((e) => e.tool === 'llm')).toBe(false);
+    expect(mockComplete.mock.calls.length).toBe(3);
+  });
+
+  it('rlm: false behaves identically to omitting the option', async () => {
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb } = capture();
+    await createSession(cfg, { rlm: false }).ask('probe', cb);
+    expect(String(execResultFor('ej'))).toContain('REFUSED');
+    expect(mockComplete.mock.calls.length).toBe(3);
+  });
+
+  it('on: llm() runs, emits one nested receipt, and the nested call carries no tools (depth-1)', async () => {
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    // The nested llm() completion, issued from inside execute_js (stubbed).
+    mockComplete.mockResolvedValueOnce({ text: 'coastal', toolCalls: [], usage: { input: 3, output: 1 } });
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb, trace } = capture();
+    await createSession(cfg, { rlm: true }).ask('probe', cb);
+
+    expect(execResultFor('ej')).toBe('CALLED:coastal');
+    const nested = trace().filter((e) => e.tool === 'llm');
+    expect(nested.length).toBe(1);
+    expect(nested[0].nested).toBe(true);
+    // Four completions: the nested one actually happened. It is issued with an
+    // EMPTY tool array (depth-1 by construction — the inner model cannot
+    // recurse). The nested call is completion index 1.
+    expect(mockComplete.mock.calls.length).toBe(4);
+    expect(mockComplete.mock.calls[1][2]).toEqual([]);
+  });
+
+  it('a delegation sub-agent inherits the off toggle: its execute_js llm() is withheld too', async () => {
+    // Two sources so delegate_source exists; rlm off (the default).
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'probe' }, 'd1')]));
+    // Sub-agent: fetch (seeds shared rows), execute_js probe, return_findings.
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall('wf'), tc('execute_js', { code: PROBE }, 'sej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'done' }, 'rf')]));
+    // Main finishes with an explanation (no chart, so no verifier turn).
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+    const { cb, trace } = capture();
+    await createSession(cfg, { sources: ['worldbank', 'owid'] }).ask('q', cb);
+
+    const subRes = execResultFor('sej');
+    expect(String(subRes)).toContain('REFUSED');
+    expect(String(subRes)).toContain('not available');
+    // The sub-agent likewise issued no nested llm() call.
+    expect(trace().some((e) => e.tool === 'llm')).toBe(false);
+  });
+
+  // ── Cost attribution (ported from main's "price against the served model").
+  // Non-RLM correctness that must survive the merge: OpenRouter's free-fallback
+  // chain can serve a different model than cfg.model, so pricing must read
+  // res.servedModel. A :free model prices at zero, so a zero total is the proof.
+  it('prices the nested llm() call against the model that served it, not cfg.model', async () => {
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [fetchCall(), tc('execute_js', { code: 'const r = await llm("classify", rows); return r;' }, 'ej')],
+      usage: { input: 0, output: 0 },
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: 'coastal',
+      toolCalls: [],
+      usage: { input: 1_000_000, output: 1_000_000 },
+      servedModel: 'some/model:free',
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'Done.' }, 'fe')],
+      usage: { input: 0, output: 0 },
+    });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg, { rlm: true }).ask('judge', cb);
+    expect(out.cost).toBe(0);
+  });
+
+  it('prices main-loop turns against the model that actually served them', async () => {
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'Done.' }, 'fe')],
+      usage: { input: 1_000_000, output: 1_000_000 },
+      servedModel: 'some/model:free',
+    });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg).ask('explain something', cb);
+    expect(out.cost).toBe(0);
   });
 });
