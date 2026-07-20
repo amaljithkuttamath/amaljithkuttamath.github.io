@@ -23,23 +23,69 @@ import {
   correlate,
   executeJs,
   rowsToCSV,
+  citationSourceLabel,
+  citationHumanUrl,
+  citationsToCsvComments,
   INDICATORS,
   resolveSources,
   schemasForSources,
+  subAgentSchemasFor,
+  type LlmFn,
   type SourceDef,
   type ChartSpec,
   type DataRow,
   type SearchReceipt,
+  type Citation,
 } from './tools';
-import {
-  createRlmRun,
-  createTurnBudget,
-  provenanceNotice,
-  type RlmCaller,
-  type RlmReceipt,
-} from './rlm';
+import { resolveCountryList, formatResolutions } from './countries';
 
 const MAX_TOOL_CALLS = 12;
+
+// RLM (Recursive Language Model) bounds for the llm() primitive exposed inside
+// execute_js. Hard caps, enforced in code: a run can make at most
+// MAX_LLM_PER_RUN calls, and a whole user turn at most MAX_LLM_PER_TURN across
+// every execute_js run in it (shared counter). Serialized `data` is refused
+// past LLM_DATA_CAP bytes so a single call can't smuggle the whole context
+// back into the model — the code must slice smaller. Exceeding any of these
+// rejects with a clear, catchable error the model's code can handle.
+const MAX_LLM_PER_RUN = 4;
+const MAX_LLM_PER_TURN = 8;
+const LLM_DATA_CAP = 20_000;
+
+// Depth-1 delegation bounds (delegate_source). A turn may spawn at most
+// MAX_DELEGATIONS_PER_TURN per-source sub-agents (shared counter, same pattern
+// as turnLlmCalls), and each sub-agent may make at most MAX_SUBAGENT_CALLS tool
+// calls before it must return_findings or is stopped. Sub-agent llm() calls
+// draw from the SAME per-turn llm budget (MAX_LLM_PER_TURN) as the main loop.
+const MAX_DELEGATIONS_PER_TURN = 3;
+const MAX_SUBAGENT_CALLS = 6;
+
+// The registry source a fetch id routes to. find_series returns ids that carry
+// their source in the namespace, so the router reads it straight off the id:
+// "owid:<slug>" → OWID, "imf:<code>" → IMF, a bare code (no ':') → World Bank
+// (its ids look like SH.DYN.MORT). A namespaced id whose prefix is neither owid
+// nor imf is 'unknown' — NOT silently treated as a World Bank code, so a bad id
+// surfaces as a clear routing error instead of a confusing downstream API 404.
+// This is the single place fetch source identity is derived (the per-source
+// dispatch branches used to each own it).
+function fetchSourceOf(id: string): 'worldbank' | 'owid' | 'imf' | 'unknown' {
+  const s = id.trim().toLowerCase();
+  if (s.startsWith('owid:')) return 'owid';
+  if (s.startsWith('imf:')) return 'imf';
+  if (s.includes(':')) return 'unknown';
+  return 'worldbank';
+}
+
+// Normalized session-cache key for one fetch: id + resolved country codes +
+// year range. Countries are the RESOLVED codes (so "UK" and "GBR" share a key —
+// honestly the same data) sorted for order-independence; no countries (every-
+// country / OWID-IMF-all) yields an empty country segment, distinct from a
+// specific-country fetch of the same id.
+function fetchCacheKey(id: string, codes: string[], ys?: number, ye?: number): string {
+  const nid = id.trim().toLowerCase();
+  const nc = codes.map((c) => c.trim().toUpperCase()).sort().join(',');
+  return `${nid}|${nc}|${ys ?? ''}:${ye ?? ''}`;
+}
 
 export interface TraceEvent {
   tool: string;
@@ -62,11 +108,21 @@ export interface TraceEvent {
   // searched, candidate count, top match + which terms/synonyms fired) that
   // the UI renders as a dedicated search-receipt card. UI-only.
   receipt?: SearchReceipt;
-  // Set only on an 'execute_js' step whose code called llm(): one nested
-  // receipt per bounded judgment call (prompt summary, data size, duration,
-  // tokens, depth). The UI renders these indented under the step, so a
-  // model-derived value is always visibly attributed as one.
-  rlmReceipts?: RlmReceipt[];
+  // Set on a recursive 'llm' step (an llm() call made from inside execute_js):
+  // renders as an indented child line-item under its execute_js parent, so the
+  // recursion is visible in the trace. The parent execute_js step immediately
+  // precedes this step's run in the event list.
+  nested?: boolean;
+  // Actual measured wall-clock duration (ms) for a step, when known at push
+  // time (the llm() receipts set this). The UI prefers it over its own
+  // render-time timer so a staged/offline render still shows a real duration.
+  durationMs?: number;
+  // Serialized-data size (bytes) attached to an llm() call — the size of the
+  // data slice the recursive call reasoned over. UI shows it on the receipt.
+  dataBytes?: number;
+  // Set true on a write_file step whose content is model-derived (produced via
+  // llm(), not fetched). Drives the subtle "model-derived" provenance label.
+  derived?: boolean;
 }
 
 export interface AgentCallbacks {
@@ -85,6 +141,11 @@ export interface AgentOutput {
   rows: DataRow[];
   csv: string;
   indicators: { id: string; name: string }[];
+  // The citation ledger for this session: one structured provenance record per
+  // distinct live fetch (backlog #11). Only fetched data appears here —
+  // model-derived (llm()) artifacts never enter it. The UI's evidence section
+  // renders these; the CSV export carries them as comment lines.
+  citations: Citation[];
   confidence: 'ok' | 'low';
   verifierReport: string;
   cost: number;
@@ -95,7 +156,7 @@ export interface AgentOutput {
 // The system prompt is assembled per session from the active databases, so a
 // hard-filtered session is never told about — and never reaches for — a source
 // it isn't allowed to use.
-function buildSystemPrompt(sources: SourceDef[]): string {
+export function buildSystemPrompt(sources: SourceDef[], rlm: boolean = false): string {
   const labels = sources.map((s) => s.label);
   const many = sources.length > 1;
   const defaultLabel = sources.some((s) => s.id === 'worldbank') ? 'World Bank' : labels[0];
@@ -103,6 +164,16 @@ function buildSystemPrompt(sources: SourceDef[]): string {
   const activeLine = many
     ? `Your active databases (find_series searches all of them at once; prefer ${defaultLabel} when more than one fits):`
     : `Your one active database is ${labels[0]}. find_series searches it:`;
+  // The recursive llm() capability is opt-in and OFF by default. When off, the
+  // prompt never mentions it — the model cannot reach for what it is not told
+  // exists (withholding, the same discipline as the source filter). When on,
+  // the execute_js guidance gains the llm() paragraph and the provenance rule.
+  const llmLine = rlm
+    ? `\n     Inside execute_js you may also \`await llm(prompt, dataSlice)\` — a bounded recursive model call for SEMANTIC work over data too big or tedious to hold in context: labelling/classifying/summarizing many rows (e.g. tag each country's trend as "rising"/"falling", group indicator names into themes). It returns TEXT only, no tools. Bounds (hard): at most ${MAX_LLM_PER_RUN} llm() calls per execute_js run and ${MAX_LLM_PER_TURN} per turn; the \`data\` you pass must serialize under ~${Math.round(LLM_DATA_CAP / 1000)}KB — slice smaller if it rejects. Over-cap/over-size calls throw a catchable error. Use llm() to reason ABOUT data, never to invent numbers: its output is model-derived, NOT fetched data.`
+    : '';
+  const provenanceRule = rlm
+    ? `- PROVENANCE: anything llm() produces is model-derived, not fetched. Never present it as a data value, cite it, or put it in a chart as if measured. If you save an llm()-derived artifact with write_file, set derived=true so it is labelled model-derived.\n`
+    : '';
 
   return `You are Chitti, a data analyst agent. You answer questions about the world with real numbers fetched live from free institutional APIs. Your reasoning and every tool call stream to the user as you work — state decisions in your reasoning, never in files.
 
@@ -116,12 +187,12 @@ PIPELINE — one step at a time, about 4-5 calls total:
    ${activeLine}
 ${snippets}
 
-2. FETCH ONCE using the fetch tool named for your chosen id's source (see above): explicit ISO3 codes (or one aggregate like WLD) for named countries/regions; fetch_worldbank_all for "every country" questions (country_ids has no wildcard — never build the full country list yourself).
+2. FETCH ONCE with fetch_series(id, …): pass the id from find_series verbatim — it routes to the right source automatically. Give explicit countries (ISO3 codes or loose names like "UK"; or one aggregate like WLD) for named countries/regions, or OMIT countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself).
 
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
    - correlate → relationship between two fetched indicators.
-   - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.
+   - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.${llmLine}
 
 4. render_chart. line = time series · bar = ranking · scatter = two indicators · grouped-bar = a few countries side by side. The call's arguments ARE the spec — build them from step 3's result.
 
@@ -131,7 +202,26 @@ Rules:
 - Hard budget: ${MAX_TOOL_CALLS} tool calls. Never re-fetch data you already have.
 - Use ids from search results verbatim. Years are numbers.
 - Only the active databases listed above are available — do not mention or attempt any other source.
-- list_countries, write_file, read_file exist but are almost never needed.`;
+${provenanceRule}${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- list_countries, write_file, read_file exist but are almost never needed.`;
+}
+
+// The system prompt for a depth-1 per-source sub-agent — scoped to ONE
+// database. It fetches and distils; it never charts, verifies, or delegates
+// (those belong to the main loop, and delegate_source is not in its schema).
+export function buildSubAgentPrompt(src: SourceDef, rlm: boolean = false): string {
+  // Sub-agents obey the same llm() toggle as the main loop: when RLM is off,
+  // their execute_js guidance never mentions llm() either, and their
+  // execute_js runs get no llm argument (the shared dispatch gates on the same
+  // rlmEnabled). So a delegation cannot become a back door to the capability.
+  const execLine = rlm
+    ? 'execute_js (compute over the rows fetched so far — you may also `await llm(prompt, dataSlice)` for bounded semantic work)'
+    : 'execute_js (compute over the rows fetched so far)';
+  return `You are a focused sub-agent. You work with exactly ONE database: ${src.label}.
+${src.promptSnippet}
+
+Your tools: find_series (searches ${src.label} only), fetch_series (fetch a ${src.label} id it returns — ids from other sources are refused here), ${execLine}, and return_findings.
+
+Do the minimum needed to answer the sub-question: find the series, fetch it, optionally compute, then call return_findings with a SHORT distilled summary — a few sentences naming the key numbers and what they show. Your fetched rows are automatically merged back to the main agent WITH their citations, so never paste raw rows into the summary. Budget: ${MAX_SUBAGENT_CALLS} tool calls. Call tools; do not narrate a plan in prose.`;
 }
 
 // A compact, model-friendly summary of a data fetch.
@@ -160,29 +250,51 @@ export interface SessionOptions {
   // The hard filter: only these sources' tools and prompt guidance reach the
   // model, so it can only answer from the databases the user selected.
   sources?: string[];
-  // Whether execute_js code may call the bounded nested `llm()` (see rlm.ts).
+  // Whether execute_js code may call the bounded recursive `llm()` primitive.
   // Default false, and deliberately so: every nested call spends the user's
   // own key, so the capability is opt-in. Off is enforced by withholding, not
-  // by refusing. The execute_js description omits the llm() paragraph and no
-  // caller is passed, so the model never learns the capability exists and
-  // cannot burn a tool call discovering it is disabled.
+  // by refusing. When off, the system prompt omits the llm() guidance (main
+  // loop AND sub-agent) and execute_js is run with no llm argument, so the
+  // sandbox binding is the throw-on-call default — the model never learns the
+  // capability exists and cannot burn a tool call discovering it is disabled.
   rlm?: boolean;
 }
 
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
   const activeSources = resolveSources(opts?.sources);
   const rlmEnabled = opts?.rlm ?? false;
-  const toolSchemas = schemasForSources(opts?.sources, rlmEnabled);
+  const toolSchemas = schemasForSources(opts?.sources);
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(activeSources) },
+    { role: 'system', content: buildSystemPrompt(activeSources, rlmEnabled) },
   ];
   const vfsFiles: Record<string, string> = {};
   const state: {
     rows: DataRow[];
     chartSpec: ChartSpec | null;
     indicators: Map<string, string>;
+    // The citation ledger (backlog #11): keyed by the fetch-cache key so a
+    // repeat/cached fetch maps to the SAME entry (cite once). Session-scoped,
+    // like state.rows — provenance persists across turns. Insertion order is
+    // preserved by Map, so the evidence section lists sources in fetch order.
+    citations: Map<string, Citation>;
     finding: string;
-  } = { rows: [], chartSpec: null, indicators: new Map(), finding: '' };
+  } = { rows: [], chartSpec: null, indicators: new Map(), citations: new Map(), finding: '' };
+
+  // Session fetch cache (backlog #9), at the fetch_series choke point. Key =
+  // normalized (id + resolved countries + year range); value = the exact
+  // model-facing summary + trace detail from the first successful fetch. Lives
+  // for the whole SESSION and is deliberately NOT invalidated on a new turn:
+  // series like a GDP time-range don't change mid-session, so a repeat fetch of
+  // the same id/countries/range is genuinely the same data. A cache HIT never
+  // touches the network and never re-appends to state.rows — the rows are
+  // already there from the first fetch (invariant: a cache entry implies its
+  // rows were merged into state.rows), so re-appending would double them. The
+  // receipt discloses the hit rather than pretending fresh work happened
+  // (receipts never lie). Shared by the main loop AND delegation sub-agents
+  // (both fetch through routeFetch against this same map), so a sub-agent fetch
+  // populates the cache the main loop can then hit. Only successful fetches are
+  // cached.
+  const fetchCache = new Map<string, { rows: DataRow[]; result: string; detail: string }>();
 
   let turnCount = 0;
 
@@ -194,6 +306,14 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       cb.onFiles({ ...vfsFiles });
     });
     let totalCost = 0;
+    // Shared per-turn counter for recursive llm() calls across every execute_js
+    // run in this turn (the MAX_LLM_PER_TURN cap). Resets each turn by living
+    // here, in ask()'s scope. Sub-agent llm() calls increment this same counter,
+    // so a delegation cannot escape the turn's overall llm budget.
+    let turnLlmCalls = 0;
+    // Shared per-turn counter for delegate_source sub-agents (MAX_DELEGATIONS_
+    // PER_TURN). Same scope-lifetime pattern as turnLlmCalls.
+    let turnDelegations = 0;
     state.finding = ''; // reset per turn; state.rows/chartSpec/indicators persist
     let turnKind: 'chart' | 'explanation' = 'chart';
     // The chart rendered during THIS turn only. state.chartSpec persists
@@ -203,27 +323,6 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     let turnChartSpec: ChartSpec | null = null;
     // Whether the model-fallback trace note was already emitted this turn.
     let fallbackNoted = false;
-    // The 8-calls-per-turn llm() budget, shared by every execute_js run in
-    // this turn (including the verifier-FAIL retry pass, which is the same
-    // turn and must not get a fresh allowance). Built only when RLM is on:
-    // with the flag off there is no budget, no run, and no caller at all.
-    const rlmBudget = rlmEnabled ? createTurnBudget() : null;
-    // Depth-1 by construction: the nested completion is issued with an EMPTY
-    // tool array, so the inner model cannot call execute_js (or anything
-    // else) and cannot recurse. There is no depth counter, because there is
-    // no edge for the recursion to follow.
-    const rlmCaller: RlmCaller | null = rlmEnabled
-      ? async (prompt: string) => {
-          const res = await complete(cfg, [{ role: 'user', content: prompt }], []);
-          // Attribute the spend to whatever model actually served THIS nested
-          // call, not to cfg.model. Those coincide today because the nested
-          // call reuses the same cfg, but OpenRouter can serve a fallback
-          // model, and a future sub-agent may deliberately use a cheaper one.
-          // Reading servedModel means the number cannot silently drift.
-          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
-          return { text: res.text, usage: res.usage };
-        }
-      : null;
     const turnStartIndex = messages.length;
 
     function pushTrace(e: Omit<TraceEvent, 'ts'>): TraceEvent {
@@ -236,16 +335,350 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       cb.onTrace([...trace]);
     }
 
-    async function dispatch(tc: ToolCall, tokens?: number): Promise<string> {
+    // Build a fresh bounded recursive llm() primitive for one execute_js run.
+    // Its per-run counter is local; the per-turn counter (turnLlmCalls) and cost
+    // are shared closure state, so llm() calls from the main loop AND from any
+    // delegation sub-agent all draw from the one MAX_LLM_PER_TURN budget. Each
+    // call streams a nested receipt (child line-item), is text-only with no tool
+    // access (depth-1 by construction), and rejects — catchably — past any cap.
+    function makeLlm(): LlmFn {
+      let runLlmCalls = 0;
+      return async (prompt: string, data?: unknown): Promise<string> => {
+        const p = String(prompt ?? '');
+        if (runLlmCalls >= MAX_LLM_PER_RUN) {
+          throw new Error(
+            `llm() limit reached: max ${MAX_LLM_PER_RUN} calls per execute_js run. ` +
+              'Do fewer, bigger-slice calls, or finish with what you have.'
+          );
+        }
+        if (turnLlmCalls >= MAX_LLM_PER_TURN) {
+          throw new Error(
+            `llm() limit reached: max ${MAX_LLM_PER_TURN} calls per turn (across all execute_js runs).`
+          );
+        }
+        let serialized = '';
+        if (data !== undefined) {
+          serialized = JSON.stringify(data) ?? '';
+          if (serialized.length > LLM_DATA_CAP) {
+            throw new Error(
+              `llm() data too large: ${serialized.length} bytes serialized > ${LLM_DATA_CAP} cap. ` +
+                'Slice the data smaller (fewer rows/fields per call) and try again.'
+            );
+          }
+        }
+        // Count the call only once it's past every guard — a rejected
+        // (over-cap or over-size) call must not consume budget.
+        runLlmCalls++;
+        turnLlmCalls++;
+        const childEv = pushTrace({
+          tool: 'llm',
+          argSummary: p.slice(0, 80),
+          status: 'running',
+          nested: true,
+          dataBytes: serialized.length,
+        });
+        const started = Date.now();
+        const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
+        try {
+          const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
+          // Price against the model that actually served the nested call, not
+          // cfg.model — OpenRouter's free-fallback chain can serve a different
+          // one (matches the main-loop attribution).
+          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+          childEv.status = 'ok';
+          childEv.durationMs = Date.now() - started;
+          childEv.tokens = res.usage.input + res.usage.output;
+          childEv.detail = serialized ? formatBytes(serialized.length) + ' in' : 'no data';
+          updateTrace();
+          return res.text ?? '';
+        } catch (err: any) {
+          childEv.status = 'error';
+          childEv.durationMs = Date.now() - started;
+          childEv.detail = 'llm() failed: ' + (err?.message ?? String(err));
+          updateTrace();
+          // Reject with a catchable error: user code may try/catch it; an
+          // uncaught rejection fails that execute_js run via the normal
+          // error-receipt path, and the loop continues.
+          throw new Error('llm() failed: ' + (err?.message ?? String(err)));
+        }
+      };
+    }
+
+    // Run a depth-1 per-source sub-agent (a delegate_source target). It drives
+    // its OWN small tool loop over a source-scoped schema set (find_series
+    // restricted to this source, the source's fetch tool, execute_js+llm(), and
+    // return_findings) against a SEPARATE message array — so the raw fetched
+    // rows land in the sub-agent's context, never the main model's. Rows and
+    // indicators still merge into the shared `state` (and VFS) via the reused
+    // dispatch(), keeping every citation intact. Returns only a distilled text
+    // summary. Errors and the step cap degrade to an ok:false failure summary;
+    // the main loop always continues.
+    async function runSubAgent(
+      src: SourceDef,
+      question: string
+    ): Promise<{ ok: boolean; summary: string; detail: string }> {
+      const subSchemas = subAgentSchemasFor(src.id);
+      const subMessages: ChatMessage[] = [
+        { role: 'system', content: buildSubAgentPrompt(src, rlmEnabled) },
+        { role: 'user', content: question || `Fetch and distil the relevant ${src.label} data.` },
+      ];
+      let steps = 0;
+      let summary = '';
+      let returned = false;
+      try {
+        while (steps < MAX_SUBAGENT_CALLS) {
+          const res = await complete(cfg, subMessages, subSchemas);
+          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+          if (!res.toolCalls.length) {
+            // No tool call — nudge once toward acting, counting it against the
+            // step budget so a silent model can't loop forever.
+            steps++;
+            subMessages.push({ role: 'assistant', content: res.text });
+            subMessages.push({
+              role: 'user',
+              content: 'Call a tool: fetch what the sub-question needs, then return_findings with a short distilled summary.',
+            });
+            continue;
+          }
+          subMessages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
+          const turnTokens = res.usage.input + res.usage.output;
+          for (const [idx, tc] of res.toolCalls.entries()) {
+            steps++;
+            const out = await dispatch(tc, {
+              tokens: idx === 0 ? turnTokens : undefined,
+              nested: true,
+              sourceIds: [src.id],
+              allowDelegate: false,
+            });
+            subMessages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
+            if (tc.name === 'return_findings') {
+              returned = true;
+              summary = String(tc.arguments.summary ?? '').trim();
+            }
+            if (steps >= MAX_SUBAGENT_CALLS) break;
+          }
+          if (returned) break;
+        }
+      } catch (err: any) {
+        // A hard failure (e.g. a model call rejected). Any rows fetched before
+        // it still merged with citations; report and let the main loop continue.
+        return {
+          ok: false,
+          summary: `Sub-agent for ${src.label} failed: ${err?.message ?? String(err)}. Continuing without it.`,
+          detail: 'error',
+        };
+      }
+      if (returned) {
+        return {
+          ok: true,
+          summary: `[${src.label}] ${summary || '(sub-agent returned no summary text)'}`,
+          detail: `${steps} step${steps === 1 ? '' : 's'}`,
+        };
+      }
+      return {
+        ok: false,
+        summary: `Sub-agent for ${src.label} reached its ${MAX_SUBAGENT_CALLS}-step limit without returning findings. Continuing without it.`,
+        detail: 'cap reached',
+      };
+    }
+
+    // routeFetch is the single fetch choke point behind fetch_series (and the
+    // legacy per-source tool names). It (1) reads the source off the id's
+    // namespace, (2) enforces the source hard-filter — an id outside the
+    // caller's allowed sources is refused (this is how a hard-filtered session,
+    // and a source-scoped sub-agent, keep out-of-namespace data out), (3)
+    // resolves loose country inputs ONCE (was duplicated across the three
+    // branches), (4) serves the session cache on a repeat, and only otherwise
+    // (5) calls the underlying per-source fetcher. Country resolution + receipt
+    // style match the pre-router per-source branches exactly. Sets ev.detail and
+    // returns the model-facing result string.
+    async function routeFetch(
+      ev: TraceEvent,
+      id: string,
+      rawCountries: string[] | undefined,
+      ys: number | undefined,
+      ye: number | undefined,
+      allowedSourceIds: string[]
+    ): Promise<string> {
+      const source = fetchSourceOf(id);
+      if (source === 'unknown') {
+        ev.detail = 'unknown source';
+        return (
+          `ERROR: cannot route "${id}" — its source namespace is not recognized. Use an id from ` +
+          'find_series (a plain World Bank code, "owid:<slug>", or "imf:<code>").'
+        );
+      }
+      if (!allowedSourceIds.includes(source)) {
+        ev.detail = 'refused: out-of-source id';
+        return (
+          `ERROR: "${id}" is a ${source} series, not available ${allowedSourceIds.length === 1 ? 'to this sub-agent' : 'in this session'}. ` +
+          `Use a find_series id from: ${allowedSourceIds.join(', ')}.`
+        );
+      }
+
+      // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
+      // ISO3/aggregate codes ONCE, here at the choke point. Unresolved names
+      // pass through unchanged; the receipt surfaces any rewrites.
+      const hasCountries = Array.isArray(rawCountries) && rawCountries.length > 0;
+      const resolved = hasCountries ? resolveCountryList(rawCountries!) : undefined;
+      const codes = resolved?.codes ?? [];
+      const changes = resolved?.changes ?? [];
+      const resNote = changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '';
+      const resDetail = changes.length ? `${formatResolutions(changes)} · ` : '';
+
+      // Cache lookup on the normalized (id + resolved countries + range) key.
+      const key = fetchCacheKey(id, codes, ys, ye);
+      const cached = fetchCache.get(key);
+      if (cached) {
+        // Hit: no network, no re-append (rows already in state.rows). Disclose it.
+        ev.detail = 'cached · ' + cached.detail;
+        return '(cached — fetched earlier this session; not re-fetched)\n' + cached.result;
+      }
+
+      let rows: DataRow[] = [];
+      let body = '';
+      let detail = '';
+      // Provenance captured verbatim from the fetcher, for the citation ledger.
+      let nid = id; // the normalized indicator id used as the citation key part
+      let requestUrl = ''; // the exact API URL that was hit
+      let sourceUpdated: string | undefined; // source data vintage, when present
+      switch (source) {
+        case 'worldbank': {
+          if (hasCountries) {
+            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye));
+            rows = r.rows;
+            requestUrl = r.requestUrl;
+            sourceUpdated = r.sourceUpdated;
+            body = resNote + summarizeRows(rows);
+            if (r.truncatedFrom) {
+              body +=
+                `\n\nNOTE: you requested ${r.truncatedFrom} countries but only the first 60 were ` +
+                `fetched (per-call limit). Call fetch_series again with the remaining countries and merge results.`;
+            }
+            detail =
+              resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
+          } else {
+            // No countries → every real country, batched internally.
+            const r = await fetchWorldbankAll(id, Number(ys), Number(ye));
+            rows = r.rows;
+            requestUrl = r.requestUrl;
+            sourceUpdated = r.sourceUpdated;
+            body = summarizeRows(rows);
+            detail = `${rows.length} rows · ${r.countryCount} countries · ${r.batchCount} batch${r.batchCount === 1 ? '' : 'es'}`;
+          }
+          state.indicators.set(id, id);
+          break;
+        }
+        case 'owid': {
+          const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye);
+          rows = r.rows;
+          requestUrl = r.requestUrl;
+          nid = 'owid:' + id.replace(/^owid:/, '');
+          state.indicators.set(nid, datasetName(nid) ?? r.metric);
+          body = resNote + summarizeRows(rows);
+          detail = resDetail + `${rows.length} rows · OWID`;
+          break;
+        }
+        case 'imf': {
+          const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye);
+          rows = r.rows;
+          requestUrl = r.requestUrl;
+          nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
+          state.indicators.set(nid, datasetName(nid) ?? nid);
+          body = resNote + summarizeRows(rows);
+          detail = resDetail + `${rows.length} rows · IMF (incl. forecasts)`;
+          break;
+        }
+      }
+      state.rows = state.rows.concat(rows);
+      // Cache only this successful result (and the rows it merged — the entry is
+      // a faithful record; state.rows already holds them, see the map's header).
+      fetchCache.set(key, { rows, result: body, detail });
+      // Record the citation ledger entry for this fetch (backlog #11). Keyed by
+      // the same cache key, so a later identical (cached) fetch reuses THIS entry
+      // rather than duplicating it — a cache hit returns above, before here, and
+      // never overwrites. Only a real, successful fetch writes a citation, so a
+      // model-derived artifact can never enter the ledger. Mirrored into the VFS
+      // as citations.json (via:'fetch') so the model can read it with read_file.
+      recordCitation(key, source, nid, codes, ys, ye, rows.length, requestUrl, sourceUpdated);
+      ev.detail = detail;
+      return body;
+    }
+
+    // Build and store one citation ledger entry, then re-mirror the whole ledger
+    // to the VFS as citations.json with via:'fetch' meta (symmetric to a
+    // model-derived artifact's via:'llm'). fetchedAt is stamped here — the moment
+    // Chitti fetched — kept strictly distinct from sourceUpdated (the source's
+    // own vintage). Idempotent per key: a repeat with the same key overwrites an
+    // identical record, so the ledger stays one-entry-per-distinct-fetch.
+    function recordCitation(
+      key: string,
+      source: 'worldbank' | 'owid' | 'imf',
+      nid: string,
+      codes: string[],
+      ys: number | undefined,
+      ye: number | undefined,
+      rowCount: number,
+      requestUrl: string,
+      sourceUpdated: string | undefined
+    ): void {
+      const humanUrl = citationHumanUrl(source, nid);
+      const citation: Citation = {
+        id: key,
+        source,
+        sourceLabel: citationSourceLabel(source),
+        indicatorId: nid,
+        indicatorName: indicatorName(nid),
+        url: humanUrl,
+        // Keep the API request URL only when it genuinely differs from the human
+        // page (it always does across our sources, but stay honest structurally).
+        ...(requestUrl && requestUrl !== humanUrl ? { requestUrl } : {}),
+        countries: codes,
+        yearRange: ys !== undefined || ye !== undefined ? { start: ys, end: ye } : null,
+        fetchedAt: new Date().toISOString(),
+        ...(sourceUpdated ? { sourceUpdated } : {}),
+        rowCount,
+        cached: false,
+      };
+      state.citations.set(key, citation);
+      vfs.write(
+        'citations.json',
+        JSON.stringify([...state.citations.values()], null, 2),
+        { via: 'fetch' }
+      );
+    }
+
+    // dispatch runs one tool call. Options let the SAME dispatcher serve both
+    // the main loop and a delegation sub-agent, so a sub-agent's fetch merges
+    // rows/indicators exactly as a direct fetch would (citations intact):
+    //   nested       — render this step as an indented child receipt (sub-agent
+    //                  steps stream under their delegate_source parent).
+    //   sourceIds    — which databases find_series searches (a sub-agent scopes
+    //                  it to its one source).
+    //   allowDelegate — false inside a sub-agent, so delegate_source is refused
+    //                  at runtime too, not only structurally (depth-1).
+    interface DispatchOpts {
+      tokens?: number;
+      nested?: boolean;
+      sourceIds?: string[];
+      allowDelegate?: boolean;
+    }
+    async function dispatch(tc: ToolCall, opts: DispatchOpts = {}): Promise<string> {
+      const {
+        tokens,
+        nested,
+        sourceIds = activeSources.map((s) => s.id),
+        allowDelegate = true,
+      } = opts;
       const a = tc.arguments;
-      const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens });
+      const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens, nested });
       try {
         let result = '';
         switch (tc.name) {
           case 'find_series': {
             const { hits, receipt } = await findSeriesWithReceipt(
               String(a.query ?? ''),
-              activeSources.map((s) => s.id)
+              sourceIds
             );
             // Attach the structured receipt for the UI's search-receipt card.
             // The model still receives only the SeriesHit[] JSON (plus a single
@@ -269,36 +702,50 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             result = JSON.stringify(list.map((c) => ({ id: c.id, name: c.name, region: c.region })));
             break;
           }
-          case 'fetch_worldbank': {
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
-            const { rows, truncatedFrom } = await fetchWorldbank(
-              String(a.indicator_id),
-              ids,
-              Number(a.year_start),
-              Number(a.year_end)
+          case 'fetch_series': {
+            // The router (backlog #7): one fetch tool, routed by the id's source
+            // namespace. Country resolution + session caching happen once, inside
+            // routeFetch, for every source. `sourceIds` is the allowed-source set
+            // (all active sources in the main loop; one source in a sub-agent),
+            // so out-of-namespace ids are refused here.
+            const rawCountries = Array.isArray(a.countries) ? (a.countries as string[]) : undefined;
+            result = await routeFetch(
+              ev,
+              String(a.id ?? ''),
+              rawCountries,
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-            result = summarizeRows(rows);
-            if (truncatedFrom) {
-              result +=
-                `\n\nNOTE: you requested ${truncatedFrom} countries but only the first 60 were ` +
-                `fetched (per-call limit). Call fetch_worldbank again with the remaining ` +
-                `country_ids and merge results if you need full coverage.`;
-            }
-            ev.detail = `${rows.length} rows` + (truncatedFrom ? ` (truncated from ${truncatedFrom})` : '');
+            break;
+          }
+          // Legacy per-source fetch tool names — retired from the model's schema
+          // surface (it now sees find_series → fetch_series only), but still
+          // dispatched here so a stubborn model that reaches for an old name by
+          // habit keeps working. All route through the SAME fetch_series choke
+          // point (routeFetch: resolution + cache), so behavior/receipts match.
+          // Undocumented on purpose.
+          case 'fetch_worldbank': {
+            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
+            result = await routeFetch(
+              ev,
+              String(a.indicator_id ?? ''),
+              rawIds,
+              Number(a.year_start),
+              Number(a.year_end),
+              sourceIds
+            );
             break;
           }
           case 'fetch_worldbank_all': {
-            const { rows, countryCount, batchCount } = await fetchWorldbankAll(
-              String(a.indicator_id),
+            result = await routeFetch(
+              ev,
+              String(a.indicator_id ?? ''),
+              undefined, // no countries → every-country path
               Number(a.year_start),
-              Number(a.year_end)
+              Number(a.year_end),
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            state.indicators.set(String(a.indicator_id), String(a.indicator_id));
-            result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · ${countryCount} countries · ${batchCount} batch${batchCount === 1 ? '' : 'es'}`;
             break;
           }
           case 'execute_js': {
@@ -311,22 +758,24 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev.detail = 'no data';
               break;
             }
-            // ONE RlmRun across both attempts: the retry below re-executes the
-            // same body, and a fresh run would hand that second execution a
-            // fresh 4-call allowance, so code calling llm() without returning
-            // could spend 8 in what the model wrote as one run.
+            // The bounded recursive llm() primitive for THIS execute_js run.
+            // Shared between the main loop and delegation sub-agents (makeLlm),
+            // so every llm() call — wherever it originates — draws from the same
+            // per-turn budget and emits the same nested receipt.
             //
-            // With RLM off there is no run and executeJs is called with NO
-            // llm argument, so the sandboxed body is handed nothing it could
-            // invoke and code that never calls llm() behaves exactly as it
-            // did before the capability existed.
-            const rlmRun = rlmCaller && rlmBudget ? createRlmRun(rlmCaller, rlmBudget) : null;
-            let out = await executeJs(code, state.rows, rlmRun?.llm);
+            // Gated off by default (opts.rlm, see rlmEnabled): when RLM is
+            // disabled we pass NO llm to executeJs, so the sandbox's `llm`
+            // binding is the default that throws on call and the model was
+            // never told the capability exists (buildSystemPrompt omits it).
+            // Enforcement is by withholding, exactly like the source filter.
+            // One llm closure is reused across BOTH executeJs attempts so the
+            // retry shares the per-run 4-call allowance, not a fresh one.
+            const llm = rlmEnabled ? makeLlm() : undefined;
+            let out = await executeJs(code, state.rows, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = await executeJs('return (' + code + ')', state.rows, rlmRun?.llm);
+              out = await executeJs('return (' + code + ')', state.rows, llm);
             }
-            if (rlmRun?.receipts.length) ev.rlmReceipts = [...rlmRun.receipts];
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =
                 'Your code ran without error but returned null/undefined. It must END with a ' +
@@ -335,57 +784,40 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev.detail = 'returned null';
             } else {
               result = out.ok ? JSON.stringify(out.result) : 'ERROR: ' + out.error;
-              // State the provenance in the model's own context, not only in
-              // the UI: this result is part model judgment, and the model is
-              // the thing that decides what to chart and what to claim next.
-              if (rlmRun?.receipts.length) result = provenanceNotice(rlmRun.receipts.length) + '\n' + result;
-              ev.detail =
-                (out.ok ? 'ok' : 'error: ' + out.error) +
-                (rlmRun?.receipts.length
-                  ? ` · ${rlmRun.receipts.length} llm() call${rlmRun.receipts.length === 1 ? '' : 's'} (model-derived)`
-                  : '');
+              ev.detail = out.ok ? 'ok' : 'error: ' + out.error;
             }
             break;
           }
           case 'write_file': {
-            vfs.write(String(a.path), String(a.content ?? ''));
-            result = 'written';
+            // Provenance: a model-derived artifact (produced via llm()) is
+            // marked so the VFS entry carries { derived, via } and the trace
+            // shows a "model-derived" label — it must never read as fetched.
+            const derived = a.derived === true;
+            vfs.write(
+              String(a.path),
+              String(a.content ?? ''),
+              derived ? { derived: true, via: 'llm' } : undefined
+            );
+            if (derived) ev.derived = true;
+            result = derived ? 'written (model-derived)' : 'written';
             break;
           }
           case 'read_file': {
             result = vfs.read(String(a.path)) || '(empty)';
             break;
           }
-          case 'fetch_owid': {
-            const id = String(a.dataset_id ?? '');
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
-            const { rows, metric } = await fetchOwid(
-              id,
-              ids,
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined
-            );
-            state.rows = state.rows.concat(rows);
-            const nid = 'owid:' + id.replace(/^owid:/, '');
-            state.indicators.set(nid, datasetName(nid) ?? metric);
-            result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · OWID`;
-            break;
-          }
+          case 'fetch_owid':
           case 'fetch_imf': {
-            const id = String(a.dataset_id ?? '');
-            const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
-            const { rows } = await fetchImf(
-              id,
-              ids,
+            // Legacy per-source names (see the note above fetch_worldbank).
+            const rawIds = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : undefined;
+            result = await routeFetch(
+              ev,
+              String(a.dataset_id ?? ''),
+              rawIds,
               a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              sourceIds
             );
-            state.rows = state.rows.concat(rows);
-            const nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
-            state.indicators.set(nid, datasetName(nid) ?? nid);
-            result = summarizeRows(rows);
-            ev.detail = `${rows.length} rows · IMF (incl. forecasts)`;
             break;
           }
           case 'growth_stats': {
@@ -425,6 +857,59 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             state.finding = String(a.explanation ?? '').trim();
             turnKind = 'explanation';
             result = 'done';
+            break;
+          }
+          case 'delegate_source': {
+            // Gating: refused inside a sub-agent (allowDelegate=false → depth-1)
+            // and refused when only one source is active (nothing to delegate
+            // across — and the tool isn't even in a single-source schema).
+            if (!allowDelegate || activeSources.length <= 1) {
+              result =
+                'ERROR: delegate_source is unavailable here — use the direct fetch/compute tools for this source.';
+              ev.detail = 'unavailable';
+              break;
+            }
+            if (turnDelegations >= MAX_DELEGATIONS_PER_TURN) {
+              result =
+                `ERROR: delegation budget spent (max ${MAX_DELEGATIONS_PER_TURN} per turn). ` +
+                'Combine what the sub-agents already returned, or use the direct tools.';
+              ev.detail = 'cap reached';
+              break;
+            }
+            const wanted = String(a.source ?? '').trim().toLowerCase();
+            const src = activeSources.find(
+              (s) => s.id.toLowerCase() === wanted || s.label.toLowerCase() === wanted
+            );
+            if (!src) {
+              result =
+                `ERROR: "${a.source}" is not an active source. Active: ` +
+                activeSources.map((s) => s.label).join(', ') + '.';
+              ev.detail = 'unknown source';
+              break;
+            }
+            turnDelegations++;
+            const subQ = String(a.question ?? '').trim();
+            // Friendly parent-receipt summary: "World Bank → 'life expectancy…'".
+            ev.argSummary = `${src.label} → "${subQ.slice(0, 60)}"`;
+            updateTrace();
+            const sub = await runSubAgent(src, subQ);
+            if (!sub.ok) {
+              // Failure: the parent receipt shows an error, the distilled failure
+              // summary goes back as the tool result, and the main loop continues.
+              ev.status = 'error';
+              ev.detail = sub.detail;
+              updateTrace();
+              return sub.summary;
+            }
+            ev.detail = sub.detail;
+            result = sub.summary;
+            break;
+          }
+          case 'return_findings': {
+            // Terminal tool of a sub-agent; consumed by runSubAgent, which reads
+            // the summary off the call. Here it just acknowledges the step.
+            ev.detail = 'returned';
+            result = 'ok';
             break;
           }
           default:
@@ -544,7 +1029,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         const turnTokens = res.usage.input + res.usage.output;
         for (const [idx, tc] of res.toolCalls.entries()) {
           calls++;
-          const out = await dispatch(tc, idx === 0 ? turnTokens : undefined);
+          const out = await dispatch(tc, { tokens: idx === 0 ? turnTokens : undefined });
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
           if (tc.name === 'finish' || tc.name === 'finish_explanation') finished = true;
           if (calls >= MAX_TOOL_CALLS) break;
@@ -571,7 +1056,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
     async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
       const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
-      const result = await verify(cfg, question, turnChartSpec, state.finding, (c) => (totalCost += c));
+      // Hand the verifier the structured ledger entries (truthful URLs +
+      // vintages) rather than reconstructed citation strings — light touch, the
+      // verdict logic is unchanged (backlog #11 point 5).
+      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c));
       ev.status = result.pass ? 'ok' : 'error';
       ev.pass = result.pass;
       ev.detail = result.report;
@@ -617,6 +1105,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     }
 
     const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
+    const citations = [...state.citations.values()];
 
     return {
       finding: state.finding,
@@ -624,8 +1113,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // spec made every chart-less follow-up re-display the previous chart.
       chartSpec: turnChartSpec,
       rows: state.rows,
-      csv: rowsToCSV(state.rows),
+      // Provenance rides along at the top of the export as `#` comment lines,
+      // so a downloaded CSV carries the citation ledger with it (backlog #11).
+      csv: citationsToCsvComments(citations) + rowsToCSV(state.rows),
       indicators,
+      citations,
       confidence,
       verifierReport: verifierReport.report,
       cost: totalCost,
@@ -692,9 +1184,18 @@ async function verify(
   question: string,
   spec: ChartSpec | null,
   finding: string,
+  citations: Citation[],
   addCost: (c: number) => void
 ): Promise<{ pass: boolean; report: string; tokens?: number }> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
+  // The ledger's own entries — truthful source, indicator, URL and vintage,
+  // straight from the fetch (not reconstructed). Gives the verifier real
+  // provenance to check the finding against; its verdict logic is unchanged.
+  const citeText = citations.length
+    ? citations
+        .map((c) => `${c.sourceLabel}: ${c.indicatorName} (${c.indicatorId}) ${c.url}${c.sourceUpdated ? ` [updated ${c.sourceUpdated}]` : ''}`)
+        .join('\n')
+    : '(no live data fetched)';
   const messages: ChatMessage[] = [
     {
       role: 'system',
@@ -706,7 +1207,7 @@ async function verify(
     },
     {
       role: 'user',
-      content: `Question: ${question}\n\nChart spec: ${specText}\n\nFinding: ${finding || '(none)'}`,
+      content: `Question: ${question}\n\nChart spec: ${specText}\n\nFinding: ${finding || '(none)'}\n\nSources (citation ledger):\n${citeText}`,
     },
   ];
   try {
@@ -726,12 +1227,25 @@ async function verify(
 }
 
 // ── Helpers ──
+// Compact byte size for the llm() receipt: "812 B", "1.2 KB".
+function formatBytes(n: number): string {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
+}
+
 function summarizeArgs(tool: string, a: Record<string, unknown>): string {
   switch (tool) {
     case 'find_series':
       return String(a.query ?? '');
     case 'list_countries':
       return String(a.filter ?? 'all');
+    case 'fetch_series': {
+      const ids = Array.isArray(a.countries) ? (a.countries as string[]) : [];
+      const shown = ids.length
+        ? ids.slice(0, 4).join(',') + (ids.length > 4 ? `+${ids.length - 4}` : '')
+        : 'all countries';
+      const hasYears = a.year_start !== undefined || a.year_end !== undefined;
+      return `${a.id} · ${shown}` + (hasYears ? ` · ${a.year_start ?? ''}–${a.year_end ?? ''}` : '');
+    }
     case 'fetch_worldbank': {
       const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
       const shown = ids.slice(0, 4).join(',') + (ids.length > 4 ? `+${ids.length - 4}` : '');
@@ -745,6 +1259,10 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
       return `${a.type} · ${a.title}`;
     case 'finish':
       return String(a.one_line_finding ?? '').slice(0, 80);
+    case 'delegate_source':
+      return `${a.source} → "${String(a.question ?? '').slice(0, 60)}"`;
+    case 'return_findings':
+      return String(a.summary ?? '').slice(0, 80);
     default:
       return '';
   }

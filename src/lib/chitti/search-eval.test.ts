@@ -12,10 +12,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { findSeries } from './tools';
 import { EVAL_CASES } from './search-eval.fixtures';
 
-// Floors, not targets. Current measured rates are top-1 97.8% (44/45) and
-// top-3 100% (45/45); these thresholds sit below that with a small margin so a
-// benign catalog reshuffle survives, but losing three-plus top-1 cases (or two
-// top-3 cases) to a scoring regression fails the build.
+// Floors, not targets. Current measured rates are top-1 98.1% (51/52) and
+// top-3 100% (52/52) — measured after the OWID curated catalog was expanded;
+// these thresholds sit below that with a small margin so a benign catalog
+// reshuffle survives, but losing three-plus top-1 cases (or two top-3 cases)
+// to a scoring regression fails the build.
 const TOP1_FLOOR = 0.93;
 const TOP3_FLOOR = 0.97;
 

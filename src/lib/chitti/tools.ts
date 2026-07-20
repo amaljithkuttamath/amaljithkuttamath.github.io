@@ -60,15 +60,31 @@ export const TOPICS = Object.keys(indicatorsData as Record<string, unknown>);
 // ── Virtual filesystem ──────────────────────────────────────────────────
 // An in-memory Record<string,string> the agent writes intermediate artifacts
 // into. The UI mirrors this so the "deep agent" is visible as it works.
+// Provenance marker for a VFS entry. Set when the file's content was produced
+// by a recursive llm() call inside execute_js (semantic labelling/summarizing
+// over data slices) rather than fetched from a data API. Identity-critical:
+// model-derived content must be visibly labelled and must never be presented
+// as fetched data (no citation, never in the evidence table).
+export interface FileMeta {
+  derived?: boolean; // true → content is model-derived, not fetched
+  via?: string; // how it was derived, e.g. 'llm'
+}
+
 export class VFS {
   files: Record<string, string> = {};
+  // Per-path provenance, parallel to `files`. Absent entry = ordinary
+  // (non-derived) file. Kept separate so the string content contract of
+  // `files` is unchanged for every existing reader.
+  meta: Record<string, FileMeta> = {};
   private onChange?: (files: Record<string, string>) => void;
 
   constructor(onChange?: (files: Record<string, string>) => void) {
     this.onChange = onChange;
   }
-  write(path: string, content: string): void {
+  write(path: string, content: string, meta?: FileMeta): void {
     this.files[path] = content;
+    if (meta && (meta.derived || meta.via)) this.meta[path] = { ...meta };
+    else delete this.meta[path]; // a plain re-write clears any stale marker
     this.onChange?.({ ...this.files });
   }
   read(path: string): string {
@@ -278,6 +294,14 @@ export interface FetchWorldbankResult {
   // Original requested country count, only set when it exceeded the 60-per-
   // call cap and was truncated. Undefined when no truncation occurred.
   truncatedFrom?: number;
+  // The exact API URL this call hit — recorded verbatim for the citation
+  // ledger (the request URL, distinct from the human-visitable data.worldbank
+  // page). Never reconstructed after the fact; it is the string we fetched.
+  requestUrl: string;
+  // Data vintage straight from the World Bank JSON header (`data[0].lastupdated`,
+  // e.g. "2024-12-16"). This is when the World Bank last refreshed the series —
+  // NOT when we fetched it. Undefined when the header omits it (never invented).
+  sourceUpdated?: string;
 }
 
 export async function fetchWorldbank(
@@ -302,6 +326,12 @@ export async function fetchWorldbank(
     const msg = Array.isArray(data) && data[0]?.message?.[0]?.value;
     throw new Error('World Bank API: ' + (msg || 'no data returned'));
   }
+  // data[0] is the WB response header; it carries `lastupdated` — the series'
+  // real data vintage. Capture it when present (string, e.g. "2024-12-16");
+  // omit otherwise. This is disclosed as `sourceUpdated`, never as fetchedAt.
+  const lastupdated = (data[0] && typeof data[0].lastupdated === 'string')
+    ? (data[0].lastupdated as string)
+    : undefined;
   const rows: DataRow[] = (data[1] as any[]).map((r) => ({
     country: r.country?.value ?? r.countryiso3code,
     iso3: r.countryiso3code,
@@ -311,7 +341,7 @@ export async function fetchWorldbank(
   }));
   // Sort by country then year ascending for stable downstream use.
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows, truncatedFrom };
+  return { rows, truncatedFrom, requestUrl: url, sourceUpdated: lastupdated };
 }
 
 // fetch_worldbank_all: every real country for one indicator, batched and
@@ -326,6 +356,10 @@ export interface FetchWorldbankAllResult {
   rows: DataRow[];
   countryCount: number;
   batchCount: number;
+  // Representative request URL (the first batch's) + the series vintage from
+  // that batch's WB header — for the citation ledger of an every-country fetch.
+  requestUrl: string;
+  sourceUpdated?: string;
 }
 
 export async function fetchWorldbankAll(
@@ -343,12 +377,18 @@ export async function fetchWorldbankAll(
   // for a request that isn't latency-critical (this whole call already
   // replaces what used to be several separate LLM-driven round-trips).
   const allRows: DataRow[] = [];
+  let requestUrl = '';
+  let sourceUpdated: string | undefined;
   for (const batch of batches) {
-    const { rows } = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
-    allRows.push(...rows);
+    const r = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
+    allRows.push(...r.rows);
+    // The batches share one indicator/vintage; keep the first batch's URL and
+    // lastupdated as the representative citation for the whole every-country set.
+    if (!requestUrl) requestUrl = r.requestUrl;
+    if (sourceUpdated === undefined) sourceUpdated = r.sourceUpdated;
   }
   allRows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows: allRows, countryCount: ids.length, batchCount: batches.length };
+  return { rows: allRows, countryCount: ids.length, batchCount: batches.length, requestUrl, sourceUpdated };
 }
 
 // ── Additional sources: Our World in Data + IMF DataMapper ──────────────
@@ -363,22 +403,55 @@ export interface Dataset {
   note?: string;
 }
 
-// OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv
+// OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv,
+// so every id here round-trips: a find_series hit fetches through the router's
+// OWID branch unchanged. This is a hand-curated set of long-standing, canonical
+// OWID grapher slugs (the "never fabricate" constraint outweighs raw count — an
+// invented slug would 404 on fetch, breaking the round-trip). Names are worded
+// to avoid stealing World-Bank-preferred queries (e.g. the Gini entry says
+// "income inequality", not "Gini coefficient", so the WB Gini index still wins
+// that phrasing). The live catalog fallback (owidCatalog) widens coverage past
+// this list whenever the network is reachable.
 const OWID_DATASETS: [string, string][] = [
+  // Health & mortality
   ['life-expectancy', 'Life expectancy at birth (years)'],
   ['child-mortality', 'Child mortality rate (under-5, per 100 live births)'],
+  ['maternal-mortality', 'Maternal mortality ratio (per 100,000 live births)'],
+  ['prevalence-of-undernourishment', 'Prevalence of undernourishment (% of population)'],
+  ['death-rates-from-air-pollution', 'Death rate from air pollution (per 100,000 persons)'],
+  ['daily-per-capita-caloric-supply', 'Daily supply of calories per person (kcal)'],
+  // Demographics & population
   ['population', 'Population'],
+  // "persons" not "people": the bare word "people" false-matched colloquial
+  // queries like "how many people are online" (a World Bank internet series).
+  ['population-density', 'Population density (persons per km²)'],
+  ['median-age', 'Median age of the population (years)'],
+  ['children-per-woman', 'Children per woman (total fertility)'],
+  // Economy, poverty & inequality
   ['gdp-per-capita-worldbank', 'GDP per capita (international-$, PPP)'],
   ['human-development-index', 'Human Development Index (HDI)'],
-  ['happiness-cantril-ladder', 'Self-reported life satisfaction (Cantril ladder, 0-10)'],
+  ['share-of-population-in-extreme-poverty', 'Share of population in extreme poverty (%)'],
+  // (Gini/income inequality intentionally omitted here: the World Bank Gini
+  // index already covers it, and the OWID slug's id — "economic-inequality-…" —
+  // false-matched the "economic output" → GDP query. Left out to keep ranking
+  // clean; WB owns that metric.)
+  // Environment & climate
   ['co-emissions-per-capita', 'CO2 emissions per capita (tonnes)'],
   ['annual-co2-emissions-per-country', 'Annual CO2 emissions (tonnes)'],
+  ['cumulative-co2-emissions', 'Cumulative CO2 emissions (tonnes)'],
+  ['consumption-co2-per-capita', 'Consumption-based CO2 emissions per capita (tonnes)'],
+  ['temperature-anomaly', 'Global temperature anomaly (°C vs pre-industrial)'],
+  ['plastic-waste-per-capita', 'Plastic waste generated per person (kg/day)'],
+  // Energy
   ['share-electricity-renewables', 'Share of electricity from renewables (%)'],
+  ['per-capita-energy-use', 'Energy use per person (kWh)'],
+  // Technology
   ['share-of-individuals-using-the-internet', 'Share of population using the internet (%)'],
+  // Society, education & governance
   ['cross-country-literacy-rates', 'Literacy rate (%)'],
+  ['happiness-cantril-ladder', 'Self-reported life satisfaction (Cantril ladder, 0-10)'],
   ['homicide-rate-unodc', 'Homicide rate (per 100,000 people)'],
-  ['share-of-population-in-extreme-poverty', 'Share of population in extreme poverty (%)'],
-  ['daily-per-capita-caloric-supply', 'Daily supply of calories per person (kcal)'],
+  ['political-regime', 'Political regime (democracy classification)'],
 ];
 
 // IMF DataMapper codes — JSON at imf.org/external/datamapper/api/v1/<code>.
@@ -443,7 +516,7 @@ export async function fetchOwid(
   countryIds?: string[],
   yearStart?: number,
   yearEnd?: number
-): Promise<{ rows: DataRow[]; metric: string }> {
+): Promise<{ rows: DataRow[]; metric: string; requestUrl: string }> {
   const clean = slug.replace(/^owid:/, '');
   const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
   let resp: Response;
@@ -451,7 +524,7 @@ export async function fetchOwid(
     resp = await fetch(url);
   } catch (err: any) {
     throw new Error(
-      `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, use fetch_worldbank for this question instead.`
+      `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, fetch a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );
   }
   if (!resp.ok) throw new Error(`OWID API HTTP ${resp.status} for slug "${clean}" — the slug may be wrong; use search_datasets results verbatim.`);
@@ -483,7 +556,9 @@ export async function fetchOwid(
     });
   }
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows, metric };
+  // The grapher CSV carries no data-vintage field in its body, so no
+  // sourceUpdated is emitted here (never invented — omitted honestly).
+  return { rows, metric, requestUrl: url };
 }
 
 // fetch_imf: IMF DataMapper JSON. Shape:
@@ -494,7 +569,7 @@ export async function fetchImf(
   countryIds?: string[],
   yearStart?: number,
   yearEnd?: number
-): Promise<{ rows: DataRow[] }> {
+): Promise<{ rows: DataRow[]; requestUrl: string }> {
   const clean = code.replace(/^imf:/, '').toUpperCase();
   const path = countryIds?.length
     ? `${clean}/${countryIds.map((c) => c.trim().toUpperCase()).join('/')}`
@@ -505,7 +580,7 @@ export async function fetchImf(
     resp = await fetch(url);
   } catch (err: any) {
     throw new Error(
-      `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to fetch_worldbank (no forecasts, but similar historical macro data).`
+      `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series (no forecasts, but similar historical macro data).`
     );
   }
   if (!resp.ok) throw new Error(`IMF API HTTP ${resp.status} for code "${clean}"`);
@@ -531,7 +606,9 @@ export async function fetchImf(
     }
   }
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows };
+  // DataMapper JSON carries no per-series vintage, so no sourceUpdated (omitted,
+  // never invented). requestUrl is the exact endpoint we hit.
+  return { rows, requestUrl: url };
 }
 
 // ── Analysis helpers ─────────────────────────────────────────────────────
@@ -653,43 +730,49 @@ export function correlate(
 // would require moving execution to a Worker, which is more machinery than
 // this risk currently justifies.
 //
-// Async note: the body is compiled as an AsyncFunction, not a plain Function,
-// so model-written code can `await llm(...)` (see rlm.ts) as one step of a
-// computation. Code that never calls llm() behaves identically — an
-// AsyncFunction that never awaits still resolves with whatever it returns —
-// so the null-return guard, the retry-wrap, and every error message at the
-// call site keep working unchanged. The alternative, a two-phase
-// collect-then-resolve pass, would have to execute the body twice and so
-// would double any side effect or non-determinism in the model's code; that
-// is not the boring option, only the one that avoids the `await`.
+// RLM primitive: the code may also `await llm(prompt, data?)` — a bounded
+// recursive language-model call over a slice of the data (the Recursive
+// Language Model pattern: the context lives as data in this REPL and the
+// model's own code makes small, depth-1 LM calls over pieces of it, keeping
+// the raw data out of the main context). Because of `llm`, the sandboxed
+// function is an AsyncFunction, so the code may use `await`; a plain
+// synchronous `return` still works exactly as before. The caps, receipts,
+// and provenance live in the injected `llm` (see agent.ts); executeJs only
+// wires it in and awaits the result. When execute_js is run WITHOUT a
+// session-provided llm (RLM off, or a direct unit test), the default is a
+// function that throws on call — withholding, not a silent undefined.
 export interface ExecuteJsResult {
   ok: boolean;
   result?: unknown;
   error?: string;
 }
 
-// The bounded judgment call injected as `llm` (rlm.ts builds it). Omitted for
-// callers that don't want to expose it; the sandboxed code then sees an `llm`
-// that refuses rather than an undefined identifier, so a model that tries it
-// gets a clear message instead of a ReferenceError.
-export type ExecuteJsLlm = (prompt: unknown, data?: unknown) => Promise<unknown>;
+// The recursive LM primitive handed to sandboxed code. Returns text only —
+// no tool access — so it is depth-1 by construction.
+export type LlmFn = (prompt: string, data?: unknown) => Promise<string>;
 
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+// The AsyncFunction constructor is not a global binding; reach it off an async
+// function's prototype. Lets the sandboxed body use `await llm(...)`.
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as {
+  new (...args: string[]): (...a: unknown[]) => Promise<unknown>;
+};
+
+// Default `llm` when execute_js is run without a session-provided one — RLM
+// off (the model was never told llm() exists) or a direct unit test. Calling
+// it is a clear, catchable error rather than a silent undefined: withholding
+// by refusal-on-call, so the sandbox never sees an undefined identifier.
+const llmUnavailable: LlmFn = async () => {
+  throw new Error('llm() is not available in this context');
+};
 
 export async function executeJs(
   code: string,
   rows: DataRow[],
-  llm?: ExecuteJsLlm
+  llm: LlmFn = llmUnavailable
 ): Promise<ExecuteJsResult> {
-  const boundLlm: ExecuteJsLlm =
-    llm ??
-    (async () => {
-      throw new Error('llm() is not available in this run.');
-    });
   try {
-    // eslint-disable-next-line no-new-func
     const fn = new AsyncFunction('rows', 'llm', code);
-    const result = await fn(rows, boundLlm);
+    const result = await fn(rows, llm);
     // Force through JSON so the result is always plain, serializable data —
     // matches every other tool's result shape and guards against the code
     // accidentally returning something (a DOM node, a class instance) that
@@ -717,22 +800,74 @@ function csvCell(s: string): string {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-// The `llm()` half of the execute_js description, kept OUT of the const so
-// that the default schema, the one any path gets when it forgets to ask for
-// RLM, never mentions the capability. Enforcement here is by withholding: a
-// model that is never told `llm` exists cannot waste a tool call discovering
-// it is disabled. Appended verbatim by schemasForSources when rlm is on, so
-// the enabled description is byte-for-byte what it was before the flag.
-export const EXECUTE_JS_RLM_PARAGRAPH =
-  '\n\n' +
-  'Your code also gets a second argument, `llm`, for the parts a computation cannot do with ' +
-  'arithmetic: `const r = await llm("classify each of these as coastal or landlocked, return ' +
-  'JSON", someRows)`. It resolves to {model_derived: true, text, provenance} — read `.text`. ' +
-  'Use it only for judgment (classify, label, extract, bucket), never for numbers you can ' +
-  'compute. Limits: 4 calls per run, 8 per turn, ~20KB of data per call, and the nested call ' +
-  'has no tools of its own, so batch your rows into ONE call rather than looping. ' +
-  'PROVENANCE: anything llm() returns is YOUR OWN judgment, not fetched data. Never chart it ' +
-  'as source data and never state it as a number a database returned.';
+// ── Citation ledger ──────────────────────────────────────────────────────
+// A structured, first-class provenance record for one live fetch. Written at
+// the fetch choke point (routeFetch), stored in session state keyed by the
+// fetch-cache key, mirrored into the VFS as citations.json (via:'fetch'), and
+// rendered by the UI's evidence section. Every field is captured verbatim from
+// the fetch — nothing is reconstructed after the fact, so what the receipt (and
+// the verifier) shows is exactly what happened. Model-derived (llm()) artifacts
+// never produce a Citation: only fetched data gets one.
+export interface Citation {
+  // Stable id = the session fetch-cache key (id + resolved countries + range),
+  // so a repeat/cached use maps to the SAME entry rather than a duplicate.
+  id: string;
+  source: 'worldbank' | 'owid' | 'imf';
+  sourceLabel: string; // friendly institution name, e.g. "World Bank Open Data"
+  indicatorId: string; // the (normalized) series id
+  indicatorName: string; // friendly indicator name when known, else the id
+  // The human-visitable canonical page — this is what the citation LINKS to.
+  url: string;
+  // The exact API URL the data actually came from, only when it differs from
+  // the human URL (they always do here). Kept for full traceability.
+  requestUrl?: string;
+  countries: string[]; // resolved ISO3 / aggregate codes ([] = every country)
+  yearRange: { start?: number; end?: number } | null;
+  fetchedAt: string; // ISO timestamp — when CHITTI fetched (not the vintage)
+  // Data vintage from the source's own response (WB `lastupdated`), when the
+  // source provides one. Omitted otherwise — never invented.
+  sourceUpdated?: string;
+  rowCount: number;
+  // Whether the record's underlying fetch was a real network call. Always false
+  // on the stored ledger entry (it IS the real fetch); a later cache hit reuses
+  // this same entry and discloses "cached" only on that use's receipt.
+  cached: boolean;
+}
+
+const CITATION_SOURCE_LABEL: Record<Citation['source'], string> = {
+  worldbank: 'World Bank Open Data',
+  owid: 'Our World in Data',
+  imf: 'IMF DataMapper',
+};
+
+export function citationSourceLabel(source: Citation['source']): string {
+  return CITATION_SOURCE_LABEL[source];
+}
+
+// The human-visitable page for a series id — the URL a citation links to.
+// Mirrors the per-source institution pages (distinct from the API request URL).
+export function citationHumanUrl(source: Citation['source'], id: string): string {
+  if (source === 'owid') return 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.replace(/^owid:/, ''));
+  if (source === 'imf') return 'https://www.imf.org/external/datamapper/' + encodeURIComponent(id.replace(/^imf:/i, ''));
+  return 'https://data.worldbank.org/indicator/' + encodeURIComponent(id);
+}
+
+// Compact one-line-per-source provenance header for CSV export. Emitted as
+// `#`-prefixed comment lines so it rides along at the top of the file without
+// breaking spreadsheet import (Excel/Sheets/pandas all skip or isolate a
+// leading comment block). A blank comment separates the block from the header.
+export function citationsToCsvComments(citations: Citation[]): string {
+  if (!citations.length) return '';
+  const lines = citations.map((c) => {
+    const range = c.yearRange
+      ? ` — ${c.yearRange.start ?? ''}–${c.yearRange.end ?? ''}`
+      : '';
+    const where = c.countries.length ? ` — countries: ${c.countries.join(', ')}` : ' — all countries';
+    const vintage = c.sourceUpdated ? ` — source updated ${c.sourceUpdated}` : '';
+    return `# Source: ${c.sourceLabel} — ${c.indicatorName} (${c.indicatorId}) — ${c.url}${where}${range} — fetched ${c.fetchedAt}${vintage}`;
+  });
+  return ['# Chitti — data provenance (every number fetched live and cited):', ...lines, '#'].join('\n') + '\n';
+}
 
 // ── Tool schemas exposed to the model ────────────────────────────────────
 export const TOOL_SCHEMAS: ToolSchema[] = [
@@ -740,10 +875,10 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     name: 'find_series',
     description:
       'Search for a data series across ALL your active databases in one call. Returns matches as ' +
-      '{id, name, source}. Use the id verbatim with the fetch tool for its source: plain codes ' +
-      '(e.g. SH.DYN.MORT) → fetch_worldbank / fetch_worldbank_all; "owid:<slug>" → fetch_owid; ' +
-      '"imf:<code>" → fetch_imf. This is the single entry point for finding what to fetch — you do ' +
-      'not choose a database first, the results tell you which source has the series.',
+      '{id, name, source}. Pass the chosen id verbatim to fetch_series — it routes to the right ' +
+      'source automatically (plain codes like SH.DYN.MORT, "owid:<slug>", and "imf:<code>" all go ' +
+      'through the same fetch tool). This is the single entry point for finding what to fetch — you ' +
+      'do not choose a database first, the results tell you which source has the series.',
     parameters: {
       type: 'object',
       properties: {
@@ -765,60 +900,56 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
-    name: 'fetch_worldbank',
+    name: 'fetch_series',
     description:
-      'Fetch time-series data for one indicator across specific countries (by ISO3 code) or one ' +
-      'aggregate (e.g. "WLD" for world, a region aggregate id). Returns rows of ' +
-      '{country, iso3, year, value}. country_ids MUST be an explicit, non-empty list — there is ' +
-      'no wildcard, an empty array returns no data. Max 60 country_ids per call. ' +
-      'Do NOT use this for "every country" questions — call fetch_worldbank_all instead, which ' +
-      'handles the full country list and batching internally in one call.',
+      'Fetch time-series data for ONE series id from find_series — the single fetch tool. It ROUTES ' +
+      'automatically by the id: plain World Bank codes (e.g. SH.DYN.MORT), "owid:<slug>", and ' +
+      '"imf:<code>" each go to their own source. Returns rows of {country, iso3, year, value, ' +
+      'indicator}. Give `countries` (ISO3 codes, or loose names like "UK"/"Korea" which are resolved ' +
+      'for you; one aggregate like ["WLD"] works too) for named countries/regions, or OMIT countries ' +
+      'for EVERY country — World Bank is batched internally, so never build the full country list ' +
+      'yourself. IMF series include projection years beyond today — say "IMF projection" when you use ' +
+      'them. Pass the id verbatim from find_series.',
     parameters: {
       type: 'object',
       properties: {
-        indicator_id: { type: 'string', description: 'World Bank indicator id, e.g. SH.DYN.MORT' },
-        country_ids: {
+        id: {
+          type: 'string',
+          description:
+            'Series id from find_series, verbatim: a plain World Bank code (e.g. "SH.DYN.MORT"), ' +
+            '"owid:<slug>", or "imf:<code>".',
+        },
+        countries: {
           type: 'array',
           items: { type: 'string' },
-          minItems: 1,
           description:
-            'Non-empty array of specific ISO3 codes, e.g. ["IND","CHN","BRA"], or one aggregate ' +
-            'id like ["WLD"] for world. Max 60 per call. For "all countries", use ' +
-            'fetch_worldbank_all instead of building this list yourself.',
+            'ISO3 codes or loose names, e.g. ["IND","CHN","BRA"] or ["UK"]; one aggregate like ' +
+            '["WLD"] works too. Omit for every country (World Bank batches internally).',
         },
         year_start: { type: 'number' },
         year_end: { type: 'number' },
       },
-      required: ['indicator_id', 'country_ids', 'year_start', 'year_end'],
-    },
-  },
-  {
-    name: 'fetch_worldbank_all',
-    description:
-      'Fetch time-series data for one indicator across EVERY real country in one call. Use this ' +
-      'instead of list_countries + fetch_worldbank whenever the question is about "all countries", ' +
-      '"which countries...", "every country", or similar — it resolves the full country list and ' +
-      'batches the underlying requests internally, so you never need to reason about country ' +
-      'counts, batch sizes, or merging results yourself. Returns rows of ' +
-      '{country, iso3, year, value} for every country with data.',
-    parameters: {
-      type: 'object',
-      properties: {
-        indicator_id: { type: 'string', description: 'World Bank indicator id, e.g. SH.DYN.MORT' },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['indicator_id', 'year_start', 'year_end'],
+      required: ['id'],
     },
   },
   {
     name: 'write_file',
-    description: 'Write an intermediate artifact to the virtual filesystem (visible to the user).',
+    description:
+      'Write an intermediate artifact to the virtual filesystem (visible to the user). ' +
+      'Set derived=true when the content is model-derived — anything produced by an llm() ' +
+      'call inside execute_js (labels, classifications, summaries), not fetched from a data ' +
+      'source. Derived files are labelled "model-derived" and must never be cited as data.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'e.g. plan.md, indicator_shortlist.json' },
         content: { type: 'string' },
+        derived: {
+          type: 'boolean',
+          description:
+            'true if this content was produced via llm() (model-derived, not fetched). ' +
+            'Marks the file model-derived so it is never mistaken for fetched data.',
+        },
       },
       required: ['path', 'content'],
     },
@@ -857,49 +988,6 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         },
       },
       required: ['code'],
-    },
-  },
-  {
-    name: 'fetch_owid',
-    description:
-      'Fetch an Our World in Data dataset (id from search_datasets, "owid:<slug>"). Returns rows ' +
-      'of {country, iso3, year, value, indicator}. Omit country_ids for every country. Use ' +
-      '"OWID_WRL" as a country id for the world aggregate.',
-    parameters: {
-      type: 'object',
-      properties: {
-        dataset_id: { type: 'string', description: 'e.g. "owid:life-expectancy" (verbatim from search_datasets)' },
-        country_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional ISO3 codes to filter to; omit for all countries.',
-        },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['dataset_id'],
-    },
-  },
-  {
-    name: 'fetch_imf',
-    description:
-      'Fetch an IMF DataMapper series (id from search_datasets, "imf:<code>"). THE source for ' +
-      'forecasts: series extend several years beyond today as IMF projections — say so in the ' +
-      'finding when you use projected years. Returns rows of {country, iso3, year, value, ' +
-      'indicator}. Omit country_ids for all countries.',
-    parameters: {
-      type: 'object',
-      properties: {
-        dataset_id: { type: 'string', description: 'e.g. "imf:NGDP_RPCH" (verbatim from search_datasets)' },
-        country_ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional ISO3 codes; omit for all countries.',
-        },
-        year_start: { type: 'number' },
-        year_end: { type: 'number' },
-      },
-      required: ['dataset_id'],
     },
   },
   {
@@ -1000,7 +1088,51 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
       required: ['explanation'],
     },
   },
+  {
+    name: 'delegate_source',
+    description:
+      'Delegate ONE database\'s part of the question to a focused sub-agent, and get back a short ' +
+      'distilled summary (the sub-agent\'s fetched rows merge into your data automatically, with ' +
+      'their citations intact — you never see the raw rows). Offered only when more than one ' +
+      'database is active. Use it ONLY for questions that genuinely span multiple databases: ' +
+      'delegate each source\'s slice, then combine the summaries. For anything one database ' +
+      'answers on its own, use the direct fetch/compute tools — delegation spends extra model ' +
+      'calls. Call it once per source (you may call it a few times, one source each).',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description: 'The database to delegate to — its name or id (e.g. "Our World in Data", "owid", "IMF", "World Bank").',
+        },
+        question: {
+          type: 'string',
+          description: 'The focused, single-source sub-question, e.g. "life expectancy for G7 countries since 1960".',
+        },
+      },
+      required: ['source', 'question'],
+    },
+  },
 ];
+
+// The sub-agent's terminal tool — hands a distilled text summary back to the
+// main agent and ends the sub-agent loop. Kept OUT of TOOL_SCHEMAS (and thus
+// out of every main-loop schema set); it exists only inside a delegation.
+export const RETURN_FINDINGS_SCHEMA: ToolSchema = {
+  name: 'return_findings',
+  description:
+    'Finish this sub-agent and return a SHORT distilled summary (a few sentences: the key ' +
+    'numbers and what they show) to the main agent. Your fetched rows are already merged back ' +
+    'with their citations — do not paste raw rows here. Call this once you have what the ' +
+    'sub-question needs.',
+  parameters: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'The distilled text summary for the main agent.' },
+    },
+    required: ['summary'],
+  },
+};
 
 // ── Source registry ──────────────────────────────────────────────────────
 // The single source of truth for "which databases exist". One entry per
@@ -1017,9 +1149,12 @@ export interface SourceDef {
   // header, so the list stays legible as the registry grows to many sources.
   category: string;
   blurb: string; // one line, shown next to the name in the picker
-  // Tool names (from TOOL_SCHEMAS) this source owns. A tool may be shared by
-  // more than one source (search_datasets serves both OWID and IMF); it is
-  // offered whenever any owning source is selected.
+  // Extra source-specific tool names (from TOOL_SCHEMAS) this source owns, on
+  // top of the always-on core. Fetching is NO LONGER listed here: it goes
+  // through the source-agnostic core `fetch_series`, which routes by the id's
+  // namespace (plain code → World Bank, "owid:" → OWID, "imf:" → IMF) and is
+  // restricted to the active/sub-agent source at dispatch time. So this is
+  // empty for today's sources; kept for a future source that needs its own tool.
   toolNames: string[];
   // How the model should use this source — spliced into the system prompt's
   // "pick a source" step only when this source is active.
@@ -1034,7 +1169,7 @@ export interface SourceDef {
 // Source-agnostic tools: control flow, computation over already-fetched rows,
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
-  'find_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
+  'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file',
 ];
 
@@ -1044,9 +1179,9 @@ export const SOURCES: SourceDef[] = [
     label: 'World Bank',
     category: 'Economics & development',
     blurb: 'Development, economic, health & social indicators for every country.',
-    toolNames: ['fetch_worldbank', 'fetch_worldbank_all'],
+    toolNames: [],
     promptSnippet:
-      'World Bank — the broad default: development, economic, health, and social indicators. Its find_series hits are plain codes (e.g. SH.DYN.MORT); fetch them with fetch_worldbank (explicit ISO3 codes, or one aggregate like WLD), or fetch_worldbank_all for "every country" questions (it batches internally — never build the full country list yourself).',
+      'World Bank — the broad default: development, economic, health, and social indicators. Its find_series hits are plain codes (e.g. SH.DYN.MORT); fetch them with fetch_series — pass explicit countries (ISO3 codes, or one aggregate like WLD), or omit countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself).',
     cite: { name: 'World Bank Open Data', url: 'https://data.worldbank.org' },
   },
   {
@@ -1054,9 +1189,9 @@ export const SOURCES: SourceDef[] = [
     label: 'Our World in Data',
     category: 'Society & environment',
     blurb: 'CO₂ & energy, happiness, HDI, literacy, extreme poverty.',
-    toolNames: ['fetch_owid'],
+    toolNames: [],
     promptSnippet:
-      'Our World in Data — topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty. Its find_series hits look like "owid:<slug>"; fetch them with fetch_owid.',
+      'Our World in Data — topics World Bank lacks: CO2/energy, happiness, HDI, literacy, extreme poverty. Its find_series hits look like "owid:<slug>"; fetch them with fetch_series.',
     cite: { name: 'Our World in Data', url: 'https://ourworldindata.org' },
     datasetSource: 'owid',
   },
@@ -1065,9 +1200,9 @@ export const SOURCES: SourceDef[] = [
     label: 'IMF',
     category: 'Economics & development',
     blurb: 'Macro data with multi-year forecasts: GDP, inflation, debt.',
-    toolNames: ['fetch_imf'],
+    toolNames: [],
     promptSnippet:
-      'IMF DataMapper — the source for forecasts/projections several years ahead: GDP growth, inflation, unemployment, government debt. Its find_series hits look like "imf:<code>"; fetch them with fetch_imf, and say "IMF projection" when you use projected years.',
+      'IMF DataMapper — the source for forecasts/projections several years ahead: GDP growth, inflation, unemployment, government debt. Its find_series hits look like "imf:<code>"; fetch them with fetch_series, and say "IMF projection" when you use projected years.',
     cite: { name: 'IMF DataMapper', url: 'https://www.imf.org/external/datamapper' },
     datasetSource: 'imf',
   },
@@ -1098,23 +1233,30 @@ export function resolveSources(ids?: string[]): SourceDef[] {
 
 // The tool schemas the model should see for a given source selection: the
 // always-on core plus every selected source's own tools, in original order.
-//
-// `rlm` is the second hard filter, and it works the same way the source
-// filter does: what the model is not given, it cannot use. When false (the
-// default, including when omitted) the execute_js description carries no
-// mention of `llm()`, so the capability is invisible rather than refused.
-// The schema objects are copied, never mutated, so two sessions with
-// different rlm settings cannot clobber each other through the shared const.
-export function schemasForSources(ids?: string[], rlm: boolean = false): ToolSchema[] {
+export function schemasForSources(ids?: string[]): ToolSchema[] {
+  const sources = resolveSources(ids);
   const allowed = new Set(CORE_TOOL_NAMES);
-  for (const s of resolveSources(ids)) for (const t of s.toolNames) allowed.add(t);
-  const picked = TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
-  if (!rlm) return picked;
-  return picked.map((sch) =>
-    sch.name === 'execute_js'
-      ? { ...sch, description: sch.description + EXECUTE_JS_RLM_PARAGRAPH }
-      : sch
-  );
+  for (const s of sources) for (const t of s.toolNames) allowed.add(t);
+  // delegate_source is offered to the MAIN loop only when more than one source
+  // is active — a single-source session has nothing to delegate across, so the
+  // tool never even appears in its schema (the dispatch refuses it too).
+  if (sources.length > 1) allowed.add('delegate_source');
+  return TOOL_SCHEMAS.filter((sch) => allowed.has(sch.name));
+}
+
+// The tool schema set for a depth-1 per-source sub-agent (a delegation target).
+// Scoped to ONE database: find_series (the caller restricts it to this source),
+// fetch_series (the router refuses out-of-namespace ids for this sub-agent's
+// source at dispatch time), execute_js (with the recursive llm() primitive),
+// plus return_findings. delegate_source is structurally absent — a sub-agent can
+// never itself delegate, so recursion is bounded to depth 1. `sourceId` names
+// the source the dispatcher restricts fetch_series to; the schema itself is the
+// same router tool for every source (routing/restriction happen at runtime).
+export function subAgentSchemasFor(sourceId: string): ToolSchema[] {
+  void sourceId; // runtime restriction lives in dispatch (sourceIds); see note above
+  const names = new Set<string>(['find_series', 'fetch_series', 'execute_js']);
+  const base = TOOL_SCHEMAS.filter((sch) => names.has(sch.name));
+  return [...base, RETURN_FINDINGS_SCHEMA];
 }
 
 // The dataset-catalog sources (owid/imf) among a selection — pushed into
@@ -1191,6 +1333,70 @@ async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
   }
 }
 
+// Parse an OWID grapher-catalog listing into namespaced series entries. OWID
+// has no single documented, keyless, CORS-open JSON endpoint that lists every
+// grapher slug, so this stays deliberately defensive about shape: a bare array
+// of chart objects, or an { charts | items | results } wrapper around one, with
+// the human title under any of title/name/chartName and the slug under slug/id.
+// Anything it can't read is skipped rather than thrown. Pure + exported so the
+// live-catalog path is unit-testable from a fixture without the network.
+export function parseOwidCatalog(data: unknown): { id: string; name: string }[] {
+  const root = data as Record<string, unknown> | unknown[];
+  const arr: unknown[] = Array.isArray(root)
+    ? root
+    : Array.isArray((root as any)?.charts) ? (root as any).charts
+    : Array.isArray((root as any)?.items) ? (root as any).items
+    : Array.isArray((root as any)?.results) ? (root as any).results
+    : [];
+  const out: { id: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue;
+    const rec = e as Record<string, unknown>;
+    const slug = String(rec.slug ?? rec.id ?? '').trim().replace(/^owid:/, '');
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const name = String(rec.title ?? rec.name ?? rec.chartName ?? slug).trim() || slug;
+    out.push({ id: 'owid:' + slug, name });
+  }
+  return out;
+}
+
+// The live OWID grapher catalog, fetched once and cached for the session — the
+// graceful widen past the curated OWID_DATASETS list (same idea as the World
+// Bank search API and the live IMF DataMapper catalog). Same host Chitti already
+// pulls OWID *data* from, so it shares that host's browser-open CORS policy.
+// NOTE (offline-honest): OWID publishes no confirmed keyless JSON index of all
+// grapher slugs, so this endpoint is a best-effort candidate. It is EXPECTED to
+// fail for many sessions; when it does, searchOwidCatalog swallows the error and
+// find_series simply returns the (expanded) curated hits. The parser above — not
+// this URL — is the tested contract.
+let owidCatalogCache: { id: string; name: string }[] | null = null;
+async function owidCatalog(): Promise<{ id: string; name: string }[]> {
+  if (owidCatalogCache) return owidCatalogCache;
+  const resp = await fetch('https://ourworldindata.org/charts.json');
+  if (!resp.ok) throw new Error('OWID charts HTTP ' + resp.status);
+  owidCatalogCache = parseOwidCatalog(await resp.json());
+  return owidCatalogCache;
+}
+
+// Search the live OWID catalog with the shared scorer. Any failure (offline,
+// CORS, no such endpoint, shape change) degrades to an empty list — findSeries
+// then just returns the curated OWID hits, never an error.
+async function searchOwidCatalog(query: string): Promise<SeriesHit[]> {
+  try {
+    const cat = await owidCatalog();
+    return cat
+      .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8)
+      .map((x) => ({ id: x.d.id, name: x.d.name, source: 'owid' }));
+  } catch {
+    return [];
+  }
+}
+
 // One search across every active database, so the model calls a single tool
 // instead of choosing between per-source search tools and guessing which
 // database holds the metric. Each source contributes hits from its own
@@ -1224,6 +1430,16 @@ export async function findSeriesWithReceipt(
   if (catalogSources.length) {
     const ds = searchDatasets(query, catalogSources);
     hits.push(...ds.map((d) => ({ id: d.id, name: d.name, source: d.source })));
+  }
+
+  // OWID live fallback: the curated OWID list, though expanded, still can't
+  // cover OWID's full grapher catalog, so when OWID is active and few curated
+  // hits came back, widen with the live grapher index. Curated hits are pushed
+  // first, so dedup keeps their friendlier names. Any failure degrades to [] —
+  // the curated hits still stand (OWID has no confirmed keyless catalog endpoint,
+  // so this fallback is expected to be empty in many sessions).
+  if (active.has('owid') && hits.filter((h) => h.source === 'owid').length < 3) {
+    hits.push(...(await searchOwidCatalog(query)));
   }
 
   // IMF live fallback: the curated IMF list is tiny, so when IMF is active and

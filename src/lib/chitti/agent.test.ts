@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   TOOL_SCHEMAS,
-  EXECUTE_JS_RLM_PARAGRAPH,
   schemasForSources,
+  subAgentSchemasFor,
   resolveSources,
   datasetSourcesFor,
   findSeries,
@@ -10,7 +10,12 @@ import {
   scoreSeries,
   explainMatch,
   parseImfIndicators,
+  parseOwidCatalog,
   DEFAULT_SOURCE_IDS,
+  VFS,
+  executeJs,
+  type DataRow,
+  type LlmFn,
 } from './tools';
 
 describe('finish_explanation tool schema', () => {
@@ -25,19 +30,20 @@ describe('finish_explanation tool schema', () => {
 describe('source hard filter', () => {
   const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
 
-  it('World-Bank-only sessions cannot see OWID/IMF fetch tools', () => {
-    const n = names(['worldbank']);
-    expect(n).toContain('fetch_worldbank');
-    expect(n).not.toContain('fetch_owid');
-    expect(n).not.toContain('fetch_imf');
-  });
-
-  it('OWID-only sessions get only their fetch tool', () => {
-    const n = names(['owid']);
-    expect(n).toContain('fetch_owid');
-    expect(n).not.toContain('fetch_imf');
-    expect(n).not.toContain('fetch_worldbank');
-    // The shared catalog is filtered to OWID datasets only.
+  // Fetching is now the source-agnostic router `fetch_series` (backlog #7): the
+  // per-source fetch tools are retired from the model's schema surface entirely,
+  // so the hard filter is enforced at the router (it refuses out-of-namespace
+  // ids), not by withholding a per-source tool from the schema set.
+  it('every session exposes fetch_series and none of the retired per-source fetch tools', () => {
+    for (const sel of [['worldbank'], ['owid'], ['imf'], ['owid', 'imf'], undefined]) {
+      const n = names(sel);
+      expect(n).toContain('fetch_series');
+      expect(n).not.toContain('fetch_worldbank');
+      expect(n).not.toContain('fetch_worldbank_all');
+      expect(n).not.toContain('fetch_owid');
+      expect(n).not.toContain('fetch_imf');
+    }
+    // The shared dataset catalog is still filtered by active source.
     expect(datasetSourcesFor(['owid'])).toEqual(['owid']);
   });
 
@@ -64,6 +70,53 @@ describe('source hard filter', () => {
     expect(resolveSources([]).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(resolveSources(['nope']).map((s) => s.id)).toEqual(DEFAULT_SOURCE_IDS);
     expect(schemasForSources(undefined).length).toBe(TOOL_SCHEMAS.length);
+  });
+});
+
+describe('delegate_source gating + depth-1 (schema level)', () => {
+  const names = (ids?: string[]) => schemasForSources(ids).map((s) => s.name);
+
+  it('delegate_source is absent from single-source schemas, present when >1 active', () => {
+    // Gating: a session with one active database never even sees the tool.
+    expect(names(['worldbank'])).not.toContain('delegate_source');
+    expect(names(['owid'])).not.toContain('delegate_source');
+    expect(names(['imf'])).not.toContain('delegate_source');
+    // >1 active database → the tool appears in the main-loop schema set.
+    expect(names(['owid', 'imf'])).toContain('delegate_source');
+    expect(names(['worldbank', 'owid'])).toContain('delegate_source');
+    expect(names(undefined)).toContain('delegate_source'); // all sources = >1
+  });
+
+  it('sub-agent schema set is depth-1: no delegate_source, only the router + core', () => {
+    for (const id of ['worldbank', 'owid', 'imf']) {
+      const n = subAgentSchemasFor(id).map((s) => s.name);
+      // Depth-1 enforced STRUCTURALLY: a sub-agent literally cannot delegate.
+      expect(n).not.toContain('delegate_source');
+      // Its allowed toolset: source-scoped find_series, the fetch_series router
+      // (restricted to this source at dispatch), execute_js (with llm()), and
+      // the terminal return_findings.
+      expect(n).toContain('find_series');
+      expect(n).toContain('fetch_series');
+      expect(n).toContain('execute_js');
+      expect(n).toContain('return_findings');
+      // No main-loop-only tools leak into a sub-agent.
+      expect(n).not.toContain('render_chart');
+      expect(n).not.toContain('finish');
+      expect(n).not.toContain('finish_explanation');
+      // The retired per-source fetch tools are gone; the router replaces them.
+      // (Cross-source refusal is a runtime check, exercised in the driven tests.)
+      expect(n).not.toContain('fetch_worldbank');
+      expect(n).not.toContain('fetch_worldbank_all');
+      expect(n).not.toContain('fetch_owid');
+      expect(n).not.toContain('fetch_imf');
+    }
+  });
+
+  it('return_findings is never exposed to the main loop', () => {
+    for (const sel of [['worldbank'], ['owid', 'imf'], undefined]) {
+      expect(names(sel)).not.toContain('return_findings');
+    }
+    expect(TOOL_SCHEMAS.map((s) => s.name)).not.toContain('return_findings');
   });
 });
 
@@ -156,6 +209,41 @@ describe('parseImfIndicators — live IMF catalog', () => {
   });
 });
 
+describe('parseOwidCatalog — live OWID grapher catalog', () => {
+  it('maps a bare array of grapher charts to namespaced series', () => {
+    const parsed = parseOwidCatalog([
+      { slug: 'life-expectancy', title: 'Life expectancy' },
+      { slug: 'co-emissions-per-capita', title: 'CO₂ emissions per capita' },
+    ]);
+    expect(parsed).toContainEqual({ id: 'owid:life-expectancy', name: 'Life expectancy' });
+    expect(parsed.find((p) => p.id === 'owid:co-emissions-per-capita')?.name).toBe('CO₂ emissions per capita');
+  });
+
+  it('unwraps { charts | items | results } and reads title/name/chartName', () => {
+    expect(parseOwidCatalog({ charts: [{ slug: 'population', name: 'Population' }] }))
+      .toEqual([{ id: 'owid:population', name: 'Population' }]);
+    expect(parseOwidCatalog({ results: [{ slug: 'median-age', chartName: 'Median age' }] }))
+      .toEqual([{ id: 'owid:median-age', name: 'Median age' }]);
+  });
+
+  it('strips an existing owid: prefix, dedupes, and is defensive against junk', () => {
+    expect(parseOwidCatalog(null)).toEqual([]);
+    expect(parseOwidCatalog({})).toEqual([]);
+    expect(parseOwidCatalog({ charts: 'nope' })).toEqual([]);
+    // owid: prefix stripped, blank/duplicate/non-object entries dropped, title
+    // missing → slug becomes the name.
+    expect(
+      parseOwidCatalog([
+        { slug: 'owid:gdp-per-capita-worldbank' },
+        { slug: 'gdp-per-capita-worldbank', title: 'dup' },
+        { id: '' },
+        null,
+        'string',
+      ])
+    ).toEqual([{ id: 'owid:gdp-per-capita-worldbank', name: 'gdp-per-capita-worldbank' }]);
+  });
+});
+
 describe('findSeries — cross-source search', () => {
   // The IMF live-catalog fallback calls fetch(); stub it to reject so these
   // stay offline and deterministic — which also exercises graceful degradation.
@@ -189,6 +277,24 @@ describe('findSeries — cross-source search', () => {
   it('finds IMF forecast series and namespaces the id', async () => {
     const hits = await findSeries('inflation', ['imf']);
     expect(hits.some((h) => h.source === 'imf' && h.id.startsWith('imf:'))).toBe(true);
+  });
+
+  it('still returns curated OWID hits when the live grapher catalog is unreachable', async () => {
+    // fetch rejects → owidCatalog() throws → searchOwidCatalog() returns []
+    // → expanded curated OWID hits must still come through (graceful degradation).
+    const hits = await findSeries('temperature anomaly', ['owid']);
+    expect(hits.some((h) => h.source === 'owid' && h.id === 'owid:temperature-anomaly')).toBe(true);
+  });
+
+  it('surfaces newly-curated OWID topics that the old thin list lacked', async () => {
+    for (const [q, id] of [
+      ['plastic waste per capita', 'owid:plastic-waste-per-capita'],
+      ['political regime', 'owid:political-regime'],
+      ['median age', 'owid:median-age'],
+    ] as const) {
+      const hits = await findSeries(q, ['owid']);
+      expect(hits[0]).toMatchObject({ source: 'owid', id });
+    }
   });
 });
 
@@ -240,6 +346,66 @@ describe('findSeriesWithReceipt — search-receipt payload', () => {
   });
 });
 
+describe('VFS provenance marker', () => {
+  it('records { derived, via } on a marked write and clears it on a plain re-write', () => {
+    const vfs = new VFS();
+    vfs.write('themes.json', '["rising","falling"]', { derived: true, via: 'llm' });
+    expect(vfs.files['themes.json']).toBe('["rising","falling"]');
+    expect(vfs.meta['themes.json']).toEqual({ derived: true, via: 'llm' });
+    // A subsequent plain write (no meta) must not leave a stale derived marker.
+    vfs.write('themes.json', 'fetched-later');
+    expect(vfs.meta['themes.json']).toBeUndefined();
+  });
+
+  it('leaves no meta entry for an ordinary fetched-data file', () => {
+    const vfs = new VFS();
+    vfs.write('plan.md', '# plan');
+    expect(vfs.meta['plan.md']).toBeUndefined();
+  });
+});
+
+describe('executeJs — RLM llm() primitive wiring', () => {
+  const rows: DataRow[] = [{ country: 'India', iso3: 'IND', year: 2020, value: 100 }];
+
+  it('awaits an injected llm() and returns its text through the result', async () => {
+    const llm: LlmFn = async (prompt) => 'LABEL:' + prompt;
+    const out = await executeJs('return await llm("hi");', rows, llm);
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe('LABEL:hi');
+  });
+
+  it('a thrown llm() is catchable inside the sandboxed code', async () => {
+    const llm: LlmFn = async () => {
+      throw new Error('boom');
+    };
+    const out = await executeJs(
+      'try { await llm("x"); return "no"; } catch (e) { return "caught:" + e.message; }',
+      rows,
+      llm
+    );
+    expect(out.ok).toBe(true);
+    expect(out.result).toBe('caught:boom');
+  });
+
+  it('an uncaught llm() rejection surfaces as ok:false (error-receipt path)', async () => {
+    const llm: LlmFn = async () => {
+      throw new Error('provider down');
+    };
+    const out = await executeJs('await llm("x"); return 1;', rows, llm);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('provider down');
+  });
+
+  it('calling llm() with no session-provided primitive is a clear, catchable error', async () => {
+    const out = await executeJs(
+      'try { await llm("x"); return "no"; } catch (e) { return e.message; }',
+      rows
+    );
+    expect(out.ok).toBe(true);
+    expect(String(out.result)).toContain('not available');
+  });
+});
+
 vi.mock('./providers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./providers')>();
   return {
@@ -249,7 +415,7 @@ vi.mock('./providers', async (importOriginal) => {
 });
 
 import { complete } from './providers';
-import { createSession } from './agent';
+import { createSession, buildSystemPrompt, buildSubAgentPrompt } from './agent';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -457,274 +623,1248 @@ describe('message trimming', () => {
   });
 });
 
-// ── The RLM (judgment-call) flag ────────────────────────────────────────
-// The capability spends the user's own key on every nested call, so it ships
-// off and the user opts in. Enforcement is by WITHHOLDING: when off, the
-// model is never told `llm()` exists, so it cannot burn a tool call finding
-// out that it is disabled. These tests pin both halves of that: the schema
-// the model sees, and the caller the sandbox is (not) handed.
-describe('rlm flag: the execute_js description', () => {
-  const execFor = (rlm?: boolean) =>
-    schemasForSources(undefined, rlm).find((s) => s.name === 'execute_js')!;
+// ── RLM: bounded recursive llm() inside execute_js ────────────────────────
+// Drive real turns through createSession with complete() mocked. A stubbed
+// fetch seeds state.rows (execute_js refuses to run with none), then the
+// model's code makes llm() calls whose completions are the SAME mocked
+// complete() — so caps, receipts, provenance, and the error path are all
+// exercised without any network or live model.
+describe('RLM llm() inside execute_js', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
 
-  it('omits the llm() paragraph by default', () => {
-    const d = execFor().description;
-    expect(d).not.toContain('llm(');
-    expect(d).not.toContain('second argument');
-    expect(d).not.toContain('model_derived');
+  beforeEach(() => {
+    mockComplete.mockReset();
+    // A minimal, valid World Bank response so fetch_worldbank yields rows.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 2 },
+          [
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 },
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 110 },
+          ],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const llmReply = (text: string) => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  const fetchCall = (id = 'fetch1') =>
+    tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, id);
+
+  // All execute_js tool-results the model saw, parsed, deduped by call id.
+  function execResults(): any[] {
+    const out: any[] = [];
+    const seen = new Set<string>();
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) {
+        if (m.role === 'tool' && m.name === 'execute_js' && !seen.has(m.tool_call_id)) {
+          seen.add(m.tool_call_id);
+          try {
+            out.push(JSON.parse(m.content));
+          } catch {
+            out.push(m.content);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // These tests exercise the llm() capability, which is now opt-in and OFF by
+  // default (see the gating tests below), so this block enables it explicitly.
+  const newSession = () =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { rlm: true });
+  const capture = () => {
+    let last: any[] = [];
+    const cb = {
+      onTrace: (ev: any[]) => (last = ev),
+      onFiles: () => {},
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    return { cb, trace: () => last };
+  };
+
+  it('caps at 4 llm() calls per execute_js run; the 5th rejects catchably, and only 4 nested receipts are emitted', async () => {
+    const code =
+      'let ok = 0; let caught = ""; ' +
+      'for (let i = 0; i < 5; i++) { try { await llm("classify " + i, rows[0]); ok++; } catch (e) { caught = e.message; } } ' +
+      'return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    for (let i = 0; i < 4; i++) mockComplete.mockResolvedValueOnce(llmReply('label' + i));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    const llmEvents = trace().filter((e) => e.tool === 'llm');
+    expect(llmEvents.length).toBe(4); // the 5th never ran, so no 5th receipt
+    expect(llmEvents.every((e) => e.status === 'ok')).toBe(true);
+
+    const res = execResults()[0];
+    expect(res.ok).toBe(4);
+    expect(res.caught).toMatch(/per execute_js run/);
   });
 
-  it('omits it when explicitly off', () => {
-    expect(execFor(false).description).not.toContain('llm(');
+  it('emits nested llm() receipts with prompt summary, data size, duration and tokens, ordered under their execute_js parent', async () => {
+    const code = 'await llm("summarize the slice", rows); return "ok";';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    mockComplete.mockResolvedValueOnce(llmReply('a summary'));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    const events = trace();
+    const ejIdx = events.findIndex((e) => e.tool === 'execute_js');
+    const llmIdx = events.findIndex((e) => e.tool === 'llm');
+    expect(ejIdx).toBeGreaterThanOrEqual(0);
+    // The child receipt is nested and ordered AFTER its execute_js parent.
+    expect(llmIdx).toBeGreaterThan(ejIdx);
+    const llmEv = events[llmIdx];
+    expect(llmEv.nested).toBe(true);
+    expect(llmEv.argSummary).toBe('summarize the slice');
+    expect(llmEv.argSummary.length).toBeLessThanOrEqual(80);
+    expect(typeof llmEv.dataBytes).toBe('number');
+    expect(llmEv.dataBytes).toBeGreaterThan(0);
+    expect(typeof llmEv.durationMs).toBe('number');
+    expect(typeof llmEv.tokens).toBe('number');
+    expect(llmEv.tokens).toBeGreaterThan(0);
   });
 
-  it('reads naturally with no dangling reference to a second argument', () => {
-    const d = execFor(false).description;
-    // The base still documents the one argument the code always gets.
-    expect(d).toContain('one argument, `rows`');
-    expect(d.trimEnd()).toBe(d.trim());
+  it('shares an 8-call budget across execute_js runs in one turn; the 9th rejects with a per-turn error', async () => {
+    const loop = (n: number, catchIt = false) =>
+      `let ok = 0; let caught = ""; for (let i = 0; i < ${n}; i++) { ` +
+      (catchIt
+        ? 'try { await llm("c" + i, rows[0]); ok++; } catch (e) { caught = e.message; }'
+        : 'await llm("c" + i, rows[0]); ok++;') +
+      ' } return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        fetchCall(),
+        tc('execute_js', { code: loop(4) }, 'ejA'), // 4 → turn total 4
+        tc('execute_js', { code: loop(3) }, 'ejB'), // 3 → turn total 7
+        tc('execute_js', { code: loop(2, true) }, 'ejC'), // 1 ok (→8), 2nd rejected
+      ])
+    );
+    for (let i = 0; i < 8; i++) mockComplete.mockResolvedValueOnce(llmReply('l' + i)); // 4 + 3 + 1
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    // Exactly 8 successful llm() calls across the three runs; the 9th made no receipt.
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(8);
+    const [a, b, c] = execResults();
+    expect(a.ok).toBe(4);
+    expect(b.ok).toBe(3);
+    expect(c.ok).toBe(1);
+    expect(c.caught).toMatch(/per turn/);
   });
 
-  it('appends the paragraph verbatim when on, and only to execute_js', () => {
-    const off = execFor(false).description;
-    const on = execFor(true).description;
-    expect(on).toBe(off + EXECUTE_JS_RLM_PARAGRAPH);
-    expect(on).toContain('model_derived');
-    expect(on).toContain('4 calls per run, 8 per turn');
+  it('rejects an over-size data slice before any model call or receipt', async () => {
+    const code =
+      'const big = []; for (let i = 0; i < 6000; i++) big.push({ i, s: "xxxxxxxxxx" }); ' +
+      'let caught = ""; try { await llm("summarize", big); } catch (e) { caught = e.message; } ' +
+      'return { caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
 
-    const otherOff = schemasForSources(undefined, false).filter((s) => s.name !== 'execute_js');
-    const otherOn = schemasForSources(undefined, true).filter((s) => s.name !== 'execute_js');
-    expect(otherOn.map((s) => s.description)).toEqual(otherOff.map((s) => s.description));
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+
+    // No llm receipt, and complete() was only called for the two model turns +
+    // verify — never for a recursive llm() call (the size guard fired first).
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(0);
+    expect(execResults()[0].caught).toMatch(/too large/);
   });
 
-  it('never mutates the shared TOOL_SCHEMAS const', () => {
-    const base = TOOL_SCHEMAS.find((s) => s.name === 'execute_js')!.description;
-    schemasForSources(undefined, true);
-    schemasForSources(['owid'], true);
-    expect(TOOL_SCHEMAS.find((s) => s.name === 'execute_js')!.description).toBe(base);
-    // ...so a later off-session is still clean after an on-session ran.
-    expect(execFor(false).description).not.toContain('llm(');
+  it('an uncaught llm() failure produces an error receipt and the main loop continues', async () => {
+    const code = 'await llm("x", rows[0]); return 1;';
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code }, 'ej1')]));
+    // The recursive llm()'s complete() rejects — uncaught in the model's code.
+    mockComplete.mockRejectedValueOnce(new Error('provider exploded'));
+    // A SECOND model turn proves the loop continued past the failed run.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Recovered.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    const llmEv = trace().find((e) => e.tool === 'llm');
+    expect(llmEv?.status).toBe('error');
+    expect(llmEv?.detail).toContain('provider exploded');
+    const ejEv = trace().find((e) => e.tool === 'execute_js');
+    expect(ejEv?.detail).toMatch(/^error:/);
+    expect(ejEv?.detail).toContain('provider exploded');
+    // Loop continued and reached finish.
+    expect(out.finding).toBe('Recovered.');
   });
 
-  it('leaves the source hard filter untouched', () => {
-    const n = schemasForSources(['worldbank'], true).map((s) => s.name);
-    expect(n).toContain('fetch_worldbank');
-    expect(n).not.toContain('fetch_owid');
-    expect(schemasForSources(undefined, true).length).toBe(TOOL_SCHEMAS.length);
+  it('marks a model-derived write_file with the provenance flag on its trace event', async () => {
+    let files: Record<string, string> = {};
+    const cb = {
+      onTrace: () => {},
+      onFiles: (f: Record<string, string>) => (files = f),
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    let last: any[] = [];
+    const cb2 = { ...cb, onTrace: (ev: any[]) => (last = ev) };
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('write_file', { path: 'themes.json', content: '["rising","falling"]', derived: true }, 'w1'),
+        tc('write_file', { path: 'plan.md', content: '# plan' }, 'w2'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    await newSession().ask('q', cb2);
+
+    const writes = last.filter((e) => e.tool === 'write_file');
+    const derivedWrite = writes.find((e) => e.argSummary === 'themes.json');
+    const plainWrite = writes.find((e) => e.argSummary === 'plan.md');
+    expect(derivedWrite?.derived).toBe(true);
+    // A plain (fetched) artifact carries no derived marker.
+    expect(plainWrite?.derived).toBeFalsy();
+    expect(files['themes.json']).toBe('["rising","falling"]');
   });
 });
 
-describe('rlm flag: the caller handed to execute_js', () => {
-  const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+// ── delegate_source: depth-1 per-source sub-agents, on the RLM plumbing ───────
+// Drive real turns through createSession with complete() mocked. Each sub-agent
+// turn is just another queued mockComplete value; its fetches merge into the
+// shared parent state, and its receipts stream nested under the delegate step —
+// all without any network or live model.
+describe('delegate_source sub-agents (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const llmReply = (text: string) => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+  // `rlm` defaults off (the shipping default); only the llm()-budget test opts
+  // in, since the capability is now off by default and withheld otherwise.
+  const newSession = (sources?: string[], rlm?: boolean) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources, rlm });
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  // Every tool-result message of a given name the model was shown, deduped by id.
+  const toolMsgs = (name: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) {
+        if (m.role === 'tool' && m.name === name && !seen.has(m.tool_call_id)) {
+          seen.add(m.tool_call_id);
+          out.push(m.content);
+        }
+      }
+    }
+    return out;
+  };
+
+  it('a single-source session refuses delegate_source at dispatch (runtime guard)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    // The mock forces the call even though it is absent from a one-source
+    // schema — proving the dispatch itself refuses, not just the schema filter.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'World Bank', question: 'x' }, 'd1'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    const res = toolMsgs('delegate_source');
+    expect(res.length).toBe(1);
+    expect(res[0]).toContain('unavailable');
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.detail).toBe('unavailable');
+  });
+
+  it('caps at 3 delegations per turn; the 4th is refused, the first 3 run', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'owid', question: 'q1' }, 'd1'),
+        tc('delegate_source', { source: 'imf', question: 'q2' }, 'd2'),
+        tc('delegate_source', { source: 'owid', question: 'q3' }, 'd3'),
+        tc('delegate_source', { source: 'imf', question: 'q4' }, 'd4'),
+      ])
+    );
+    // Three sub-agents that each return immediately.
+    for (let i = 0; i < 3; i++)
+      mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sum' + i }, 'r' + i)]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    await newSession(['owid', 'imf']).ask('q', cb);
+
+    const res = toolMsgs('delegate_source');
+    expect(res.length).toBe(4);
+    // First 3 succeeded (distilled summaries, source-labelled); 4th hit the cap.
+    expect(res.slice(0, 3).every((r) => r.startsWith('['))).toBe(true);
+    expect(res[3]).toMatch(/delegation budget spent/);
+    const dels = trace().filter((e) => e.tool === 'delegate_source');
+    expect(dels.length).toBe(4);
+    expect(dels[3].status).toBe('ok'); // a cap refusal is a normal result, not an error
+    expect(dels[3].detail).toBe('cap reached');
+  });
+
+  it('a sub-agent that never returns findings stops at its 6-step cap; parent continues', async () => {
+    // find_series over OWID is a pure in-memory catalog filter (offline).
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'gdp' }, 'd1')]));
+    // Six sub-agent turns that keep searching and never return_findings.
+    for (let i = 0; i < 6; i++)
+      mockComplete.mockResolvedValueOnce(modelTurn([tc('find_series', { query: 'gdp' }, 'f' + i)]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+
+    // Exactly six nested sub-agent steps; the 7th turn never ran.
+    const nested = trace().filter((e) => e.nested && e.tool === 'find_series');
+    expect(nested.length).toBe(6);
+    const res = toolMsgs('delegate_source');
+    expect(res[0]).toMatch(/6-step limit/);
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.status).toBe('error');
+    expect(ev?.detail).toBe('cap reached');
+    // The main loop continued past the failed delegation.
+    expect(out.finding).toBe('done');
+  });
+
+  it('merges two sub-agents\' fetched rows + indicators into parent state, citations intact', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes('api.worldbank.org'))
+          return {
+            ok: true,
+            json: async () => [
+              { page: 1, pages: 1 },
+              [
+                { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 70 },
+                { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 71 },
+              ],
+            ],
+          };
+        if (u.includes('ourworldindata.org'))
+          return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\nIndia,IND,2021,69.5\n' };
+        throw new Error('unexpected url ' + u);
+      })
+    );
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('delegate_source', { source: 'World Bank', question: 'life expectancy IND' }, 'd1'),
+        tc('delegate_source', { source: 'owid', question: 'life expectancy IND' }, 'd2'),
+      ])
+    );
+    // Sub-agent 1 (World Bank): fetch then return.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_worldbank', { indicator_id: 'SP.DYN.LE00.IN', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'WB life exp ~71' }, 'r1')]));
+    // Sub-agent 2 (OWID): fetch then return.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_owid', { dataset_id: 'owid:life-expectancy', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'of')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'OWID life exp ~69.5' }, 'r2')]));
+    // Parent combines: chart + finish.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'IND', data: [[2020, 70]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'combined' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('life expectancy', cb);
+
+    // Rows from BOTH sources merged, each carrying its own citation (indicator).
+    expect(out.rows.length).toBe(4);
+    const inds = new Set(out.rows.map((r) => r.indicator));
+    expect(inds.has('SP.DYN.LE00.IN')).toBe(true);
+    expect(inds.has('owid:life-expectancy')).toBe(true);
+    // Indicator registry (drives the evidence table + chart↔evidence linking).
+    const indIds = out.indicators.map((i) => i.id);
+    expect(indIds).toContain('SP.DYN.LE00.IN');
+    expect(indIds).toContain('owid:life-expectancy');
+    // The parent model never saw the raw rows — only the distilled summaries.
+    const res = toolMsgs('delegate_source');
+    expect(res.some((r) => r.includes('WB life exp'))).toBe(true);
+    expect(res.some((r) => r.includes('OWID life exp'))).toBe(true);
+  });
+
+  it('sub-agent llm() calls draw from the SAME per-turn llm budget as the main loop', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('api.worldbank.org'))
+          return { ok: true, json: async () => [{ page: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+        throw new Error('unexpected ' + url);
+      })
+    );
+
+    // Main turn: seed rows, then two execute_js runs spending 6 of the 8 llm()
+    // calls (4 + 2 — the per-run cap is 4, so a single 6-call run would trip it;
+    // this exercises the shared PER-TURN budget instead).
+    const runCode = (n: number) => `for (let i = 0; i < ${n}; i++) { await llm("m" + i, rows[0]); } return ${n};`;
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: runCode(4) }, 'ejA'),
+        tc('execute_js', { code: runCode(2) }, 'ejB'),
+      ])
+    );
+    for (let i = 0; i < 6; i++) mockComplete.mockResolvedValueOnce(llmReply('l' + i));
+    // Main delegates to World Bank; the sub-agent's execute_js tries 4 more
+    // llm() calls but only 2 fit (6 + 2 = 8), the 3rd/4th reject per-turn.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'more' }, 'd1')]));
+    const subCode =
+      'let ok = 0; let caught = ""; for (let i = 0; i < 4; i++) { try { await llm("s" + i, rows[0]); ok++; } catch (e) { caught = e.message; } } return { ok, caught };';
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('execute_js', { code: subCode }, 'sej')]));
+    for (let i = 0; i < 2; i++) mockComplete.mockResolvedValueOnce(llmReply('sl' + i));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r1')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank', 'owid'], true).ask('q', cb);
+
+    // 6 main + 2 sub = exactly the 8-per-turn cap of llm() receipts.
+    expect(trace().filter((e) => e.tool === 'llm').length).toBe(8);
+    // The sub-agent's 3rd/4th calls rejected with the PER-TURN error, proving a
+    // shared budget (a fresh per-run budget would have allowed 4).
+    const subEjResult = (() => {
+      for (const call of mockComplete.mock.calls) {
+        const msgs = call[1] as any[];
+        if (!Array.isArray(msgs)) continue;
+        for (const m of msgs)
+          if (m.role === 'tool' && m.name === 'execute_js' && m.tool_call_id === 'sej') return JSON.parse(m.content);
+      }
+      return null;
+    })();
+    expect(subEjResult?.ok).toBe(2);
+    expect(subEjResult?.caught).toMatch(/per turn/);
+  });
+
+  it('a sub-agent whose model call fails yields an error receipt; the main loop continues', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'q' }, 'd1')]));
+    // The sub-agent's first model call rejects.
+    mockComplete.mockRejectedValueOnce(new Error('provider exploded'));
+    // A later parent turn proves the loop continued past the failed delegation.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'Recovered.' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+
+    const ev = trace().find((e) => e.tool === 'delegate_source');
+    expect(ev?.status).toBe('error');
+    expect(ev?.detail).toBe('error');
+    const res = toolMsgs('delegate_source');
+    expect(res[0]).toContain('failed');
+    expect(res[0]).toContain('provider exploded');
+    // Never a crash, never fabricated filler — the loop reached a real finish.
+    expect(out.finding).toBe('Recovered.');
+  });
+});
+
+// ── Fuzzy country resolution wired into the fetch tools ───────────────────────
+// A driven turn where the model requests a loose country code ("UK"). The
+// dispatch must resolve it to the WB ISO3 ("GBR") before the fetch, hit the API
+// with the resolved code, and surface the rewrite on the trace receipt.
+describe('country resolution in fetch dispatch (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+  it('resolves "UK" → GBR before the fetch and shows it on the receipt', async () => {
+    // Capture the URL fetch() was called with, and return a minimal WB payload.
+    let fetchedUrl = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        fetchedUrl = String(url);
+        return {
+          ok: true,
+          json: async () => [
+            { page: 1, pages: 1 },
+            [{ country: { value: 'United Kingdom' }, countryiso3code: 'GBR', date: '2020', value: 80 }],
+          ],
+        };
+      })
+    );
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'SP.DYN.LE00.IN', country_ids: ['UK'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'GBR', data: [[2020, 80]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'done' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] })
+      .ask('life expectancy in the UK', cb);
+
+    // The API was hit with the RESOLVED code, not the raw "UK".
+    expect(fetchedUrl).toContain('/country/GBR/');
+    expect(fetchedUrl).not.toContain('/country/UK/');
+
+    // The trace receipt for the fetch surfaces the resolution.
+    const fetchEv = last.find((e) => e.tool === 'fetch_worldbank');
+    expect(fetchEv?.detail).toContain('UK → GBR (United Kingdom)');
+
+    // The model's tool result also carries the resolution note.
+    const wbMsg = (() => {
+      for (const call of mockComplete.mock.calls) {
+        const msgs = call[1] as any[];
+        if (!Array.isArray(msgs)) continue;
+        for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === 'wf') return m.content as string;
+      }
+      return '';
+    })();
+    expect(wbMsg).toContain('UK → GBR (United Kingdom)');
+
+    // Rows still merged normally.
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0].iso3).toBe('GBR');
+  });
+});
+
+// ── fetch_series router + session cache (backlog #7 + #9) ─────────────────────
+// Driven turns through createSession with complete() mocked and fetch() stubbed
+// (egress is blocked in this environment — live routing against the real APIs is
+// NOT testable, so every fetch here is a stub; the stub's URL and call count are
+// what prove routing and caching). No network, no live model.
+describe('fetch_series router + session cache (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+
+  // A fetch stub that records every URL and answers WB / OWID / IMF shapes.
+  const recordingFetch = () => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('api.worldbank.org'))
+        return { ok: true, json: async () => [{ page: 1, pages: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+      if (u.includes('ourworldindata.org'))
+        return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\n' };
+      if (u.includes('imf.org'))
+        return { ok: true, json: async () => ({ values: { NGDP_RPCH: { IND: { '2020': 5 } } } }) };
+      throw new Error('unexpected url ' + u);
+    });
+    return { fn, urls };
+  };
+
+  // The tool-result string the model saw for a given tool_call_id.
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+
+  it('routes an id to its source by namespace (World Bank / OWID / IMF)', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'wb'),
+        tc('fetch_series', { id: 'owid:life-expectancy', countries: ['IND'] }, 'ow'),
+        tc('fetch_series', { id: 'imf:NGDP_RPCH', countries: ['IND'] }, 'im'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+
+    // Each id reached the correct host, carrying its resolved country.
+    expect(urls.some((u) => u.includes('api.worldbank.org') && u.includes('/country/IND/') && u.includes('SH.DYN.MORT'))).toBe(true);
+    expect(urls.some((u) => u.includes('ourworldindata.org/grapher/life-expectancy.csv'))).toBe(true);
+    expect(urls.some((u) => u.includes('imf.org') && u.includes('NGDP_RPCH'))).toBe(true);
+    // Rows merged with each source's citation intact.
+    const inds = new Set(out.rows.map((r) => r.indicator));
+    expect(inds.has('SH.DYN.MORT')).toBe(true);
+    expect(inds.has('owid:life-expectancy')).toBe(true);
+    expect(inds.has('imf:NGDP_RPCH')).toBe(true);
+  });
+
+  it('round-trips a newly-curated OWID slug: find_series id fetches via the OWID branch', async () => {
+    // A catalog hit's id must be fetchable by the existing OWID fetcher. Take a
+    // slug added in this increment, confirm search surfaces it, then fetch that
+    // exact id and confirm it reaches the grapher CSV endpoint for that slug.
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    // recordingFetch answers OWID URLs with CSV (no .json), so the live-catalog
+    // fallback throws → curated hits stand; the new slug must be among them.
+    const hits = await findSeries('temperature anomaly', ['owid']);
+    const id = hits.find((h) => h.id === 'owid:temperature-anomaly')!.id;
+    expect(id).toBe('owid:temperature-anomaly');
+
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id, countries: ['IND'], year_start: 2020, year_end: 2020 }, 'ta'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['owid']).ask('q', cb);
+    expect(urls.some((u) => u.includes('ourworldindata.org/grapher/temperature-anomaly.csv'))).toBe(true);
+    expect(new Set(out.rows.map((r) => r.indicator)).has('owid:temperature-anomaly')).toBe(true);
+  });
+
+  it('an unrecognized namespace is a clear routing error, not a crash or a stray fetch', async () => {
+    const { fn } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'foo:bar', countries: ['IND'] }, 'bad'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(toolMsgById('bad')).toMatch(/not recognized/);
+    expect(fn).not.toHaveBeenCalled(); // refused before any network call
+    expect(out.rows.length).toBe(0);
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.status).toBe('ok'); // a clean refusal, not an error receipt
+    expect(ev?.detail).toBe('unknown source');
+  });
+
+  it('a legacy per-source tool name (fetch_imf) still dispatches through the router', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_imf', { dataset_id: 'imf:NGDP_RPCH', country_ids: ['IND'] }, 'lg'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(urls.some((u) => u.includes('imf.org') && u.includes('NGDP_RPCH'))).toBe(true);
+    expect(out.rows.some((r) => r.indicator === 'imf:NGDP_RPCH')).toBe(true);
+  });
+
+  it('resolves a loose country ("UK" → GBR) through the router and shows it on the receipt', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['UK'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    expect(urls.some((u) => u.includes('/country/GBR/'))).toBe(true);
+    expect(urls.some((u) => u.includes('/country/UK/'))).toBe(false);
+    expect(toolMsgById('f')).toContain('UK → GBR (United Kingdom)');
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toContain('UK → GBR (United Kingdom)');
+  });
+
+  it('refuses an out-of-source id inside a source-scoped sub-agent (runtime hard filter)', async () => {
+    const { fn } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'owid', question: 'q' }, 'd1')]));
+    // The OWID sub-agent reaches for a World Bank id — outside its one source.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'nothing usable' }, 'r')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+
+    const msg = toolMsgById('sf');
+    expect(msg).toMatch(/not available/);
+    expect(msg).toContain('SH.DYN.MORT');
+    // Refused before any network call — a World Bank fetch never happened.
+    expect(fn.mock.calls.some((c) => String(c[0]).includes('api.worldbank.org'))).toBe(false);
+    const ev = trace().find((e) => e.nested && e.tool === 'fetch_series');
+    expect(ev?.detail).toBe('refused: out-of-source id');
+    expect(out.finding).toBe('done');
+  });
+
+  it('serves a repeat identical fetch from the session cache — no second network call, receipt says cached', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    // Two IDENTICAL fetch_series calls in the same session.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    // Exactly one real World Bank fetch; the second was served from cache.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(1);
+    expect(toolMsgById('a')).not.toContain('cached');
+    expect(toolMsgById('b')).toContain('cached');
+    // Rows are NOT doubled — the cache hit does not re-append.
+    expect(out.rows.length).toBe(1);
+    const evs = trace().filter((e) => e.tool === 'fetch_series');
+    expect(evs.length).toBe(2);
+    expect(evs[1].detail?.startsWith('cached')).toBe(true);
+  });
+
+  it('keys the cache on countries and range — a different country or range really re-fetches', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['CHN'], year_start: 2020, year_end: 2020 }, 'b'), // diff country
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2000, year_end: 2000 }, 'c'), // diff range
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    await newSession().ask('q', cb);
+
+    // Three distinct keys → three real World Bank fetches, none cached.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(3);
+    for (const id of ['a', 'b', 'c']) expect(toolMsgById(id)).not.toContain('cached');
+  });
+
+  it('a sub-agent fetch populates the shared cache; the main loop then hits it', async () => {
+    const { fn, urls } = recordingFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'le' }, 'd1')]));
+    // Sub-agent fetches the series, then returns.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r')]));
+    // Main loop asks for the SAME series/countries/range → must hit the cache.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'mf'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+
+    // Exactly one real fetch total — the sub-agent's; the main loop's was cached.
+    expect(urls.filter((u) => u.includes('api.worldbank.org')).length).toBe(1);
+    expect(toolMsgById('mf')).toContain('cached');
+    // The sub-agent appended once; the cache hit did not re-append.
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0].indicator).toBe('SP.DYN.LE00.IN');
+  });
+});
+
+// ── VFS as citation ledger (backlog #11) ─────────────────────────────────────
+// Every number traceable: each live fetch writes a structured citation record
+// into state (surfaced as out.citations) AND mirrors the whole ledger into the
+// VFS as citations.json (via:'fetch'). Egress is blocked here, so live source
+// headers (the real World Bank `lastupdated`) are NOT verifiable — every fetch
+// below is a STUB. The WB `lastupdated` vintage is proven with a stubbed header
+// standing in for the real one; that substitution is called out honestly.
+describe('citation ledger (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+
+  // Capture BOTH the trace and the latest VFS files snapshot (so citations.json
+  // — written through the real VFS onChange path — can be read back and parsed).
+  const capture = () => {
+    let trace: any[] = [];
+    let files: Record<string, string> = {};
+    const cb = {
+      onTrace: (ev: any[]) => (trace = ev),
+      onFiles: (f: Record<string, string>) => (files = f),
+      onChart: () => {},
+      onStatus: () => {},
+    };
+    return { cb, trace: () => trace, files: () => files };
+  };
+
+  // A WB stub whose response header carries `lastupdated` — a stand-in for the
+  // real World Bank vintage field (egress is blocked; the live header can't be
+  // reached). Records every URL it is called with.
+  const wbFetchWithVintage = (lastupdated?: string) => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, ...(lastupdated ? { lastupdated } : {}) },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 42 }],
+        ],
+      };
+    });
+    return { fn, urls };
+  };
+
+  it('records a ledger entry on a successful fetch with the resolved country, URL, row count and fetched-at', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        // "UK" must be resolved to GBR before it lands in the citation.
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['UK'], year_start: 2019, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    expect(out.citations.length).toBe(1);
+    const c = out.citations[0];
+    expect(c.source).toBe('worldbank');
+    expect(c.sourceLabel).toBe('World Bank Open Data');
+    expect(c.indicatorId).toBe('SP.DYN.LE00.IN');
+    // Resolved country code, not the raw "UK".
+    expect(c.countries).toEqual(['GBR']);
+    expect(c.yearRange).toEqual({ start: 2019, end: 2020 });
+    expect(c.rowCount).toBe(1);
+    // Human-visitable page is what renders; the API URL is kept separately.
+    expect(c.url).toBe('https://data.worldbank.org/indicator/SP.DYN.LE00.IN');
+    expect(c.requestUrl).toContain('api.worldbank.org');
+    // fetchedAt is a real ISO timestamp; the record is not marked cached.
+    expect(() => new Date(c.fetchedAt).toISOString()).not.toThrow();
+    expect(c.fetchedAt).toBe(new Date(c.fetchedAt).toISOString());
+    expect(c.cached).toBe(false);
+  });
+
+  it('captures sourceUpdated from a WB-style lastupdated header, and omits it when absent', async () => {
+    // With vintage.
+    {
+      const { fn } = wbFetchWithVintage('2024-12-16');
+      vi.stubGlobal('fetch', fn);
+      mockComplete.mockResolvedValueOnce(
+        modelTurn([
+          tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+          tc('finish_explanation', { explanation: 'done' }, 'fe'),
+        ])
+      );
+      const { cb } = capture();
+      const out = await newSession(['worldbank']).ask('q', cb);
+      expect(out.citations[0].sourceUpdated).toBe('2024-12-16');
+    }
+    mockComplete.mockReset();
+    vi.unstubAllGlobals();
+    // Without vintage — the field is OMITTED, never invented.
+    {
+      const { fn } = wbFetchWithVintage(undefined);
+      vi.stubGlobal('fetch', fn);
+      mockComplete.mockResolvedValueOnce(
+        modelTurn([
+          tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+          tc('finish_explanation', { explanation: 'done' }, 'fe'),
+        ])
+      );
+      const { cb } = capture();
+      const out = await newSession(['worldbank']).ask('q', cb);
+      expect('sourceUpdated' in out.citations[0]).toBe(false);
+    }
+  });
+
+  it('a cache hit does NOT duplicate the ledger entry — same citation, cited once', async () => {
+    const { fn, urls } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // One real network call, and exactly ONE ledger entry.
+    expect(urls.length).toBe(1);
+    expect(out.citations.length).toBe(1);
+  });
+
+  it('sub-agent fetches land in the SAME ledger as the main loop', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'le' }, 'd1')]));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'sf')])
+    );
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'sub done' }, 'r')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank', 'owid']).ask('q', cb);
+    // The sub-agent's fetch produced the citation in the shared session ledger.
+    expect(out.citations.length).toBe(1);
+    expect(out.citations[0].indicatorId).toBe('SP.DYN.LE00.IN');
+  });
+
+  it('model-derived (via:llm) files never appear in the citation ledger', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        // A model-derived artifact — must be marked via:'llm' in the VFS and must
+        // NOT enter the citation ledger.
+        tc('write_file', { path: 'themes.json', content: '["rising"]', derived: true }, 'w'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, files } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // Exactly one citation — the fetch — and nothing referencing the derived file.
+    expect(out.citations.length).toBe(1);
+    expect(out.citations.some((c) => c.indicatorId === 'themes.json')).toBe(false);
+    // The derived file exists in the VFS alongside the fetched ledger.
+    expect(files()['themes.json']).toBe('["rising"]');
+    expect(files()['citations.json']).toBeTruthy();
+  });
+
+  it('mirrors the ledger into a readable, well-formed citations.json (via:fetch)', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        // Read the ledger back through the model's own file tool.
+        tc('read_file', { path: 'citations.json' }, 'rf'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, files } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    const raw = files()['citations.json'];
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].indicatorId).toBe('SP.DYN.LE00.IN');
+    expect(parsed[0].url).toBe('https://data.worldbank.org/indicator/SP.DYN.LE00.IN');
+    expect(parsed[0].sourceUpdated).toBe('2024-12-16');
+    // The whole ledger matches out.citations exactly.
+    expect(parsed).toEqual(out.citations);
+  });
+
+  it('CSV export carries the provenance lines at the top', async () => {
+    const { fn } = wbFetchWithVintage('2024-12-16');
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SP.DYN.LE00.IN', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('render_chart', { type: 'line', title: 'LE', series: [{ name: 'IND', data: [[2020, 42]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'done' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+
+    const { cb } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // Provenance rides at the top as `#` comment lines, above the data header.
+    expect(out.csv).toContain('# Source: World Bank Open Data');
+    expect(out.csv).toContain('SP.DYN.LE00.IN');
+    expect(out.csv).toContain('source updated 2024-12-16');
+    const headerIdx = out.csv.indexOf('country,iso3,year,value');
+    expect(headerIdx).toBeGreaterThan(0);
+    // Every provenance line precedes the CSV data header.
+    expect(out.csv.slice(0, headerIdx).split('\n').filter((l) => l.startsWith('# Source:')).length).toBe(1);
+  });
+
+  it('records OWID / IMF citations too, without inventing a vintage they do not provide', async () => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('ourworldindata.org'))
+        return { ok: true, text: async () => 'Entity,Code,Year,Life\nIndia,IND,2020,69\n' };
+      if (u.includes('imf.org'))
+        return { ok: true, json: async () => ({ values: { NGDP_RPCH: { IND: { '2020': 5 } } } }) };
+      throw new Error('unexpected ' + u);
+    });
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'owid:life-expectancy', countries: ['IND'] }, 'ow'),
+        tc('fetch_series', { id: 'imf:NGDP_RPCH', countries: ['IND'] }, 'im'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['owid', 'imf']).ask('q', cb);
+    const byId = Object.fromEntries(out.citations.map((c) => [c.indicatorId, c]));
+    expect(byId['owid:life-expectancy'].url).toBe('https://ourworldindata.org/grapher/life-expectancy');
+    expect('sourceUpdated' in byId['owid:life-expectancy']).toBe(false);
+    expect(byId['imf:NGDP_RPCH'].url).toBe('https://www.imf.org/external/datamapper/NGDP_RPCH');
+    expect('sourceUpdated' in byId['imf:NGDP_RPCH']).toBe(false);
+  });
+});
+
+// ── The RLM (judgment-call) flag: off by default ──────────────────────────
+// Ported and adapted from main's off-by-default gating (commit 73f554e). The
+// branch's llm() plumbing lives INLINE in agent.ts (not a separate rlm.ts) and
+// is gated in the SYSTEM PROMPT rather than the execute_js tool-schema where
+// main put it — so the prompt assertions target buildSystemPrompt /
+// buildSubAgentPrompt. The product semantics are identical to main's: the
+// capability ships OFF, the user opts in, and "off" is enforced by
+// WITHHOLDING (the model is never told llm() exists), for the main loop AND
+// for delegation sub-agents.
+describe('rlm flag: the system prompt withholds llm() when off', () => {
+  const sources = resolveSources(['worldbank', 'owid']);
+
+  it('omits every llm() mention by default (flag off)', () => {
+    const p = buildSystemPrompt(sources);
+    expect(p).not.toContain('llm(');
+    expect(p).not.toMatch(/model-derived/i);
+    // The base guidance the code always gets is still there and reads cleanly.
+    expect(p).toContain('execute_js → anything else');
+  });
+
+  it('omits it when explicitly off, identical to omitting the flag', () => {
+    expect(buildSystemPrompt(sources, false)).toBe(buildSystemPrompt(sources));
+  });
+
+  it('includes the bounded llm() guidance and the provenance rule when on', () => {
+    const p = buildSystemPrompt(sources, true);
+    expect(p).toContain('await llm(');
+    expect(p).toContain('model-derived');
+    expect(p).toContain('4 llm() calls per execute_js run'); // MAX_LLM_PER_RUN
+    expect(p).toContain('8 per turn'); // MAX_LLM_PER_TURN
+  });
+
+  it('sub-agent prompts inherit the same toggle', () => {
+    expect(buildSubAgentPrompt(sources[0])).not.toContain('llm(');
+    expect(buildSubAgentPrompt(sources[0], false)).not.toContain('llm(');
+    expect(buildSubAgentPrompt(sources[0], true)).toContain('await llm(');
+  });
+});
+
+describe('rlm flag: the llm() primitive in the execute_js sandbox', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
   const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
 
-  // A turn that fetches one row, runs execute_js, then finishes. The js body
-  // reports what `llm` did when invoked, so the assertion is behavioural
-  // rather than a check on a symbol that always exists.
+  beforeEach(() => {
+    mockComplete.mockReset();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 1 },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const fetchCall = (id = 'wf') =>
+    tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, id);
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  // The probe reports whether llm() ran or refused, so the assertion is
+  // behavioural — a check on what the sandbox binding actually did, not on a
+  // symbol that always exists.
   const PROBE =
-    'try { await llm("classify", rows); return "CALLED"; } ' +
-    'catch (e) { return "REFUSED: " + e.message; }';
+    'try { const r = await llm("classify", rows[0]); return "CALLED:" + r; } ' +
+    'catch (e) { return "REFUSED:" + e.message; }';
 
-  function queueTurn(mock: ReturnType<typeof vi.fn>, code: string) {
-    mock.mockReset();
-    // 1. fetch, so state.rows is non-empty (execute_js short-circuits otherwise).
-    mock.mockResolvedValueOnce({
-      text: '',
-      toolCalls: [
-        {
-          id: 'f1',
-          name: 'fetch_worldbank',
-          arguments: {
-            indicator_id: 'NY.GDP.MKTP.CD',
-            country_ids: ['USA'],
-            year_start: 2000,
-            year_end: 2001,
-          },
-        },
-      ],
-      usage: { input: 10, output: 5 },
-    });
-    // 2. execute_js with the probe body.
-    mock.mockResolvedValueOnce({
-      text: '',
-      toolCalls: [{ id: 'x1', name: 'execute_js', arguments: { code } }],
-      usage: { input: 10, output: 5 },
-    });
-    // 3. finish_explanation, which skips the verifier so the mock queue stays
-    //    short and any UNEXPECTED extra completion (i.e. a nested llm call)
-    //    fails loudly instead of silently consuming a queued value.
-    mock.mockResolvedValueOnce({
-      text: '',
-      toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
-      usage: { input: 8, output: 4 },
-    });
-  }
-
-  function execTrace(trace: any[]) {
-    return trace.find((e) => e.tool === 'execute_js');
-  }
-
-  it('passes no caller by default, so llm() is unavailable in the sandbox', async () => {
-    const mock = complete as unknown as ReturnType<typeof vi.fn>;
-    queueTurn(mock, PROBE);
+  const capture = () => {
     let last: any[] = [];
-    const session = createSession(cfg);
-    await session.ask('probe', { ...cb, onTrace: (t: any[]) => { last = t; } });
+    const cb = { onTrace: (e: any[]) => (last = e), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const execResultFor = (id: string) => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs)
+        if (m.role === 'tool' && m.name === 'execute_js' && m.tool_call_id === id) {
+          try {
+            return JSON.parse(m.content);
+          } catch {
+            return m.content;
+          }
+        }
+    }
+    return null;
+  };
 
-    const ev = execTrace(last);
-    expect(ev).toBeDefined();
-    expect(ev.detail).toBe('ok');
-    expect(ev.rlmReceipts).toBeUndefined();
-    // Exactly three completions: fetch, execute_js, finish. No nested call.
-    expect(mock.mock.calls.length).toBe(3);
+  it('off by default: llm() is withheld in the sandbox and no nested call is billed', async () => {
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb, trace } = capture();
+    await createSession(cfg).ask('probe', cb);
+
+    const res = execResultFor('ej');
+    expect(String(res)).toContain('REFUSED');
+    expect(String(res)).toContain('not available');
+    // No nested 'llm' trace event, and exactly three completions (turn, finish,
+    // verify) — the nested call never happened.
+    expect(trace().some((e) => e.tool === 'llm')).toBe(false);
+    expect(mockComplete.mock.calls.length).toBe(3);
   });
 
   it('rlm: false behaves identically to omitting the option', async () => {
-    const mock = complete as unknown as ReturnType<typeof vi.fn>;
-    queueTurn(mock, PROBE);
-    let last: any[] = [];
-    const session = createSession(cfg, { rlm: false });
-    await session.ask('probe', { ...cb, onTrace: (t: any[]) => { last = t; } });
-    expect(execTrace(last).rlmReceipts).toBeUndefined();
-    expect(mock.mock.calls.length).toBe(3);
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb } = capture();
+    await createSession(cfg, { rlm: false }).ask('probe', cb);
+    expect(String(execResultFor('ej'))).toContain('REFUSED');
+    expect(mockComplete.mock.calls.length).toBe(3);
   });
 
-  it('code that never calls llm() is unaffected when the flag is off', async () => {
-    const mock = complete as unknown as ReturnType<typeof vi.fn>;
-    queueTurn(mock, 'return rows.length;');
-    let last: any[] = [];
-    const session = createSession(cfg);
-    await session.ask('count', { ...cb, onTrace: (t: any[]) => { last = t; } });
-    const ev = execTrace(last);
-    expect(ev.detail).toBe('ok');
-    expect(ev.rlmReceipts).toBeUndefined();
+  it('on: llm() runs, emits one nested receipt, and the nested call carries no tools (depth-1)', async () => {
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall(), tc('execute_js', { code: PROBE }, 'ej')]));
+    // The nested llm() completion, issued from inside execute_js (stubbed).
+    mockComplete.mockResolvedValueOnce({ text: 'coastal', toolCalls: [], usage: { input: 3, output: 1 } });
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish', { one_line_finding: 'Done.' }, 'fin')]));
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const { cb, trace } = capture();
+    await createSession(cfg, { rlm: true }).ask('probe', cb);
+
+    expect(execResultFor('ej')).toBe('CALLED:coastal');
+    const nested = trace().filter((e) => e.tool === 'llm');
+    expect(nested.length).toBe(1);
+    expect(nested[0].nested).toBe(true);
+    // Four completions: the nested one actually happened. It is issued with an
+    // EMPTY tool array (depth-1 by construction — the inner model cannot
+    // recurse). The nested call is completion index 1.
+    expect(mockComplete.mock.calls.length).toBe(4);
+    expect(mockComplete.mock.calls[1][2]).toEqual([]);
   });
 
-  it('enabling restores the nested call, its receipt, and the provenance note', async () => {
-    const mock = complete as unknown as ReturnType<typeof vi.fn>;
-    // Queued by hand rather than via queueTurn: the nested llm() completion
-    // is consumed in call order, so it has to sit between execute_js and
-    // finish. It is stubbed, so the sandbox never reaches a network.
-    mock.mockReset();
-    mock
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [
-          {
-            id: 'f1',
-            name: 'fetch_worldbank',
-            arguments: {
-              indicator_id: 'NY.GDP.MKTP.CD',
-              country_ids: ['USA'],
-              year_start: 2000,
-              year_end: 2001,
-            },
-          },
-        ],
-        usage: { input: 10, output: 5 },
-      })
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [
-          {
-            id: 'x1',
-            name: 'execute_js',
-            arguments: { code: 'const r = await llm("classify", rows); return r.text;' },
-          },
-        ],
-        usage: { input: 10, output: 5 },
-      })
-      // The nested llm() completion, issued from inside execute_js.
-      .mockResolvedValueOnce({ text: 'coastal', toolCalls: [], usage: { input: 3, output: 1 } })
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
-        usage: { input: 8, output: 4 },
-      });
+  it('a delegation sub-agent inherits the off toggle: its execute_js llm() is withheld too', async () => {
+    // Two sources so delegate_source exists; rlm off (the default).
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('delegate_source', { source: 'World Bank', question: 'probe' }, 'd1')]));
+    // Sub-agent: fetch (seeds shared rows), execute_js probe, return_findings.
+    mockComplete.mockResolvedValueOnce(modelTurn([fetchCall('wf'), tc('execute_js', { code: PROBE }, 'sej')]));
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('return_findings', { summary: 'done' }, 'rf')]));
+    // Main finishes with an explanation (no chart, so no verifier turn).
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+    const { cb, trace } = capture();
+    await createSession(cfg, { sources: ['worldbank', 'owid'] }).ask('q', cb);
 
-    let last: any[] = [];
-    const session = createSession(cfg, { rlm: true });
-    await session.ask('judge', { ...cb, onTrace: (t: any[]) => { last = t; } });
-
-    const ev = execTrace(last);
-    expect(ev.rlmReceipts).toBeDefined();
-    expect(ev.rlmReceipts.length).toBe(1);
-    expect(ev.rlmReceipts[0].ok).toBe(true);
-    expect(ev.rlmReceipts[0].depth).toBe(1);
-    expect(ev.detail).toContain('1 llm() call');
-    // Four completions: the nested one actually happened.
-    expect(mock.mock.calls.length).toBe(4);
-    // The nested call is issued with an EMPTY tool array (depth-1 by
-    // construction), which is what makes recursion impossible.
-    expect(mock.mock.calls[2][2]).toEqual([]);
+    const subRes = execResultFor('sej');
+    expect(String(subRes)).toContain('REFUSED');
+    expect(String(subRes)).toContain('not available');
+    // The sub-agent likewise issued no nested llm() call.
+    expect(trace().some((e) => e.tool === 'llm')).toBe(false);
   });
 
-  it('attributes nested cost to the model that served it, not the configured one', async () => {
-    const mock = complete as unknown as ReturnType<typeof vi.fn>;
-    mock.mockReset();
-    mock
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [
-          {
-            id: 'f1',
-            name: 'fetch_worldbank',
-            arguments: {
-              indicator_id: 'NY.GDP.MKTP.CD',
-              country_ids: ['USA'],
-              year_start: 2000,
-              year_end: 2001,
-            },
-          },
-        ],
-        usage: { input: 0, output: 0 },
-      })
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [
-          {
-            id: 'x1',
-            name: 'execute_js',
-            arguments: { code: 'const r = await llm("classify", rows); return r.text;' },
-          },
-        ],
-        usage: { input: 0, output: 0 },
-      })
-      // Served by a :free model, which estimateCost prices at zero. If the
-      // cost still referenced cfg.model this nested call would be billed at
-      // the default rate, so a zero total is what proves the attribution.
-      .mockResolvedValueOnce({
-        text: 'coastal',
-        toolCalls: [],
-        usage: { input: 1_000_000, output: 1_000_000 },
-        servedModel: 'some/model:free',
-      })
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
-        usage: { input: 0, output: 0 },
-      });
-
-    const session = createSession(cfg, { rlm: true });
-    const out = await session.ask('judge', cb);
+  // ── Cost attribution (ported from main's "price against the served model").
+  // Non-RLM correctness that must survive the merge: OpenRouter's free-fallback
+  // chain can serve a different model than cfg.model, so pricing must read
+  // res.servedModel. A :free model prices at zero, so a zero total is the proof.
+  it('prices the nested llm() call against the model that served it, not cfg.model', async () => {
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [fetchCall(), tc('execute_js', { code: 'const r = await llm("classify", rows); return r;' }, 'ej')],
+      usage: { input: 0, output: 0 },
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: 'coastal',
+      toolCalls: [],
+      usage: { input: 1_000_000, output: 1_000_000 },
+      servedModel: 'some/model:free',
+    });
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'Done.' }, 'fe')],
+      usage: { input: 0, output: 0 },
+    });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg, { rlm: true }).ask('judge', cb);
     expect(out.cost).toBe(0);
   });
 
-  // Same attribution rule in the MAIN loop, not just the nested call. This
-  // matters in normal use: the free-model fallback chain means OpenRouter can
-  // serve a different model than the one picked, and pricing the response
-  // against cfg.model would bill the user for a model that never ran.
   it('prices main-loop turns against the model that actually served them', async () => {
-    (complete as any)
-      .mockResolvedValueOnce({
-        text: '',
-        toolCalls: [{ id: 'e1', name: 'finish_explanation', arguments: { explanation: 'Done.' } }],
-        usage: { input: 1_000_000, output: 1_000_000 },
-        servedModel: 'some/model:free',
-      });
-
-    const session = createSession(cfg);
-    const out = await session.ask('explain something', cb);
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'Done.' }, 'fe')],
+      usage: { input: 1_000_000, output: 1_000_000 },
+      servedModel: 'some/model:free',
+    });
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg).ask('explain something', cb);
     expect(out.cost).toBe(0);
   });
 });
