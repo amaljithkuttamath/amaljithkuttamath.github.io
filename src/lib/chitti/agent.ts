@@ -104,6 +104,24 @@ export interface TraceEvent {
   // has returned a verdict. Drives the ink-stamped VERIFIED badge. The UI
   // must only stamp a step where this is true.
   pass?: boolean;
+  // The three honest verification outcomes, set only on a 'verify' event:
+  //   'verified'    — the verifier ran and passed (pass===true; amber stamp).
+  //   'unverified'  — the verifier ran and did NOT confirm the answer, or its
+  //                   output was unparseable (could-not-verify). pass===false.
+  //   'unavailable' — the verify call itself failed (network/provider error) or
+  //                   was skipped. NEVER implies the answer was verified.
+  // The UI keys its three answer/receipt treatments off this, never off a
+  // defaulted-true pass.
+  verifyStatus?: 'verified' | 'unverified' | 'unavailable';
+  // The verifier's self-reported confidence in ITS verdict (not the finding's).
+  // 'none' when the verifier couldn't run (unavailable). Rendered on the verify
+  // receipt beside the verdict.
+  confidence?: 'high' | 'medium' | 'low' | 'none';
+  // The concrete problems the verifier flagged on a non-pass — each a short
+  // sentence naming WHAT was doubted (claim vs source, missing citation, number
+  // not found). Empty on a pass. Never fabricated: a malformed/unparseable
+  // verdict yields [] (could-not-verify), not invented issues.
+  issues?: string[];
   // Set only on a 'find_series' step: structured search metadata (databases
   // searched, candidate count, top match + which terms/synonyms fired) that
   // the UI renders as a dedicated search-receipt card. UI-only.
@@ -148,9 +166,38 @@ export interface AgentOutput {
   citations: Citation[];
   confidence: 'ok' | 'low';
   verifierReport: string;
+  // The structured verification verdict for this turn, surfaced honestly by the
+  // UI as one of three states. null on an explanation turn (verification is not
+  // run for prose answers). status/confidence/issues drive the answer-level tag
+  // and the verify receipt; the UI must never present a non-'verified' status
+  // as verified.
+  verification: VerificationVerdict | null;
   cost: number;
   retried: boolean;
   kind: 'chart' | 'explanation';
+}
+
+export type VerifyStatus = 'verified' | 'unverified' | 'unavailable';
+
+// The verifier's verdict as it leaves verify()/reaches the UI. `pass` is true
+// only when status==='verified' — the two are kept in lockstep so a caller can
+// never read a truthy pass out of an unavailable/unverified verdict.
+export interface VerificationVerdict {
+  status: VerifyStatus;
+  pass: boolean;
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  issues: string[];
+  report: string;
+  tokens?: number;
+}
+
+// The shape parseVerifierVerdict extracts from the verifier's raw text. `null`
+// from the parser means "could not be parsed" — the caller treats that as
+// could-not-verify (never verified, never fabricated issues).
+export interface ParsedVerdict {
+  pass: boolean;
+  confidence: 'high' | 'medium' | 'low';
+  issues: string[];
 }
 
 // The system prompt is assembled per session from the active databases, so a
@@ -1054,14 +1101,20 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       }
     }
 
-    async function runVerify(critique?: string): Promise<{ pass: boolean; report: string }> {
+    async function runVerify(critique?: string): Promise<VerificationVerdict> {
       const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
       // Hand the verifier the structured ledger entries (truthful URLs +
       // vintages) rather than reconstructed citation strings — light touch, the
       // verdict logic is unchanged (backlog #11 point 5).
       const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c));
-      ev.status = result.pass ? 'ok' : 'error';
+      // A genuine pass is the only 'ok' receipt; unverified AND unavailable both
+      // read as error receipts (existing torn-receipt styling). The stamp is
+      // driven off `pass` alone, so only a real pass can be stamped.
+      ev.status = result.status === 'verified' ? 'ok' : 'error';
       ev.pass = result.pass;
+      ev.verifyStatus = result.status;
+      ev.confidence = result.confidence;
+      ev.issues = result.issues;
       ev.detail = result.report;
       ev.tokens = result.tokens;
       updateTrace();
@@ -1071,23 +1124,33 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     cb.onStatus('Planning…', 'loading');
     await agentPass();
 
-    let verifierReport = { pass: true, report: '' };
     let retried = false;
     let confidence: 'ok' | 'low' = 'ok';
+    // The final verdict for the turn (null on an explanation turn — verification
+    // does not run for prose answers).
+    let verification: VerificationVerdict | null = null;
 
     if (turnKind === 'chart') {
       cb.onStatus('Verifying…', 'loading');
-      verifierReport = await runVerify();
-      vfs.write('verifier_report.md', verifierReport.report);
+      verification = await runVerify();
+      vfs.write('verifier_report.md', verification.report);
 
-      if (!verifierReport.pass) {
+      // Retry ONLY on a genuine 'unverified' verdict — the verifier ran and said
+      // the answer isn't good enough. An 'unavailable' verdict (the verify call
+      // itself failed) is NOT retried: re-running the pipeline can't fix a
+      // verifier network/provider error, and doing so would be a wasted round.
+      if (verification.status === 'unverified') {
         retried = true;
         cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
-        await agentPass(verifierReport.report);
-        const second = await runVerify(verifierReport.report);
-        vfs.write('verifier_report.md', verifierReport.report + '\n\n---\nRetry verdict:\n' + second.report);
-        if (!second.pass) confidence = 'low';
+        await agentPass(verification.report);
+        const second = await runVerify(verification.report);
+        vfs.write('verifier_report.md', verification.report + '\n\n---\nRetry verdict:\n' + second.report);
+        verification = second; // the retry's verdict is the turn's final one
       }
+      // Low confidence when the final verdict is not a clean pass, or the pass
+      // itself came back low-confidence. Verified-but-medium/high stays 'ok'.
+      confidence =
+        verification.status === 'verified' && verification.confidence !== 'low' ? 'ok' : 'low';
     }
 
     cb.onStatus('Done', 'ok');
@@ -1119,7 +1182,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       indicators,
       citations,
       confidence,
-      verifierReport: verifierReport.report,
+      verifierReport: verification?.report ?? '',
+      verification,
       cost: totalCost,
       retried,
       kind: turnKind,
@@ -1178,7 +1242,68 @@ function pipelineStatus(
   return 'Planning…';
 }
 
+// ── Verdict parsing (pure, exported for tests) ────────────────────────────
+// Pull the first balanced-looking top-level JSON object out of a text blob.
+// The verifier is asked for bare JSON, but models wrap it in ``` fences or a
+// sentence of prose; we take the slice from the first '{' to the last '}' and
+// try to parse it. Returns a plain object or null (never throws).
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1));
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? (obj as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Parse the verifier's raw text into a structured verdict, DEFENSIVELY. The
+// contract, in priority order:
+//   1. A JSON object {pass:bool, confidence:'high'|'medium'|'low', issues:[str]}
+//      — accepted only when ALL three fields are the right shape. A present-but-
+//      malformed JSON verdict returns null (could-not-verify) rather than a
+//      half-guessed one: we never invent a pass or fabricate issues.
+//   2. Legacy "PASS: …" / "FAIL: …" prefix (the pre-structured format, still
+//      emitted by older prompts and exercised by the existing tests). PASS →
+//      pass with high confidence; FAIL → not-pass, low confidence, the reason
+//      text kept as the single issue.
+//   3. Anything else (empty, or neither JSON nor a PASS/FAIL prefix) → null.
+// A null return ALWAYS means could-not-verify; it never means verified.
+export function parseVerifierVerdict(raw: string): ParsedVerdict | null {
+  const text = (raw ?? '').trim();
+  if (!text) return null;
+
+  const json = extractJsonObject(text);
+  if (json) {
+    const pass = typeof json.pass === 'boolean' ? json.pass : null;
+    const conf = json.confidence;
+    const confOk = conf === 'high' || conf === 'medium' || conf === 'low';
+    const issues = Array.isArray(json.issues)
+      ? (json.issues as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim())
+      : null;
+    // Every field must be well-formed. A partial object is could-not-verify.
+    if (pass !== null && confOk && issues !== null) {
+      return { pass, confidence: conf as 'high' | 'medium' | 'low', issues };
+    }
+    return null;
+  }
+
+  if (/^\s*PASS\b/i.test(text)) {
+    return { pass: true, confidence: 'high', issues: [] };
+  }
+  if (/^\s*FAIL\b/i.test(text)) {
+    const reason = text.replace(/^\s*FAIL\s*:?\s*/i, '').trim();
+    return { pass: false, confidence: 'low', issues: reason ? [reason] : [] };
+  }
+  return null;
+}
+
 // ── Verifier: a second LLM call judging whether the chart answers the question.
+// It returns one of three honest outcomes (see VerifyStatus). It NEVER defaults
+// to verified: a provider error is 'unavailable', an unparseable verdict is
+// 'unverified' (could-not-verify), and only a genuine parsed pass is 'verified'.
 async function verify(
   cfg: ProviderConfig,
   question: string,
@@ -1186,11 +1311,11 @@ async function verify(
   finding: string,
   citations: Citation[],
   addCost: (c: number) => void
-): Promise<{ pass: boolean; report: string; tokens?: number }> {
+): Promise<VerificationVerdict> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
   // The ledger's own entries — truthful source, indicator, URL and vintage,
   // straight from the fetch (not reconstructed). Gives the verifier real
-  // provenance to check the finding against; its verdict logic is unchanged.
+  // provenance to check the finding against.
   const citeText = citations.length
     ? citations
         .map((c) => `${c.sourceLabel}: ${c.indicatorName} (${c.indicatorId}) ${c.url}${c.sourceUpdated ? ` [updated ${c.sourceUpdated}]` : ''}`)
@@ -1200,10 +1325,16 @@ async function verify(
     {
       role: 'system',
       content:
-        'You are a strict verifier. Given a user question, a rendered chart spec, and a one-line finding, ' +
-        'judge whether the chart and finding actually answer the question. ' +
-        'Respond with a single line starting with either "PASS:" or "FAIL:" followed by a brief reason. ' +
-        'FAIL only for real problems (wrong indicator, no data, chart type mismatched to the question, finding not supported).',
+        'You are a strict verifier. Given a user question, a rendered chart spec, a one-line finding, and the ' +
+        'citation ledger, judge whether the chart and finding actually answer the question and are supported by ' +
+        'the cited sources.\n\n' +
+        'Respond with ONLY a JSON object, no prose, no code fences:\n' +
+        '{"pass": true|false, "confidence": "high"|"medium"|"low", "issues": ["..."]}\n\n' +
+        '- pass=false ONLY for real problems: wrong indicator, no data, chart type mismatched to the question, a ' +
+        'number in the finding not supported by the sources, or a claim with no citation.\n' +
+        '- confidence: how sure you are of THIS verdict.\n' +
+        '- issues: one short concrete sentence per real problem, naming WHAT is doubted (claim vs source mismatch, ' +
+        'missing citation, number not found in the data). Use an empty array when pass=true.',
     },
     {
       role: 'user',
@@ -1214,15 +1345,39 @@ async function verify(
     const res = await complete(cfg, messages, []);
     addCost(estimateCost(res.servedModel ?? cfg.model, res.usage));
     const text = res.text.trim();
-    const pass = /^\s*PASS/i.test(text) || (!/^\s*FAIL/i.test(text) && !!spec && !!finding);
+    const tokens = res.usage.input + res.usage.output;
+    const parsed = parseVerifierVerdict(text);
+    if (!parsed) {
+      // The call succeeded but its verdict is unparseable — could-not-verify.
+      // Honest: not verified, and NO fabricated issues (we don't know what was
+      // wrong, only that we couldn't read the verdict).
+      return {
+        status: 'unverified',
+        pass: false,
+        confidence: 'low',
+        issues: [],
+        report: text || 'Verifier returned an unreadable verdict — could not verify.',
+        tokens,
+      };
+    }
     return {
-      pass,
-      report: text || (spec ? 'PASS: chart rendered.' : 'FAIL: no chart.'),
-      tokens: res.usage.input + res.usage.output,
+      status: parsed.pass ? 'verified' : 'unverified',
+      pass: parsed.pass,
+      confidence: parsed.confidence,
+      issues: parsed.issues,
+      report: text || (parsed.pass ? 'PASS' : 'FAIL'),
+      tokens,
     };
   } catch (err: any) {
-    // If the verifier call itself fails, don't block shipping.
-    return { pass: !!spec && !!finding, report: 'Verifier unavailable: ' + (err?.message ?? err) };
+    // The verify call itself failed (network/provider error). Verification is
+    // UNAVAILABLE — we say so plainly and NEVER imply the answer was verified.
+    return {
+      status: 'unavailable',
+      pass: false,
+      confidence: 'none',
+      issues: [],
+      report: 'verification unavailable — provider error: ' + (err?.message ?? String(err)),
+    };
   }
 }
 

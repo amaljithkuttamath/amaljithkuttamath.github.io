@@ -415,7 +415,7 @@ vi.mock('./providers', async (importOriginal) => {
 });
 
 import { complete } from './providers';
-import { createSession, buildSystemPrompt, buildSubAgentPrompt } from './agent';
+import { createSession, buildSystemPrompt, buildSubAgentPrompt, parseVerifierVerdict } from './agent';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -561,6 +561,221 @@ describe('verifier-fail retry', () => {
       (m) => m.role === 'user' && m.content.startsWith('A previous attempt was judged insufficient.')
     );
     expect(hasCritique).toBe(true);
+  });
+});
+
+// ── Structured verifier verdict parsing (pure helper) ─────────────────────
+describe('parseVerifierVerdict — structured verdict parsing', () => {
+  it('parses a well-formed JSON pass verdict with high confidence and no issues', () => {
+    const v = parseVerifierVerdict('{"pass": true, "confidence": "high", "issues": []}');
+    expect(v).toEqual({ pass: true, confidence: 'high', issues: [] });
+  });
+
+  it('parses a medium-confidence fail verdict, keeping the concrete issues', () => {
+    const v = parseVerifierVerdict(
+      '{"pass": false, "confidence": "medium", "issues": ["The 1.9% figure is not in the fetched rows.", "GDP is uncited."]}'
+    );
+    expect(v).toEqual({
+      pass: false,
+      confidence: 'medium',
+      issues: ['The 1.9% figure is not in the fetched rows.', 'GDP is uncited.'],
+    });
+  });
+
+  it('parses a low-confidence verdict and tolerates code fences + surrounding prose', () => {
+    const raw = 'Here is my verdict:\n```json\n{"pass": false, "confidence": "low", "issues": ["Chart type mismatched."]}\n```\nThanks.';
+    const v = parseVerifierVerdict(raw);
+    expect(v).toEqual({ pass: false, confidence: 'low', issues: ['Chart type mismatched.'] });
+  });
+
+  it('drops blank/non-string issue entries without fabricating any', () => {
+    const v = parseVerifierVerdict('{"pass": false, "confidence": "low", "issues": ["real one", "", 42, null, "  "]}');
+    expect(v).toEqual({ pass: false, confidence: 'low', issues: ['real one'] });
+  });
+
+  it('still parses the legacy "PASS:" / "FAIL:" line format', () => {
+    expect(parseVerifierVerdict('PASS: chart rendered.')).toEqual({ pass: true, confidence: 'high', issues: [] });
+    const fail = parseVerifierVerdict('FAIL: chart type mismatched to the question.');
+    expect(fail).toEqual({ pass: false, confidence: 'low', issues: ['chart type mismatched to the question.'] });
+  });
+
+  it('malformed / partial JSON → null (could-not-verify), never a guessed pass', () => {
+    // Missing confidence.
+    expect(parseVerifierVerdict('{"pass": true, "issues": []}')).toBeNull();
+    // Bad confidence value.
+    expect(parseVerifierVerdict('{"pass": false, "confidence": "meh", "issues": []}')).toBeNull();
+    // pass not a boolean.
+    expect(parseVerifierVerdict('{"pass": "yes", "confidence": "high", "issues": []}')).toBeNull();
+    // issues not an array.
+    expect(parseVerifierVerdict('{"pass": true, "confidence": "high", "issues": "none"}')).toBeNull();
+    // Not JSON, and no PASS/FAIL prefix.
+    expect(parseVerifierVerdict('the model rambled without a verdict')).toBeNull();
+    // Empty.
+    expect(parseVerifierVerdict('')).toBeNull();
+    expect(parseVerifierVerdict('   ')).toBeNull();
+  });
+});
+
+// ── Verification outcomes, driven end-to-end through createSession ─────────
+// complete() is mocked; a chart turn is finished, then the verifier's mocked
+// return decides the state. Asserts on both the TraceEvent (receipt) and the
+// AgentOutput.verification (answer-level treatment).
+describe('verification outcomes (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const chartTurn = () =>
+    ({
+      text: '',
+      toolCalls: [
+        tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'A finding.' }, 'fin'),
+      ],
+      usage: { input: 10, output: 5 },
+    });
+  const newSession = () => createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const verifyEvent = (events: any[]) => events.filter((e) => e.tool === 'verify');
+
+  it('a JSON pass verdict → verified state: pass=true, stamp-eligible, tokens on the receipt', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce({
+      text: '{"pass": true, "confidence": "high", "issues": []}',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(out.verification).not.toBeNull();
+    expect(out.verification!.status).toBe('verified');
+    expect(out.verification!.pass).toBe(true);
+    expect(out.verification!.confidence).toBe('high');
+    expect(out.confidence).toBe('ok');
+    expect(out.retried).toBe(false);
+
+    const [v] = verifyEvent(trace());
+    expect(v.pass).toBe(true);
+    expect(v.verifyStatus).toBe('verified');
+    expect(v.status).toBe('ok'); // 'ok' receipt → the UI stamps it
+    // Cost transparency: the verify call's tokens ride on its receipt.
+    expect(v.tokens).toBe(7);
+  });
+
+  it('a JSON fail verdict (after one retry that also fails) → unverified with issues, low confidence', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    // Verify #1 fails with concrete issues → triggers ONE retry.
+    mockComplete.mockResolvedValueOnce({
+      text: '{"pass": false, "confidence": "medium", "issues": ["The 1.9% figure is not in the fetched rows."]}',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+    // Retry pass (agentPass) → finish again.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish', { one_line_finding: 'Second attempt.' }, 'fin2')],
+      usage: { input: 8, output: 4 },
+    });
+    // Verify #2 also fails.
+    mockComplete.mockResolvedValueOnce({
+      text: '{"pass": false, "confidence": "low", "issues": ["Chart still does not answer the question."]}',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(out.retried).toBe(true);
+    expect(out.verification!.status).toBe('unverified');
+    expect(out.verification!.pass).toBe(false);
+    expect(out.verification!.issues).toEqual(['Chart still does not answer the question.']);
+    expect(out.confidence).toBe('low');
+
+    const vs = verifyEvent(trace());
+    expect(vs.length).toBe(2); // first (retried) + final
+    const finalV = vs[1];
+    expect(finalV.verifyStatus).toBe('unverified');
+    expect(finalV.pass).toBe(false);
+    expect(finalV.status).toBe('error'); // non-pass reads as an error receipt
+    expect(finalV.confidence).toBe('low');
+    expect(finalV.issues).toEqual(['Chart still does not answer the question.']);
+  });
+
+  it('a provider error in the verify call → unavailable state, error receipt, NO retry, never verified', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    // The verify complete() itself rejects — a network/provider failure.
+    mockComplete.mockRejectedValueOnce(new Error('502 upstream'));
+    // NOTE: no retry mocks queued. If the implementation retried on an
+    // unavailable verdict, the next complete() would throw "no more mocked
+    // values" and fail this test — proving unavailable does NOT retry.
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(out.retried).toBe(false);
+    expect(out.verification!.status).toBe('unavailable');
+    expect(out.verification!.pass).toBe(false); // never defaulted to verified
+    expect(out.verification!.confidence).toBe('none');
+    expect(out.verification!.report).toContain('verification unavailable');
+    expect(out.confidence).toBe('low');
+
+    const [v] = verifyEvent(trace());
+    expect(v.verifyStatus).toBe('unavailable');
+    expect(v.pass).toBe(false);
+    expect(v.status).toBe('error'); // failed verify shows as an error receipt
+    expect(v.tokens).toBeUndefined(); // the call threw — no tokens to report
+  });
+
+  it('an unparseable verifier verdict → could-not-verify (unverified), never verified, no fabricated issues', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    // Verify #1: unreadable → treated as unverified → triggers a retry.
+    mockComplete.mockResolvedValueOnce({
+      text: 'I think it is probably fine but I am not totally sure honestly',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+    // Retry pass.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish', { one_line_finding: 'Retry finding.' }, 'fin2')],
+      usage: { input: 8, output: 4 },
+    });
+    // Verify #2: also unreadable.
+    mockComplete.mockResolvedValueOnce({
+      text: 'still rambling, no verdict here',
+      toolCalls: [],
+      usage: { input: 5, output: 2 },
+    });
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+
+    expect(out.verification!.status).toBe('unverified');
+    expect(out.verification!.pass).toBe(false);
+    expect(out.verification!.issues).toEqual([]); // never fabricated
+    const finalV = verifyEvent(trace())[1];
+    expect(finalV.verifyStatus).toBe('unverified');
+    expect(finalV.issues).toEqual([]);
+  });
+
+  it('an explanation turn runs no verifier and returns verification=null', async () => {
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'Prose answer.' }, 'fe')],
+      usage: { input: 8, output: 4 },
+    });
+    // No verifier mock queued — a verify call would throw "no more mocked values".
+    const { cb } = capture();
+    const out = await newSession().ask('explain', cb);
+    expect(out.kind).toBe('explanation');
+    expect(out.verification).toBeNull();
   });
 });
 

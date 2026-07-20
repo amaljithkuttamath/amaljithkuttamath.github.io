@@ -124,11 +124,11 @@ const PRESETS = [
              block elements. -->
         <section class="ch-answer" style="display:none">
           <div class="ch-finding"></div>
-          <div class="ch-conf-legend" style="display:none">
-            <span class="ch-conf-swatch ch-conf-swatch-hi"><i></i>confident</span>
-            <span class="ch-conf-swatch ch-conf-swatch-lo"><i></i>uncertain</span>
-          </div>
-          <span class="ch-conf" style="display:none">confidence: low</span>
+          <!-- Answer-level verification cue: hidden on a genuine pass (the amber
+               VERIFIED stamp lives in the trace receipt), a muted dashed tag on
+               "could not verify", and a muted dotted tag on "verification
+               unavailable". Built by renderVerification(); never amber. -->
+          <div class="ch-verify" style="display:none"></div>
         </section>
 
         <!-- Chart: full width, mounts live while the agent works. Hidden
@@ -372,7 +372,7 @@ const PRESETS = [
     type ProviderConfig,
     type ModelOption,
   } from '../../lib/chitti/providers';
-  import type { TraceEvent } from '../../lib/chitti/agent';
+  import type { TraceEvent, AgentOutput } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
   import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
@@ -497,8 +497,7 @@ const PRESETS = [
     metaSection: HTMLElement;
     answerSection: HTMLElement;
     findingEl: HTMLElement;
-    confEl: HTMLElement;
-    confLegend: HTMLElement;
+    verifyEl: HTMLElement;
     dataDetails: HTMLDetailsElement;
     dataCount: HTMLElement;
     csvBtn: HTMLButtonElement;
@@ -548,8 +547,7 @@ const PRESETS = [
       metaSection: q(root, '.ch-meta'),
       answerSection: q(root, '.ch-answer'),
       findingEl: q(root, '.ch-finding'),
-      confEl: q(root, '.ch-conf'),
-      confLegend: q(root, '.ch-conf-legend'),
+      verifyEl: q(root, '.ch-verify'),
       dataDetails: q<HTMLDetailsElement>(root, '.ch-data'),
       dataCount: q(root, '.ch-data-count'),
       csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
@@ -1076,6 +1074,43 @@ const PRESETS = [
     return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
   }
 
+  // The could-not-verify receipt: a compact, honest verdict block for a verify
+  // step that ran but did NOT confirm the answer. Shows the verdict, the
+  // verifier's self-confidence, and the issue count, then the concrete doubts
+  // in an expandable <details> (the same receipt-detail motif used elsewhere in
+  // the trace). Muted throughout — never amber.
+  function buildVerifyReceipt(e: TraceEvent): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'ch-verify-receipt';
+    const verdict = document.createElement('div');
+    verdict.className = 'ch-verify-verdict';
+    verdict.textContent = 'could not verify';
+    wrap.appendChild(verdict);
+    const meta = document.createElement('div');
+    meta.className = 'ch-trace-detail';
+    const conf = e.confidence && e.confidence !== 'none' ? 'confidence: ' + e.confidence : 'confidence: unknown';
+    const n = (e.issues && e.issues.length) || 0;
+    meta.textContent = conf + ' · ' + n + (n === 1 ? ' issue' : ' issues');
+    wrap.appendChild(meta);
+    if (e.issues && e.issues.length) {
+      const det = document.createElement('details');
+      det.className = 'ch-verify-issues';
+      const sum = document.createElement('summary');
+      sum.textContent = 'what was doubted';
+      det.appendChild(sum);
+      const ul = document.createElement('ul');
+      ul.className = 'ch-verify-issue-list';
+      for (const iss of e.issues) {
+        const li = document.createElement('li');
+        li.textContent = iss;
+        ul.appendChild(li);
+      }
+      det.appendChild(ul);
+      wrap.appendChild(det);
+    }
+    return wrap;
+  }
+
   // The search-receipt card: find_series streams as a visible receipt of the
   // scorer's work — how many databases were searched, how many candidates were
   // weighed, the top match with its source, and which query terms/synonyms
@@ -1203,6 +1238,12 @@ const PRESETS = [
       )
     );
     tb.traceEl.innerHTML = '';
+    // Index of the LAST verify event: a failing verify that is followed by
+    // another verify is a pre-retry attempt ("not verified — retrying"); only
+    // the final verify event renders the full could-not-verify / unavailable
+    // treatment, so the receipt reflects the turn's actual outcome.
+    let lastVerifyIdx = -1;
+    events.forEach((e, idx) => { if (e.tool === 'verify') lastVerifyIdx = idx; });
     events.forEach((e, i) => {
       if (tb.startTimes[i] === undefined) tb.startTimes[i] = performance.now();
 
@@ -1301,17 +1342,39 @@ const PRESETS = [
         prov.textContent = 'model-derived';
         body.appendChild(prov);
       }
-      // Ink-stamped VERIFIED badge — only the verify step, only on a genuine pass.
-      if (e.tool === 'verify' && e.pass === true) {
-        const stampEl = document.createElement('span');
-        stampEl.className = 'ch-stamp';
-        stampEl.textContent = 'verified';
-        body.appendChild(stampEl);
-      } else if (e.tool === 'verify' && e.status === 'error') {
-        const note = document.createElement('div');
-        note.className = 'ch-trace-detail';
-        note.textContent = 'not verified — retrying';
-        body.appendChild(note);
+      // The verify receipt renders one of the three honest outcomes. The
+      // ink-stamped amber VERIFIED badge appears ONLY on a genuine pass; the
+      // other states are muted and never borrow amber.
+      if (e.tool === 'verify') {
+        const isLast = i === lastVerifyIdx;
+        if (e.pass === true) {
+          const stampEl = document.createElement('span');
+          stampEl.className = 'ch-stamp';
+          stampEl.textContent = 'verified';
+          body.appendChild(stampEl);
+          if (e.confidence && e.confidence !== 'none') {
+            const c = document.createElement('div');
+            c.className = 'ch-trace-detail';
+            c.textContent = 'confidence: ' + e.confidence;
+            body.appendChild(c);
+          }
+        } else if (!isLast) {
+          // A failing verify with another verify still to come = a retry follows.
+          const note = document.createElement('div');
+          note.className = 'ch-trace-detail';
+          note.textContent = 'not verified — retrying';
+          body.appendChild(note);
+        } else if (e.verifyStatus === 'unavailable') {
+          const note = document.createElement('div');
+          note.className = 'ch-trace-detail ch-trace-unavailable';
+          note.textContent = 'verification unavailable — provider error';
+          body.appendChild(note);
+        } else {
+          // Final could-not-verify: verdict + confidence + issue count, with the
+          // concrete doubts in an expandable detail (reusing the trace's
+          // details/summary receipt pattern).
+          body.appendChild(buildVerifyReceipt(e));
+        }
       }
       const metaCol = document.createElement('div');
       metaCol.className = 'ch-trace-meta-col';
@@ -1894,7 +1957,6 @@ const PRESETS = [
       tb.findingEl.innerHTML = tb.findingEl.classList.contains('ch-finding-prose')
         ? mdToHtml(text)
         : inlineMd(esc(text));
-      tb.confLegend.style.display = 'none';
       return;
     }
     // Confidence data is present: render word-by-word so low-confidence
@@ -1909,7 +1971,33 @@ const PRESETS = [
       }
       tb.findingEl.appendChild(span);
     });
-    tb.confLegend.style.display = 'flex';
+  }
+
+  // ── Answer-level verification cue ───────────────────────────────────────
+  // The three honest states, keyed off the structured verdict (never a
+  // defaulted pass). Verified → nothing here (the amber VERIFIED stamp lives in
+  // the trace receipt; the answer stays clean). Could-not-verify → a muted,
+  // dashed "unverified" tag naming the first doubted claim. Verification
+  // unavailable → a muted, dotted tag saying so plainly. Amber is never used
+  // here — it is reserved for the genuine stamp.
+  function renderVerification(tb: TurnBlock, v: AgentOutput['verification']) {
+    const el = tb.verifyEl;
+    el.textContent = '';
+    el.className = 'ch-verify';
+    if (!v || v.status === 'verified') { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    const tag = document.createElement('span');
+    tag.className = 'ch-verify-tag';
+    if (v.status === 'unavailable') {
+      el.classList.add('ch-verify-unavailable');
+      tag.textContent = 'verification unavailable — provider error';
+    } else {
+      // could-not-verify: name the first concrete doubt when we have one.
+      el.classList.add('ch-verify-unverified');
+      const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
+      tag.textContent = 'could not verify — ' + reason;
+    }
+    el.appendChild(tag);
   }
 
   // ── Running token + cost total ──────────────────────────────────────────
@@ -2087,7 +2175,7 @@ const PRESETS = [
       }
 
       renderFinding(tb, out.finding || 'No finding produced.');
-      if (out.confidence === 'low') tb.confEl.style.display = 'inline-block';
+      renderVerification(tb, out.verification);
       renderTable(tb, out.rows, out.csv);
       renderCitations(tb, out.citations);
       renderRunningTotal(tb, tb.trace, out.cost);
@@ -2187,7 +2275,13 @@ const PRESETS = [
       // LLM call: the harness hands over a realistic event sequence (e.g. an
       // execute_js step with nested llm() child receipts) and this drives the
       // app's own renderer over it.
-      stageTrace(question: string, events: any[], files?: Record<string, string>, citations?: Citation[]) {
+      stageTrace(
+        question: string,
+        events: any[],
+        files?: Record<string, string>,
+        citations?: Citation[],
+        answer?: { finding?: string; verification?: AgentOutput['verification'] }
+      ) {
         const tb = createTurnBlock();
         allTurns.push(tb);
         consoleEl.style.display = 'none';
@@ -2203,6 +2297,14 @@ const PRESETS = [
         if (citations && citations.length) {
           tb.metaSection.style.display = 'block';
           renderCitations(tb, citations);
+        }
+        // The answer-level verification cue lives in the answer section, not the
+        // trace — drive it through the REAL renderFinding + renderVerification so
+        // an offline screenshot exercises the actual honest-state treatment.
+        if (answer) {
+          tb.answerSection.style.display = 'block';
+          renderFinding(tb, answer.finding ?? 'Staged finding.');
+          renderVerification(tb, answer.verification ?? null);
         }
         dbg.tb = tb;
         return tb.root;
@@ -3385,6 +3487,48 @@ const PRESETS = [
     opacity: 0.9;
   }
 
+  /* Could-not-verify receipt in the trace: an honest counterpart to the stamp.
+     No amber, no ink-stamp flourish — a plain muted verdict with the flagged
+     issues in an expandable detail. The "verification unavailable" note reuses
+     .ch-trace-detail with this modifier for a slightly firmer muted tone. */
+  :global(.ch-verify-receipt) {
+    align-self: flex-start;
+    margin-top: 4px;
+  }
+  :global(.ch-verify-verdict) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted));
+  }
+  :global(.ch-trace-unavailable) {
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+  :global(.ch-verify-issues) {
+    margin-top: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+  }
+  :global(.ch-verify-issues > summary) {
+    cursor: pointer;
+    list-style: none;
+    color: var(--fg-muted);
+    opacity: 0.85;
+  }
+  :global(.ch-verify-issues > summary)::-webkit-details-marker { display: none; }
+  :global(.ch-verify-issues > summary)::before { content: '▸ '; color: var(--fg-muted); }
+  :global(.ch-verify-issues[open] > summary)::before { content: '▾ '; }
+  :global(.ch-verify-issue-list) {
+    margin: 4px 0 2px;
+    padding-left: 18px;
+    line-height: 1.6;
+  }
+  :global(.ch-verify-issue-list li) { margin: 0 0 2px; }
+
   /* A write_file/read_file trace row inline-expands its own file content —
      no separate "workspace" list duplicating the same file elsewhere on the
      page. `.ch-trace-file` wraps the row's existing `.ch-trace-head` inside
@@ -3507,45 +3651,43 @@ const PRESETS = [
      --confidence-low (aliased to --danger — see global.css), per the design
      spec's token mapping. Only ever applied by renderFinding() when a
      logprobs array is actually passed in; see that function's comment for
-     why the live app currently always takes the plain-text branch instead. */
+     why the live app currently always takes the plain-text branch instead.
+     (The dormant two-swatch legend that used to key this was removed with the
+     verification-state work — it was the key for this never-live logprob
+     feature, unrelated to the verification verdict, and would have muddled two
+     different "confidence" concepts sitting beside each other.) */
   :global(.ch-conf-word-lo) {
     color: var(--confidence-low);
     text-decoration: underline dotted;
     text-underline-offset: 3px;
     cursor: help;
   }
-  /* Small two-swatch legend under the answer, shown only when confidence
-     data was present for that run. */
-  .ch-conf-legend {
-    display: none;
-    gap: 14px;
-    align-items: center;
-    margin: 0 0 var(--space-sm);
+
+  /* ── Answer-level verification cue ────────────────────────────────────────
+     The honest non-verified states. Muted throughout — amber (--signal) is
+     reserved exclusively for the genuine VERIFIED stamp in the trace. A
+     could-not-verify tag gets a dashed border with a faint danger tint; a
+     verification-unavailable tag gets a plain dotted muted border. */
+  .ch-verify { margin: 2px 0 var(--space-sm); }
+  .ch-verify-tag {
+    display: inline-block;
     font-family: var(--font-mono);
     font-size: var(--text-tag);
+    letter-spacing: 0.02em;
     color: var(--fg-muted);
-  }
-  .ch-conf-swatch { display: inline-flex; align-items: center; gap: 5px; }
-  .ch-conf-swatch i {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--fg);
-  }
-  .ch-conf-swatch-lo i { background: var(--confidence-low); }
-  .ch-conf {
-    display: inline-block;
-    margin-bottom: var(--space-sm);
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
-    color: var(--signal);
-    border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
-    background: color-mix(in srgb, var(--signal) 8%, transparent);
     padding: 2px 10px;
     border-radius: var(--radius-full);
+    border: 1px dashed var(--fg-faint);
+    max-width: 68ch;
+  }
+  .ch-verify-unverified .ch-verify-tag {
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--danger) 40%, var(--fg-faint));
+    color: color-mix(in srgb, var(--danger) 55%, var(--fg-muted));
+  }
+  .ch-verify-unavailable .ch-verify-tag {
+    border-style: dotted;
+    color: var(--fg-muted);
   }
   .ch-chart-card {
     margin: var(--space-sm) 0 0;
