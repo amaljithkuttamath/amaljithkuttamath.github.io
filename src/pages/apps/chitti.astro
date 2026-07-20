@@ -375,6 +375,7 @@ const PRESETS = [
   import type { TraceEvent } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
+  import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
 
   // ── Elements ──────────────────────────────────────────────────────────
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -1383,6 +1384,14 @@ const PRESETS = [
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
+  // Minimal HTML escape for values interpolated into the tooltip's HTML
+  // string (series names, unit, axis label all originate from model/spec text).
+  function escapeHtml(s: string): string {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
+    );
+  }
+
   function buildOption(spec: ChartSpec) {
     const signal = cssVar('--signal') || '#d9a13b';
     const muted = cssVar('--fg-muted') || '#79817c';
@@ -1400,37 +1409,141 @@ const PRESETS = [
     // header instead (see renderChart / .ch-chart-unit).
     // containLabel keeps rotated category labels and axis ticks inside the
     // grid instead of spilling past the right/bottom edges.
-    const grid = { left: 12, right: 18, top: 40, bottom: 8, containLabel: true };
+    // A long line series gets a bottom dataZoom slider; reserve room for it so
+    // it never overlaps the x-axis tick labels.
+    const hasZoom = needsDataZoom(spec);
+    const grid = { left: 12, right: 18, top: 40, bottom: hasZoom ? 34 : 8, containLabel: true };
     const axisLine = { lineStyle: { color: faint } };
     const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
 
+    // The unit lives in spec.y_axis (also shown in the card header). Only the
+    // axis tick and tooltip number formatting consult it — via formatAxisValue,
+    // which appends % for percent units and otherwise just compacts magnitudes.
+    const unit = spec.y_axis || '';
+    const reduce = prefersReducedMotion();
+
+    // A themed legend. type:'scroll' with paged arrows only when there are
+    // enough series to warrant it (legendMode); otherwise a plain legend that
+    // still wraps. Show/hide (legend click) behavior is ECharts' default in
+    // both modes, so chart-link's "row with a hidden series does nothing"
+    // contract is unchanged.
     const legend = {
       textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
       top: 0,
       left: 0,
-      type: 'scroll' as const,
+      type: legendMode(spec),
       icon: 'roundRect',
-      // Leave room on the right for the scroll arrows so they don't get
-      // clipped against the chart's edge.
+      // Themed pager arrows: muted when active, faint when there's no more to
+      // page. Amber is reserved for the dataZoom handle, so the arrows stay
+      // monochrome with the rest of the axis furniture.
       pageIconColor: muted,
+      pageIconInactiveColor: faint,
       pageTextStyle: baseText,
     };
+
+    // Value-axis tick labels: compact, unit-aware. Safe on single-point /
+    // all-equal series — formatAxisValue never divides by a data range.
+    const valueAxisLabel = { ...baseText, formatter: (v: number) => formatAxisValue(v, unit) };
+
+    // Shared-axis tooltip: monospace, values formatted like the axis, the unit
+    // shown once in the header, series ordered by value descending at that x.
+    // Rows whose series has no point here (null) are dropped, so a hidden or
+    // absent series contributes nothing — never a blank "null" line.
+    function axisTooltipFormatter(params: any): string {
+      const arr = Array.isArray(params) ? params : [params];
+      if (!arr.length) return '';
+      const rows = arr
+        .map((p: any) => {
+          const raw = Array.isArray(p?.value) ? p.value[1] : p?.value;
+          const num = raw == null ? null : Number(raw);
+          return { name: p?.seriesName ?? '', marker: p?.marker ?? '', num };
+        })
+        .filter((r: any) => r.num != null && Number.isFinite(r.num))
+        .sort((a: any, b: any) => b.num - a.num);
+      if (!rows.length) return '';
+      const head = arr[0]?.axisValueLabel ?? arr[0]?.axisValue ?? '';
+      const unitTag = unit ? ` · ${escapeHtml(unit)}` : '';
+      const headHtml = `<div style="opacity:.7;margin-bottom:2px">${escapeHtml(String(head))}${unitTag}</div>`;
+      const body = rows
+        .map(
+          (r: any) =>
+            `<div style="display:flex;justify-content:space-between;gap:14px">` +
+            `<span>${r.marker}${escapeHtml(r.name)}</span>` +
+            `<span>${escapeHtml(formatAxisValue(r.num, unit))}</span></div>`
+        )
+        .join('');
+      return headHtml + body;
+    }
+
     const tooltip = {
       trigger: 'axis' as const,
       backgroundColor: bg,
       borderColor: faint,
       textStyle: { color: fg, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+      formatter: axisTooltipFormatter,
     };
+
+    // Minimal toolbox: save-as-image only, dark background baked in, filename
+    // from the title slug. No zoom/restore/dataView clutter.
+    const toolbox = {
+      show: true,
+      right: 8,
+      top: 0,
+      itemSize: 13,
+      feature: {
+        saveAsImage: {
+          title: 'Save',
+          name: titleSlug(spec.title),
+          backgroundColor: bg || '#0b0d0c',
+          pixelRatio: 2,
+          iconStyle: { borderColor: muted },
+          emphasis: { iconStyle: { borderColor: fg } },
+        },
+      },
+    };
+
+    // A themed dataZoom pair for long line series: inside (wheel/pinch) + a
+    // slim slider with an amber handle. Empty [] for short charts. Zoom
+    // animation is disabled under prefers-reduced-motion.
+    const dataZoom = hasZoom
+      ? [
+          { type: 'inside' as const, zoomLock: false, zoomOnMouseWheel: true, moveOnMouseWheel: false },
+          {
+            type: 'slider' as const,
+            height: 16,
+            bottom: 4,
+            borderColor: faint,
+            backgroundColor: 'transparent',
+            fillerColor: 'rgba(217,161,59,0.10)',
+            dataBackground: { lineStyle: { color: faint }, areaStyle: { color: faint } },
+            selectedDataBackground: { lineStyle: { color: signal }, areaStyle: { color: 'rgba(217,161,59,0.15)' } },
+            handleStyle: { color: signal, borderColor: signal },
+            moveHandleStyle: { color: muted },
+            textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 9 },
+            labelFormatter: '',
+          },
+        ]
+      : [];
 
     if (spec.type === 'scatter') {
       return {
+        animation: !reduce,
         color: palette,
         textStyle: baseText,
         grid,
         legend,
-        tooltip: { ...tooltip, trigger: 'item' as const },
+        toolbox,
+        // Scatter is per-point (item trigger), not a shared axis — its value is
+        // a coordinate pair, so it keeps a dedicated single-point formatter.
+        tooltip: {
+          ...tooltip,
+          trigger: 'item' as const,
+          formatter: (p: any) =>
+            `${p?.marker ?? ''}${escapeHtml(p?.seriesName ?? '')}<br/>` +
+            `${escapeHtml(String(p?.value?.[0] ?? ''))}, ${escapeHtml(formatAxisValue(Number(p?.value?.[1]), unit))}`,
+        },
         xAxis: { type: 'value', name: spec.x_axis, nameLocation: 'middle' as const, nameGap: 28, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
-        yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
         series: spec.series.map((s) => ({
           name: s.name,
           type: 'scatter',
@@ -1445,10 +1558,12 @@ const PRESETS = [
       const cats: (string | number)[] = [];
       for (const s of spec.series) for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
       return {
+        animation: !reduce,
         color: palette,
         textStyle: baseText,
         grid,
         legend: spec.series.length > 1 ? legend : { show: false },
+        toolbox,
         tooltip,
         xAxis: {
           type: 'category',
@@ -1459,7 +1574,7 @@ const PRESETS = [
           axisLine,
           axisLabel: { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
         },
-        yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
+        yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
         series: spec.series.map((s) => {
           const map = new Map(s.data.map(([x, y]) => [x, y]));
           return {
@@ -1486,11 +1601,14 @@ const PRESETS = [
     for (const s of spec.series) for (const [x] of s.data) if (!lineCats.includes(x)) lineCats.push(x);
     lineCats.sort((a, b) => Number(a) - Number(b));
     return {
+      animation: !reduce,
       color: palette,
       textStyle: baseText,
       grid,
       legend: spec.series.length > 1 ? legend : { show: false },
+      toolbox,
       tooltip,
+      dataZoom,
       xAxis: {
         type: 'category',
         boundaryGap: false,
@@ -1498,7 +1616,7 @@ const PRESETS = [
         axisLabel: baseText,
         data: lineCats,
       },
-      yAxis: { type: 'value', axisLine, splitLine, axisLabel: baseText },
+      yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
       series: spec.series.map((s, i) => {
         const map = new Map(s.data.map(([x, y]) => [x, y]));
         return {
