@@ -183,7 +183,11 @@ function cleanStale(s: unknown): { failedAt: string; reason: string } | undefine
   return { failedAt, reason };
 }
 
-function cleanTile(tile: unknown): Tile {
+// Exported so dashboard-share.ts can rebuild a shared/imported tile through the
+// SAME whitelist as storage — a stray field on a fragment or imported file is
+// structurally incapable of surviving. Callers outside this module treat the
+// result as the canonical, key-free tile shape.
+export function cleanTile(tile: unknown): Tile {
   const o = (tile && typeof tile === 'object' ? tile : {}) as Record<string, unknown>;
   const t: Tile = {
     id: str(o.id) || newId('tile'),

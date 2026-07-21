@@ -18,6 +18,7 @@
 // text-safe paths.
 
 import type { ChartSpec, DataRow, Citation } from './tools';
+import { packJson, unpackJson, hasCompression } from './codec';
 
 // Bumped whenever the payload shape changes incompatibly. decodeShareState gates
 // on it: an unknown version yields null (invalid link), never a guess.
@@ -179,61 +180,14 @@ export function buildSharePayload(input: ShareInput): ShareStateV1 {
   };
 }
 
-// ── base64url ───────────────────────────────────────────────────────────────
-function bytesToB64url(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function b64urlToBytes(s: string): Uint8Array {
-  // atob throws on malformed input; the caller catches and returns null.
-  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-// ── deflate-raw via native streams (feature-detected) ───────────────────────
-function hasCompression(): boolean {
-  return (
-    typeof (globalThis as any).CompressionStream === 'function' &&
-    typeof (globalThis as any).DecompressionStream === 'function'
-  );
-}
-
-async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const cs = new (globalThis as any).CompressionStream('deflate-raw');
-  const writer = cs.writable.getWriter();
-  void writer.write(bytes);
-  void writer.close();
-  const buf = await new Response(cs.readable).arrayBuffer();
-  return new Uint8Array(buf);
-}
-
-async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const ds = new (globalThis as any).DecompressionStream('deflate-raw');
-  const writer = ds.writable.getWriter();
-  void writer.write(bytes);
-  void writer.close();
-  const buf = await new Response(ds.readable).arrayBuffer();
-  return new Uint8Array(buf);
-}
-
-const enc = new TextEncoder();
-const dec = new TextDecoder();
+// The base64url + deflate-raw + flag transport now lives in codec.ts, shared
+// with the dashboard permalink (dashboard-share.ts). This module keeps only the
+// answer-specific schema, whitelist rebuild, size ladder, and version gate.
 
 // Serialize one payload object to the fragment string (flag + base64url). The
 // `compress` flag is resolved here so tests can force the uncompressed path.
-async function serialize(state: ShareStateV1, compress: boolean): Promise<string> {
-  const json = JSON.stringify(state);
-  const raw = enc.encode(json);
-  if (compress) {
-    const packed = await deflateRaw(raw);
-    return 'C' + bytesToB64url(packed);
-  }
-  return 'U' + bytesToB64url(raw);
+function serialize(state: ShareStateV1, compress: boolean): Promise<string> {
+  return packJson(JSON.stringify(state), compress);
 }
 
 // ── Public encode ───────────────────────────────────────────────────────────
@@ -276,22 +230,8 @@ export async function encodeShareState(
 // payload was hand-crafted.
 export async function decodeShareState(payload: string): Promise<ShareStateV1 | null> {
   try {
-    if (typeof payload !== 'string' || payload.length < 2) return null;
-    // Reject absurdly large fragments before doing any work.
-    if (payload.length > MAX_SHARE_BYTES * 4) return null;
-    const flag = payload[0];
-    const body = payload.slice(1);
-    if (flag !== 'C' && flag !== 'U') return null;
-
-    const packed = b64urlToBytes(body);
-    let raw: Uint8Array;
-    if (flag === 'C') {
-      if (!hasCompression()) return null; // can't inflate without the API
-      raw = await inflateRaw(packed);
-    } else {
-      raw = packed;
-    }
-    const json = dec.decode(raw);
+    const json = await unpackJson(payload, { maxBytes: MAX_SHARE_BYTES });
+    if (json == null) return null;
     const obj = JSON.parse(json) as Record<string, unknown>;
     if (!obj || typeof obj !== 'object') return null;
     if (obj.v !== SHARE_VERSION) return null; // version gate
