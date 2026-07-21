@@ -1334,6 +1334,50 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
+    name: 'edit_dashboard',
+    description:
+      'Change a SAVED dashboard when the user asks to (rename it or a tile, remove or reorder a ' +
+      'tile, or refresh its data from source). ONE tool, one action per call — use ONLY on an ' +
+      'explicit user request to edit a dashboard, never on your own. Reference a tile by its exact ' +
+      'title (preferred) or its 1-based position; the tool lists the dashboard\'s tiles if the ' +
+      'reference is ambiguous or missing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dashboard_title: {
+          type: 'string',
+          description: 'Which saved dashboard to edit (matched by title).',
+        },
+        action: {
+          type: 'string',
+          enum: ['rename_dashboard', 'rename_tile', 'remove_tile', 'move_tile', 'refresh_dashboard'],
+          description:
+            'rename_dashboard (needs new_title) · rename_tile (needs a tile ref + new_title) · ' +
+            'remove_tile (needs a tile ref) · move_tile (needs a tile ref + direction) · ' +
+            'refresh_dashboard (re-fetches every tile\'s series from source).',
+        },
+        new_title: {
+          type: 'string',
+          description: 'The new name, for rename_dashboard / rename_tile.',
+        },
+        tile_title: {
+          type: 'string',
+          description: 'Tile reference by exact title (case-insensitive fallback), for the tile actions.',
+        },
+        tile_index: {
+          type: 'number',
+          description: '1-based tile position, an alternative to tile_title.',
+        },
+        direction: {
+          type: 'string',
+          enum: ['up', 'down'],
+          description: 'Which way to move the tile, for move_tile.',
+        },
+      },
+      required: ['dashboard_title', 'action'],
+    },
+  },
+  {
     name: 'delegate_source',
     description:
       'Delegate ONE database\'s part of the question to a focused sub-agent, and get back a short ' +
@@ -1416,6 +1460,7 @@ export interface SourceDef {
 export const CORE_TOOL_NAMES = [
   'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file', 'save_to_dashboard',
+  'edit_dashboard',
 ];
 
 export const SOURCES: SourceDef[] = [
