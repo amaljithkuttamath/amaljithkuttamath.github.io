@@ -3114,15 +3114,19 @@ describe('ask() loop & multi-turn state (driven)', () => {
     expect(mockComplete.mock.calls.length).toBe(3);
   });
 
-  it('a model that never calls a tool stops after two no-op turns (no infinite loop)', async () => {
+  it('a model that never calls a tool stops after the nudge (no infinite loop), and skips verify on the empty run', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #1 → nudge
-    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #2 → give up
-    mockComplete.mockResolvedValueOnce(verifyJsonPass()); // turnKind default 'chart' → verify
+    // Primary is a non-:free model, so no substitution: nudge, then give up.
+    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #1 → corrective nudge
+    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #2 → give up (not free → no substitute)
     const out = await newSession().ask('q', cb());
     expect(out.finding).toBe('');
-    // 2 loop turns + 1 verify = 3; it did NOT keep nudging forever.
-    expect(mockComplete.mock.calls.length).toBe(3);
+    // Exactly 2 completions: the two loop turns. verify() is NEVER called on an
+    // empty run (no answer, no chart, no rows) — no LLM spend, no verdict retry.
+    expect(mockComplete.mock.calls.length).toBe(2);
+    // The verdict reflects the distinct 'skipped' state, never could-not-verify.
+    expect(out.verification).not.toBeNull();
+    expect(out.verification!.status).toBe('skipped');
   });
 
   it('state.finding resets each turn — a no-answer turn 2 does NOT inherit turn 1\'s finding', async () => {
@@ -3132,13 +3136,13 @@ describe('ask() loop & multi-turn state (driven)', () => {
     mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'First turn finding.' }, 'fe1')]));
     const first = await session.ask('q1', cb());
     expect(first.finding).toBe('First turn finding.');
-    // Turn 2: model never answers (two no-ops). If finding were not reset,
-    // out.finding would leak 'First turn finding.'.
+    // Turn 2: model never answers (two no-ops → empty run, verify skipped). If
+    // finding were not reset, out.finding would leak 'First turn finding.'.
     mockComplete.mockResolvedValueOnce(noTools(''));
     mockComplete.mockResolvedValueOnce(noTools(''));
-    mockComplete.mockResolvedValueOnce(verifyJsonPass());
     const second = await session.ask('q2', cb());
     expect(second.finding).toBe('');
+    expect(second.verification!.status).toBe('skipped');
   });
 
   it('a follow-up turn after a fetch-less turn 1 gets the "fresh question" steer, not the rows=0 trap', async () => {
@@ -3203,6 +3207,150 @@ describe('ask() loop & multi-turn state (driven)', () => {
     expect(toolMsgById('ej')).toBe('1'); // saw the persisted row, not the empty guard
     // No new network fetch happened in turn 2.
     expect(fetchFn.mock.calls.length).toBe(callsAfterTurn1);
+  });
+});
+
+// ── Corrective nudge + free-model fallback for the narrate-instead-of-act
+// failure (the live Nemotron "let me check the available skills" run) ─────────
+// A completion with NO tool calls and no usable answer is the model narrating a
+// plan instead of acting. The executor injects ONE corrective nudge; if a :free
+// primary still won't act, it substitutes ONE fallback model; only then does the
+// run surface "no result". An empty run skips verify() entirely. Driven through
+// createSession with complete() mocked.
+describe('corrective nudge + fallback (driven through createSession)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const noTools = (text = '') => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyJsonPass = () => ({ text: '{"pass": true, "confidence": "high", "issues": []}', toolCalls: [], usage: { input: 2, output: 1 } });
+  const wbStub = () =>
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { page: 1, pages: 1, total: 1 },
+        [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+      ],
+    }));
+  // A turn that fetches, charts, and finishes — a complete, non-empty run.
+  const actTurn = () =>
+    modelTurn([
+      tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+      tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2020, 100]] }] }, 'rc'),
+      tc('finish', { one_line_finding: 'India: 100 in 2020.' }, 'fin'),
+    ]);
+  // A cb that keeps the latest full trace + any substituted model.
+  const capturingCb = () => {
+    const captured: { trace: any[]; models: string[] } = { trace: [], models: [] };
+    return {
+      captured,
+      cb: {
+        onTrace: (e: any[]) => { captured.trace = e; },
+        onFiles: () => {},
+        onChart: () => {},
+        onStatus: () => {},
+        onModel: (m: string) => captured.models.push(m),
+      },
+    };
+  };
+  const freeCfg = { provider: 'openrouter' as const, model: 'primary-model:free', apiKey: 'x' };
+  const paidCfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
+
+  it('turn-1 no-op injects a corrective nudge receipt + system message before the next attempt', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    const { captured, cb } = capturingCb();
+    mockComplete.mockResolvedValueOnce(noTools('Let me find the relevant skill for fetching World Bank data…'));
+    mockComplete.mockResolvedValueOnce(actTurn()); // acts after the nudge
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    const out = await createSession(paidCfg).ask('life expectancy by region', cb);
+    // A muted nudge receipt (status ok, not error-red).
+    const nudge = captured.trace.find((e) => e.tool === 'nudge');
+    expect(nudge).toBeTruthy();
+    expect(nudge.status).toBe('ok');
+    expect(nudge.detail).toMatch(/narrated instead of acting/);
+    // The corrective SYSTEM message is present in the SECOND request's messages.
+    const secondMsgs = mockComplete.mock.calls[1][1] as any[];
+    const corrective = secondMsgs.find(
+      (m) => m.role === 'system' && /function TOOLS/.test(m.content) && /no "skills"/.test(m.content)
+    );
+    expect(corrective).toBeTruthy();
+    expect(corrective.content).toMatch(/find_series/);
+    // The nudge did its job: the turn completed normally.
+    expect(out.finding).toBe('India: 100 in 2020.');
+  });
+
+  it('nudge-then-success completes normally with exactly one nudge (no blind re-nudging)', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    const { captured, cb } = capturingCb();
+    mockComplete.mockResolvedValueOnce(noTools('narrating a plan'));
+    mockComplete.mockResolvedValueOnce(actTurn());
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    const out = await createSession(paidCfg).ask('q', cb);
+    expect(out.finding).toBe('India: 100 in 2020.');
+    expect(out.verification!.status).toBe('verified');
+    // Exactly ONE nudge receipt this turn.
+    expect(captured.trace.filter((e) => e.tool === 'nudge')).toHaveLength(1);
+    // 3 completions: narration, act, verify.
+    expect(mockComplete.mock.calls.length).toBe(3);
+  });
+
+  it('nudge fails on a :free primary → substitutes a fallback model, whose success completes the turn', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    const { captured, cb } = capturingCb();
+    mockComplete.mockResolvedValueOnce(noTools('narration #1')); // → nudge
+    mockComplete.mockResolvedValueOnce(noTools('narration #2')); // post-nudge still nothing → substitute
+    mockComplete.mockResolvedValueOnce(actTurn()); // the substitute model acts
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    const out = await createSession(freeCfg).ask('q', cb);
+    // A visible substitution receipt naming the substitute model.
+    const fb = captured.trace.find((e) => e.tool === 'fallback');
+    expect(fb).toBeTruthy();
+    expect(fb.detail).toMatch(/narrated instead of calling tools/);
+    const substitute = fb.argSummary as string;
+    expect(substitute).not.toBe(freeCfg.model);
+    expect(captured.models).toContain(substitute);
+    // The SECOND-model attempt (the 3rd completion) actually used the substitute.
+    expect((mockComplete.mock.calls[2][0] as any).model).toBe(substitute);
+    // Its success completed the turn.
+    expect(out.finding).toBe('India: 100 in 2020.');
+    expect(out.verification!.status).toBe('verified');
+  });
+
+  it('both the nudge AND the fallback fail → empty run: no verify call, skipped verdict, "no result" evidence', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    const { captured, cb } = capturingCb();
+    mockComplete.mockResolvedValueOnce(noTools('narration #1')); // → nudge
+    mockComplete.mockResolvedValueOnce(noTools('narration #2')); // → substitute
+    mockComplete.mockResolvedValueOnce(noTools('narration #3')); // substitute still nothing → give up
+    const out = await createSession(freeCfg).ask('q', cb);
+    // Both recovery attempts are visible in the trace (retry + fallback).
+    expect(captured.trace.find((e) => e.tool === 'nudge')).toBeTruthy();
+    expect(captured.trace.find((e) => e.tool === 'fallback')).toBeTruthy();
+    // verify() was NEVER called: exactly the 3 loop completions, no 4th.
+    expect(mockComplete.mock.calls.length).toBe(3);
+    // A muted "nothing to verify" line, and a distinct 'skipped' verdict.
+    const skip = captured.trace.find((e) => e.tool === 'verify' && e.verifyStatus === 'skipped');
+    expect(skip).toBeTruthy();
+    expect(skip.status).toBe('ok'); // muted, never error-red
+    expect(skip.detail).toMatch(/nothing to verify/);
+    expect(out.finding).toBe('');
+    expect(out.verification!.status).toBe('skipped');
+  });
+
+  it('empty run on a non-:free primary skips verify after the nudge (no substitution attempted)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const { captured, cb } = capturingCb();
+    mockComplete.mockResolvedValueOnce(noTools('narration')); // → nudge
+    mockComplete.mockResolvedValueOnce(noTools('narration')); // give up (not :free → no substitute)
+    const out = await createSession(paidCfg).ask('q', cb);
+    // Nudge yes, fallback NO (paid primary).
+    expect(captured.trace.find((e) => e.tool === 'nudge')).toBeTruthy();
+    expect(captured.trace.find((e) => e.tool === 'fallback')).toBeFalsy();
+    // 2 completions only — verify skipped, no substitute.
+    expect(mockComplete.mock.calls.length).toBe(2);
+    expect(out.verification!.status).toBe('skipped');
   });
 });
 
