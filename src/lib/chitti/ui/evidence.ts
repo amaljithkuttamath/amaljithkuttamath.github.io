@@ -9,8 +9,17 @@ import type { DataRow, Citation } from '../tools';
 import type { AgentOutput, TraceEvent } from '../agent';
 import { matchRowToPoint } from '../chart-link';
 import { verificationCueText, verificationStampLabel } from '../a11y';
-import { esc, inlineMd, mdToHtml, fmtRange, fmtFetchedAt, formatTokens } from './dom';
+import { esc, escapeHtml, inlineMd, mdToHtml, fmtRange, fmtFetchedAt, formatTokens } from './dom';
 import { highlightPointForRow, downplayPointForRow } from './charts';
+
+// A citation URL rides in from a shareable #share= fragment, so it is
+// attacker-controllable. Allow only http(s) — anything else (javascript:,
+// data:, …) collapses to a dead '#'. The caller still escapes the result for
+// the attribute context.
+function safeUrl(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  return /^https?:\/\//i.test(s) ? s : '#';
+}
 
 // ── Data table + CSV ───────────────────────────────────────────────────
 export function renderTable(tb: TurnBlock, rows: DataRow[], csv: string) {
@@ -185,7 +194,7 @@ export function renderCitations(tb: TurnBlock, citations: Citation[]) {
     return (
       '<li class="ch-cite-item">' +
       `<span class="ch-cite-src">${esc(c.sourceLabel)}</span>` +
-      `<a class="ch-cite-ind" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(name)} <span class="ch-cite-id">(${esc(c.indicatorId)})</span></a>` +
+      `<a class="ch-cite-ind" href="${escapeHtml(safeUrl(c.url))}" target="_blank" rel="noopener noreferrer">${esc(name)} <span class="ch-cite-id">(${esc(c.indicatorId)})</span></a>` +
       '<span class="ch-cite-facets">' +
       `<span class="ch-cite-facet">${esc(where)}</span>` +
       `<span class="ch-cite-facet">${esc(fmtRange(c.yearRange))}</span>` +

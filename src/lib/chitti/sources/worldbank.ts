@@ -10,6 +10,27 @@ import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
 
 const WB = 'https://api.worldbank.org/v2';
 
+// A bare World Bank indicator code: 1-4 letters, then one or more dot-segments
+// (e.g. NY.GDP.PCAP.KD, SH.DYN.MORT, SP.POP.TOTL). Colon-prefixed ids
+// (owid:/imf:/who:) don't match and belong to other adapters anyway.
+const WB_CODE = /^[A-Za-z]{1,4}(?:\.[A-Za-z0-9]+)+$/;
+
+// Resolve an exact indicator code via the WB `/indicator/{code}` endpoint.
+// Returns undefined when offline/blocked or the code doesn't exist. Never throws.
+async function resolveWbIndicatorCode(code: string): Promise<Indicator | undefined> {
+  try {
+    const url = `${WB}/indicator/${encodeURIComponent(code)}?format=json`;
+    const resp = await fetch(url);
+    if (!resp.ok) return undefined;
+    const data = await resp.json();
+    const row = Array.isArray(data) && Array.isArray(data[1]) ? data[1][0] : undefined;
+    if (row && row.id && row.name) return { id: row.id as string, name: row.name as string, topic: 'World Bank' };
+  } catch {
+    /* offline / blocked */
+  }
+  return undefined;
+}
+
 // search_indicators: filter the curated list; if <3 hits, hit the WB search API.
 export async function searchIndicators(query: string, topic?: string): Promise<Indicator[]> {
   const q = (query || '').toLowerCase().trim();
@@ -23,6 +44,23 @@ export async function searchIndicators(query: string, topic?: string): Promise<I
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .map((x) => x.i);
+
+  const dedup = (list: Indicator[]): Indicator[] => {
+    const seen = new Set<string>();
+    return list.filter((x) => x.id && !seen.has(x.id.toLowerCase()) && (seen.add(x.id.toLowerCase()), true));
+  };
+
+  // When the query IS an exact indicator code, resolve that code authoritatively
+  // and include it — otherwise a code like NY.GDP.PCAP.KD short-circuits on ≥3
+  // fuzzy token matches (ny/gdp/kd) and never surfaces the very series asked for,
+  // returning e.g. "GDP growth (annual %)" instead. The caller re-ranks by
+  // scoreSeries, which scores the exact code far above any token match.
+  const code = query.trim();
+  if (!topic && WB_CODE.test(code)) {
+    const curated = INDICATORS.find((i) => i.id.toLowerCase() === code.toLowerCase());
+    const exact = curated ?? (await resolveWbIndicatorCode(code));
+    if (exact) return dedup([exact, ...scored]).slice(0, 12);
+  }
 
   if (scored.length >= 3) return scored.slice(0, 12);
 
@@ -235,7 +273,11 @@ export const worldbankAdapter: SourceAdapter = {
   detailSuffix: (r) => (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : ''),
   indicatorLabel: (nid) => nid,
   async fetchSeries(id, countries, ys, ye, signal): Promise<FetchSeriesResult> {
-    if (countries !== undefined) {
+    // An empty array means "every country", same as `undefined` — matching
+    // OWID/IMF/WHO. Routing `[]` down the specific-country path built a
+    // malformed `/country//indicator/<id>` URL (double slash) that the WB API
+    // does not read as "all", so the same input failed only for World Bank.
+    if (countries && countries.length) {
       const r = await fetchWorldbank(id, countries, ys, ye, signal);
       return { rows: r.rows, requestUrl: r.requestUrl, sourceUpdated: r.sourceUpdated, truncatedFrom: r.truncatedFrom };
     }

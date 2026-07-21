@@ -87,6 +87,9 @@ export async function fetchWho(
   try {
     resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
+    // Preserve a user-cancel's AbortError identity (see owid.ts) instead of
+    // rewriting it into a World Bank fallback steer.
+    if (err?.name === 'AbortError' || signal?.aborted) throw err;
     throw new Error(
       `WHO GHO fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );

@@ -71,6 +71,7 @@ import { buildSystemPrompt, buildSubAgentPrompt } from './prompts';
 import { needsPlan, parsePlanBrief, type PlanStep, type InsightBrief } from './planner';
 import { verify, type VerificationVerdict, type VerifyStatus, type ParsedVerdict } from './verifier';
 import { normalizeSpec } from './spec';
+import { extractJsonObject } from './parse-json';
 import type { TraceEvent } from './receipts';
 
 
@@ -463,7 +464,13 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             subMessages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
             if (tc.name === 'return_findings') {
               returned = true;
-              summary = String(tc.arguments.summary ?? '').trim();
+              // Read defensively: safeParse can yield a non-object (a bare
+              // `null`/array/number from `arguments:"null"`) that dispatch()
+              // already tolerates. Dereferencing `.summary` off null here would
+              // throw and demote a sub-agent that DID return findings to a
+              // swallowed "failed, continuing without it".
+              const args = tc.arguments && typeof tc.arguments === 'object' ? (tc.arguments as Record<string, unknown>) : {};
+              summary = String(args.summary ?? '').trim();
             }
             if (steps >= MAX_SUBAGENT_CALLS) break;
           }
@@ -773,8 +780,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.id ?? ''),
               rawCountries,
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              numOrUndef(a.year_start),
+              numOrUndef(a.year_end),
               sourceIds
             );
             break;
@@ -791,11 +798,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               rawIds,
-              // Conditional coercion (matching fetch_series): a missing bound
-              // stays undefined, never Number(undefined)===NaN leaking into the
-              // World Bank URL as "date=YS:NaN".
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              // A missing OR null bound stays undefined — never Number(null)===0
+              // or Number(undefined)===NaN leaking into the World Bank URL.
+              numOrUndef(a.year_start),
+              numOrUndef(a.year_end),
               sourceIds
             );
             break;
@@ -805,8 +811,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               undefined, // no countries → every-country path
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              numOrUndef(a.year_start),
+              numOrUndef(a.year_end),
               sourceIds
             );
             break;
@@ -885,8 +891,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.dataset_id ?? ''),
               rawIds,
-              a.year_start !== undefined ? Number(a.year_start) : undefined,
-              a.year_end !== undefined ? Number(a.year_end) : undefined,
+              numOrUndef(a.year_start),
+              numOrUndef(a.year_end),
               sourceIds
             );
             break;
@@ -1284,6 +1290,29 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         }
 
         if (!res.toolCalls.length) {
+          // Before treating a no-tool-call turn as narration, try to recover a
+          // tool call the model printed as JSON text (models with weak native
+          // function-calling do this). If we can, dispatch it as if it were
+          // native — otherwise the tool never runs and the JSON leaks into the
+          // answer. Guarded to the offered tools, so real prose falls through.
+          const salvaged = salvageToolCall(res.text, new Set(toolSchemas.map((s) => s.name)));
+          if (salvaged) {
+            // Unique id per recovered call so two salvaged turns never collide.
+            salvaged.id = `${salvaged.id}_${calls}`;
+            pushTrace({
+              tool: 'salvage',
+              argSummary: salvaged.name,
+              status: 'ok',
+              detail: `recovered a tool call the model wrote as text → ${salvaged.name}`,
+            });
+            messages.push({ role: 'assistant', content: res.text, tool_calls: [salvaged] });
+            calls++;
+            const out = await dispatch(salvaged, { tokens: res.usage.input + res.usage.output });
+            messages.push({ role: 'tool', tool_call_id: salvaged.id, name: salvaged.name, content: out });
+            if (salvaged.name === 'finish' || salvaged.name === 'finish_explanation') return;
+            continue;
+          }
+
           noopTurns++;
           const fallbackText = res.text.trim() || res.reasoning?.trim() || '';
           // Per-turn spec here, NOT the session one: on follow-up turns the
@@ -1364,13 +1393,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
         let finished = false;
         const turnTokens = res.usage.input + res.usage.output;
+        // Dispatch EVERY tool_call in this response — never break mid-batch. The
+        // assistant message above announced all of them, and an OpenAI/Anthropic
+        // history where an assistant tool_call has no matching tool result is a
+        // 400 on the next complete(), which would poison the rest of the session.
+        // The MAX_TOOL_CALLS cap is a soft budget: overshooting by the few calls
+        // in one already-emitted batch is fine; the outer `while` stops us after.
         for (const [idx, tc] of res.toolCalls.entries()) {
           throwIfAborted();
           calls++;
           const out = await dispatch(tc, { tokens: idx === 0 ? turnTokens : undefined });
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
           if (tc.name === 'finish' || tc.name === 'finish_explanation') finished = true;
-          if (calls >= MAX_TOOL_CALLS) break;
         }
         if (finished) return;
 
@@ -1633,6 +1667,66 @@ export async function runAgent(
   return createSession(cfg, opts).ask(question, cb);
 }
 
+
+// Coerce a model-supplied year bound to a number, treating a JSON `null` (and
+// undefined / '') as "no bound". `x !== undefined ? Number(x) : undefined` let
+// a `null` through, and Number(null) === 0 — so `year_start: null` ("no lower
+// bound") became year 0, a degenerate request range. Only a finite number wins.
+function numOrUndef(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// Well-known hallucinated tool names → the real tool. Some free models
+// (observed: OpenRouter NVIDIA models) print a tool call as JSON text and pick
+// a plausible-but-wrong name — `fetch_data` for `fetch_series` was the live
+// failure. Only names the model was actually offered are ever dispatched (the
+// salvager re-checks against the active schema set), so this map is a courtesy,
+// not a trust boundary.
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  fetch_data: 'fetch_series',
+  get_data: 'fetch_series',
+  get_series: 'fetch_series',
+  fetch: 'fetch_series',
+  search: 'find_series',
+  search_series: 'find_series',
+  find: 'find_series',
+  chart: 'render_chart',
+  plot: 'render_chart',
+};
+
+// Recover a tool call a model printed as JSON *text* instead of a native
+// tool_call. Without this, a model with unreliable function-calling (several
+// free models) sees its `{"tool":"fetch_data","arguments":{…}}` treated as
+// narration — the tool never runs and the raw JSON can leak into the answer.
+// Accepts the common key spellings ({tool|name|tool_name|action|function},
+// {arguments|args|parameters|input}) and a JSON-string arguments value, maps a
+// known alias, and returns a ToolCall ONLY when the resolved name is a tool the
+// model was offered (`validNames`) — otherwise null, so genuine narration falls
+// through to the existing nudge path.
+export function salvageToolCall(text: string, validNames: Set<string>): ToolCall | null {
+  const obj = extractJsonObject(text);
+  if (!obj) return null;
+  let rawName: unknown = obj.tool ?? obj.name ?? obj.tool_name ?? obj.action;
+  let rawArgs: unknown = obj.arguments ?? obj.args ?? obj.parameters ?? obj.input;
+  const fn = obj.function;
+  if (typeof rawName !== 'string' && fn && typeof fn === 'object') {
+    const f = fn as Record<string, unknown>;
+    if (typeof f.name === 'string') rawName = f.name;
+    if (rawArgs === undefined) rawArgs = f.arguments ?? f.parameters;
+  }
+  if (typeof rawName !== 'string' || !rawName.trim()) return null;
+  const key = rawName.trim().toLowerCase();
+  const name = validNames.has(key) ? key : TOOL_NAME_ALIASES[key] ?? key;
+  if (!validNames.has(name)) return null;
+  if (typeof rawArgs === 'string') {
+    try { rawArgs = JSON.parse(rawArgs); } catch { /* leave as-is → normalized to {} below */ }
+  }
+  const args =
+    rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? (rawArgs as Record<string, unknown>) : {};
+  return { id: 'call_salvaged_' + name, name, arguments: args };
+}
 
 // Pull the first plausible one-sentence takeaway out of a model's text.
 // Free models sometimes narrate progress instead of calling finish; if they've

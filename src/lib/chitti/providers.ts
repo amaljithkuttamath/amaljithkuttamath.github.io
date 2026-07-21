@@ -1170,7 +1170,14 @@ export async function complete(
     // honest "stopped" outcome by inspecting the signal.
     if (deps.signal?.aborted) throw asClassified(err, cfg.provider);
     const ce = asClassified(err, cfg.provider);
-    const canFallback = ce.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free');
+    // Free-model fallback applies to OpenRouter :free primaries. Whether the
+    // ERROR class is eligible must be judged on the LATEST error, not the first:
+    // a first error that is retryable-but-not-fallback-eligible (e.g. `network`)
+    // can, after the bounded retry, surface as a fallback-eligible class (e.g.
+    // `empty_completion`) — for which switching free models is the intended
+    // remedy. Computed per-error below, off `current`, not frozen off `ce`.
+    const fallbackEligibleFor = (c: ClassifiedError) =>
+      c.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free');
 
     // One bounded transport retry against the SAME model, for transient classes
     // only (rate_limit / server / timeout / network / empty_completion). The
@@ -1193,7 +1200,7 @@ export async function complete(
     // context_length — those surface so the user sees the truth (a different
     // free model cannot fix a bad key or an over-long prompt). The substitution
     // receipt stays visible via the served model.
-    if (canFallback) {
+    if (fallbackEligibleFor(current)) {
       let chain: string[] = [];
       try {
         chain = await buildChain(cfg.model);

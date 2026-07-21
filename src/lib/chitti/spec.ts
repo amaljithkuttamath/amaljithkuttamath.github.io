@@ -15,7 +15,13 @@ export function normalizeSpec(raw: any): ChartSpec {
           .map((pt: any) => {
             if (!Array.isArray(pt) || pt.length < 2) return null;
             const x = typeof pt[0] === 'number' ? pt[0] : isNaN(Number(pt[0])) ? pt[0] : Number(pt[0]);
-            const y = Number(pt[1]);
+            // Drop gap points instead of plotting a false zero. Number(null),
+            // Number('') and Number(false) all === 0 and would sail past an
+            // isNaN guard, so a missing y ([2021, null]) turned into a real
+            // crash-to-zero in the chart. Only a genuinely numeric y survives.
+            const rawY = pt[1];
+            if (rawY === null || rawY === undefined || rawY === '' || typeof rawY === 'boolean') return null;
+            const y = Number(rawY);
             return isNaN(y) ? null : [x, y];
           })
           .filter((p: any) => p !== null)

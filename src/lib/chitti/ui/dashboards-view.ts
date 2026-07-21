@@ -673,7 +673,16 @@ export function renderDashDetail(dash: Dashboard) {
 
   // Re-show the last refresh log for THIS dashboard, if any (survives the
   // post-run re-render so the receipts stay visible next to the fresh tiles).
-  if (lastRefreshLog && lastRefreshLog.dashId === dash.id && lastRefreshLog.lines.length) {
+  // Also render it while a refresh is still IN FLIGHT (done === false), even
+  // with zero lines yet: runRefresh() grabs `.ch-refresh-log-lines` right after
+  // this render and streams per-tile receipts into it. Gating on lines.length
+  // meant the container didn't exist at stream time, so every live receipt was
+  // silently dropped and the log only appeared once the whole pass finished.
+  if (
+    lastRefreshLog &&
+    lastRefreshLog.dashId === dash.id &&
+    (lastRefreshLog.lines.length || !lastRefreshLog.done)
+  ) {
     dashViewBody.appendChild(buildRefreshLog(lastRefreshLog));
   }
 

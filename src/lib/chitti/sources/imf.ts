@@ -27,7 +27,7 @@ export async function fetchImf(
   yearEnd?: number,
   signal?: AbortSignal
 ): Promise<{ rows: DataRow[]; requestUrl: string }> {
-  const clean = code.replace(/^imf:/, '').toUpperCase();
+  const clean = code.replace(/^imf:/i, '').toUpperCase();
   const path = countryIds?.length
     ? `${clean}/${countryIds.map((c) => c.trim().toUpperCase()).join('/')}`
     : clean;
@@ -36,6 +36,9 @@ export async function fetchImf(
   try {
     resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
+    // Preserve a user-cancel's AbortError identity (see owid.ts) instead of
+    // rewriting it into a World Bank fallback steer.
+    if (err?.name === 'AbortError' || signal?.aborted) throw err;
     throw new Error(
       `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series (no forecasts, but similar historical macro data).`
     );
@@ -133,7 +136,7 @@ export const imfAdapter: SourceAdapter = {
   sourceLabel: 'IMF DataMapper',
   humanUrl: (id) => 'https://www.imf.org/external/datamapper/' + encodeURIComponent(id.replace(/^imf:/i, '')),
   matchesId: (id) => id.trim().toLowerCase().startsWith('imf:'),
-  normalizeId: (id) => 'imf:' + id.replace(/^imf:/, '').toUpperCase(),
+  normalizeId: (id) => 'imf:' + id.replace(/^imf:/i, '').toUpperCase(),
   curated: IMF_CATALOG,
   usesSharedCatalog: true,
   liveCatalogSearch: (query) => searchImfCatalog(query),

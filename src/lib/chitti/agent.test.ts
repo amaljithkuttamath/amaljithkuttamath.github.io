@@ -505,6 +505,44 @@ describe('fetchWorldbank — built URL for open ranges + "since 1990" live-bug r
   });
 });
 
+describe('worldbank adapter — empty countries + exact indicator code', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const wbOk = (rows: unknown[] = []) => ({
+    ok: true,
+    status: 200,
+    json: async () => [{ lastupdated: '2024-12-16' }, rows],
+  });
+  const wb = SOURCES.find((s) => s.id === 'worldbank')!;
+
+  it('treats an empty countries array as "all countries" (no malformed /country// URL)', async () => {
+    // Before the fix `[]` took the specific-country path and built
+    // `.../country//indicator/<id>` (double slash), which WB does not read as
+    // "all" — every other source already treats [] as every-country.
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { urls.push(String(url)); return wbOk(); }));
+    await wb.fetchSeries('NY.GDP.PCAP.CD', [], undefined, undefined);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every((u) => !u.includes('country//'))).toBe(true);
+    // The every-country path batches real ISO3 codes into the country segment.
+    expect(urls[0]).toMatch(/country\/[A-Z]{3}/);
+  });
+
+  it('resolves an exact WB indicator code to THAT series, not a fuzzy token match', async () => {
+    // Querying the bare code NY.GDP.PCAP.KD (constant GDP/cap — not curated)
+    // used to short-circuit on ≥3 fuzzy token matches (ny/gdp/kd) and return
+    // "GDP growth (annual %)". Now the exact code is resolved and, re-ranked by
+    // scoreSeries, floats to the top.
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/indicator/NY.GDP.PCAP.KD')) {
+        return { ok: true, status: 200, json: async () => [{ page: 1 }, [{ id: 'NY.GDP.PCAP.KD', name: 'GDP per capita (constant 2015 US$)' }]] };
+      }
+      return { ok: false, status: 404, json: async () => [] };
+    }));
+    const hits = await findSeries('NY.GDP.PCAP.KD', ['worldbank']);
+    expect(hits[0].id).toBe('NY.GDP.PCAP.KD');
+  });
+});
+
 describe('findSeries — cross-source search', () => {
   // The IMF live-catalog fallback calls fetch(); stub it to reject so these
   // stay offline and deterministic — which also exercises graceful degradation.
@@ -682,6 +720,7 @@ import {
   buildSubAgentPrompt,
   parseVerifierVerdict,
   normalizeSpec,
+  salvageToolCall,
   needsPlan,
   countCountryMentions,
   parsePlanBrief,
@@ -2824,6 +2863,24 @@ describe('normalizeSpec — defensive chart-spec guarding', () => {
     expect(normalizeSpec({ series: [{ name: 'A', data: 'nope' }] }).series[0].data).toEqual([]);
   });
 
+  it('drops a gap point (null/empty/boolean y) instead of plotting a false zero', () => {
+    // Number(null) === 0, Number('') === 0, Number(false) === 0 all sail past an
+    // isNaN guard — a missing y must become a gap, not a crash-to-zero line.
+    expect(
+      normalizeSpec({ series: [{ name: 'GDP', data: [[2020, 100], [2021, null], [2022, 120]] }] }).series[0].data
+    ).toEqual([[2020, 100], [2022, 120]]);
+    expect(
+      normalizeSpec({ series: [{ name: 'A', data: [[2020, ''], [2021, 5]] }] }).series[0].data
+    ).toEqual([[2021, 5]]);
+    expect(
+      normalizeSpec({ series: [{ name: 'A', data: [[2020, false], [2021, 5]] }] }).series[0].data
+    ).toEqual([[2021, 5]]);
+    // A genuine zero is still a real value and must be kept.
+    expect(
+      normalizeSpec({ series: [{ name: 'A', data: [[2020, 0], [2021, 5]] }] }).series[0].data
+    ).toEqual([[2020, 0], [2021, 5]]);
+  });
+
   it('passes x_axis/y_axis through when present and omits them when blank/absent', () => {
     const withAxes = normalizeSpec({ title: 'T', x_axis: 'Year', y_axis: 'GDP', series: [] });
     expect(withAxes.x_axis).toBe('Year');
@@ -2850,6 +2907,45 @@ describe('normalizeSpec — defensive chart-spec guarding', () => {
     expect(spec.series).toHaveLength(4);
     expect(spec.series[3]).toEqual({ name: 'ok', data: [[2000, 1]] });
     expect(spec.series.slice(0, 3).every((s) => s.name === 'series' && s.data.length === 0)).toBe(true);
+  });
+});
+
+// ── salvageToolCall: recover a tool call a model wrote as JSON text ─────────
+// Some models (observed: OpenRouter NVIDIA free models) print the tool call as
+// JSON in content instead of emitting a native tool_call. salvageToolCall pulls
+// it back so the tool runs instead of the raw JSON leaking into the answer.
+describe('salvageToolCall — recover a text-embedded tool call', () => {
+  const valid = new Set(['find_series', 'fetch_series', 'render_chart', 'finish']);
+
+  it('recovers the live failure: {"tool":"fetch_data",...} → fetch_series', () => {
+    const text = '{"tool": "fetch_data", "arguments": {"indicator": "NY.GDP.PCAP.CD", "countries": ["IND"], "start_year": 2000, "end_year": 2024}}';
+    const tc = salvageToolCall(text, valid);
+    expect(tc?.name).toBe('fetch_series');
+    expect(tc?.arguments).toEqual({ indicator: 'NY.GDP.PCAP.CD', countries: ['IND'], start_year: 2000, end_year: 2024 });
+  });
+
+  it('accepts a valid name verbatim and tolerates surrounding prose/fences', () => {
+    const tc = salvageToolCall('Sure, let me do that:\n```json\n{"tool":"find_series","arguments":{"query":"gdp"}}\n```', valid);
+    expect(tc?.name).toBe('find_series');
+    expect(tc?.arguments).toEqual({ query: 'gdp' });
+  });
+
+  it('reads the OpenAI {"function":{"name","arguments"}} shape with string arguments', () => {
+    const tc = salvageToolCall('{"function":{"name":"fetch_series","arguments":"{\\"id\\":\\"SP.POP.TOTL\\"}"}}', valid);
+    expect(tc?.name).toBe('fetch_series');
+    expect(tc?.arguments).toEqual({ id: 'SP.POP.TOTL' });
+  });
+
+  it('accepts the {name, args} spelling and defaults missing arguments to {}', () => {
+    const tc = salvageToolCall('{"name":"finish","args":null}', valid);
+    expect(tc?.name).toBe('finish');
+    expect(tc?.arguments).toEqual({});
+  });
+
+  it('returns null for genuine prose, an unknown tool, or a non-tool JSON object', () => {
+    expect(salvageToolCall('I could not find that series, sorry.', valid)).toBeNull();
+    expect(salvageToolCall('{"tool":"delete_everything","arguments":{}}', valid)).toBeNull();
+    expect(salvageToolCall('{"insight":"gdp rose","confidence":"high"}', valid)).toBeNull();
   });
 });
 

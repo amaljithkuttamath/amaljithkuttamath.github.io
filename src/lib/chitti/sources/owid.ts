@@ -68,12 +68,16 @@ export async function fetchOwid(
   yearEnd?: number,
   signal?: AbortSignal
 ): Promise<{ rows: DataRow[]; metric: string; requestUrl: string }> {
-  const clean = slug.replace(/^owid:/, '');
+  const clean = slug.replace(/^owid:/i, '');
   const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
   let resp: Response;
   try {
     resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
+    // A user-cancel must keep its AbortError identity so the loop unwinds as a
+    // stop — not get rewritten into a "CORS block, fall back to World Bank" steer
+    // that sends the agent chasing a retry against an aborted signal.
+    if (err?.name === 'AbortError' || signal?.aborted) throw err;
     throw new Error(
       `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, fetch a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );
@@ -199,9 +203,9 @@ export const owidAdapter: SourceAdapter = {
     datasetSource: 'owid',
   citationSource: 'owid',
   sourceLabel: 'Our World in Data',
-  humanUrl: (id) => 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.replace(/^owid:/, '')),
+  humanUrl: (id) => 'https://ourworldindata.org/grapher/' + encodeURIComponent(id.replace(/^owid:/i, '')),
   matchesId: (id) => id.trim().toLowerCase().startsWith('owid:'),
-  normalizeId: (id) => 'owid:' + id.replace(/^owid:/, ''),
+  normalizeId: (id) => 'owid:' + id.replace(/^owid:/i, ''),
   curated: OWID_CATALOG,
   usesSharedCatalog: true,
   liveCatalogSearch: (query) => searchOwidCatalog(query),
