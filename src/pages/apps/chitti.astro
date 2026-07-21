@@ -1545,6 +1545,16 @@ const PRESETS = [
         tb.traceEl.appendChild(buildPlanCard(e.plan, events, e.tokens));
         return;
       }
+      // A gated plan whose brief was unusable (parse failed or the planning call
+      // errored) renders a muted one-line receipt in place of the card — so the
+      // missing plan is explained, never silent. Not a tool row: no dot/glow.
+      if (e.tool === 'plan' && !e.plan) {
+        const skip = document.createElement('p');
+        skip.className = 'ch-plan-skipped';
+        skip.textContent = e.detail || 'plan skipped';
+        tb.traceEl.appendChild(skip);
+        return;
+      }
 
       const row = document.createElement('div');
       // A recursive llm() step renders as an indented child line-item under the
@@ -4270,6 +4280,17 @@ const PRESETS = [
     color: var(--ch-meta);
     padding-top: 2px;
     border-top: 1px dashed var(--fg-faint);
+  }
+  /* A gated-but-unusable plan: a muted one-line receipt where the plan card
+     would have been. Deliberately quiet (no dot, no border) — it explains an
+     absence, it is not a failure. */
+  :global(.ch-plan-skipped) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    font-style: italic;
+    color: var(--ch-meta);
+    margin: 2px 0 8px;
+    padding: 0 0 0 2px;
   }
 
   /* A write_file/read_file trace row inline-expands its own file content —

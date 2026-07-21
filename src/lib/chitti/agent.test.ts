@@ -16,6 +16,8 @@ import {
   parseWhoIndicators,
   parseWorldBankError,
   fetchWho,
+  fetchWorldbank,
+  worldbankDateParam,
   DEFAULT_SOURCE_IDS,
   VFS,
   executeJs,
@@ -413,6 +415,93 @@ describe('fetchWho — GHO OData URL + row parsing', () => {
     expect(rows.every((r) => r.indicator === 'who:WHOSIS_000001')).toBe(true);
     // ISO3 resolves to a display name where known.
     expect(rows.find((r) => r.iso3 === 'IND')?.country).toBe('India');
+  });
+});
+
+describe('worldbankDateParam — open/closed year ranges never leak NaN/undefined', () => {
+  const YEAR = new Date().getFullYear();
+  it('both bounds → date=YS:YE', () => {
+    expect(worldbankDateParam(2000, 2010)).toBe('&date=2000:2010');
+  });
+  it('only a start ("since 1990") → date=YS:<current year>', () => {
+    expect(worldbankDateParam(1990, undefined)).toBe(`&date=1990:${YEAR}`);
+  });
+  it('only an end → date=1960:YE', () => {
+    expect(worldbankDateParam(undefined, 2010)).toBe('&date=1960:2010');
+  });
+  it('neither → the date param is omitted entirely', () => {
+    expect(worldbankDateParam(undefined, undefined)).toBe('');
+  });
+  it('a same-year single range is left as-is', () => {
+    expect(worldbankDateParam(2020, 2020)).toBe('&date=2020:2020');
+  });
+  it('NaN bounds (the live bug: Number(undefined)) are treated as ABSENT, never "NaN"', () => {
+    // The exact pathology that broke the live app: a bare Number(undefined).
+    expect(worldbankDateParam(1990, Number(undefined))).toBe(`&date=1990:${YEAR}`);
+    expect(worldbankDateParam(Number(undefined), Number(undefined))).toBe('');
+    // Nothing the builder emits ever contains these poison strings.
+    for (const out of [
+      worldbankDateParam(1990, Number(undefined)),
+      worldbankDateParam(Number(undefined), 2010),
+      worldbankDateParam(Number(undefined), Number(undefined)),
+    ]) {
+      expect(out).not.toMatch(/NaN|undefined/);
+    }
+  });
+});
+
+describe('fetchWorldbank — built URL for open ranges + "since 1990" live-bug repro', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const YEAR = new Date().getFullYear();
+  // A minimal well-formed World Bank JSON body: [header, rows].
+  const wbOk = (rows: unknown[] = []) => ({
+    ok: true,
+    status: 200,
+    json: async () => [{ lastupdated: '2024-12-16' }, rows],
+  });
+
+  it('year_start only ("since 1990") → date=1990:<current year> and the fetch SUCCEEDS (no rejection)', async () => {
+    // This is the exact live sequence: the model passed year_start (1990) with
+    // no year_end. Before the fix this built `date=1990:NaN`, which the World
+    // Bank rejected with "The provided parameter value is not valid".
+    let seen = '';
+    const wbRows = [
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '1990', value: 100 },
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 200 },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen = String(url);
+      return wbOk(wbRows);
+    }));
+    const r = await fetchWorldbank('NY.GDP.PCAP.CD', ['IND'], 1990, undefined);
+    expect(seen).toContain(`&date=1990:${YEAR}`);
+    expect(seen).not.toMatch(/NaN|undefined/); // the poison strings never reach the URL
+    expect(r.requestUrl).toBe(seen);
+    // The stubbed WB answered normally — the success path, not a rejection.
+    expect(r.rows.length).toBe(2);
+    expect(r.sourceUpdated).toBe('2024-12-16');
+  });
+
+  it('both bounds → date=YS:YE', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA'], 2000, 2010);
+    expect(seen).toContain('&date=2000:2010');
+  });
+
+  it('year_end only → date=1960:YE', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA'], undefined, 2010);
+    expect(seen).toContain('&date=1960:2010');
+  });
+
+  it('no bounds → no date param at all', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA']);
+    expect(seen).not.toContain('date=');
+    expect(seen).not.toMatch(/NaN|undefined/);
   });
 });
 
@@ -3632,7 +3721,7 @@ describe('plan mode, driven through createSession', () => {
     expect(userMsg!.content).toMatch(/Intended insight: Divergence after 2010\./);
   });
 
-  it('a malformed brief → no plan receipt, no injected note, run proceeds identically', async () => {
+  it('a malformed brief → muted plan-skipped receipt (never a faked card), no injected note, run proceeds', async () => {
     // The planning call still fires (the gate opened), but its output is junk.
     mockComplete.mockResolvedValueOnce({ text: 'the model forgot to answer in JSON', toolCalls: [], usage: { input: 6, output: 3 } });
     mockComplete.mockResolvedValueOnce(chartTurn());
@@ -3643,14 +3732,31 @@ describe('plan mode, driven through createSession', () => {
     expect(out.aborted).toBe(false);
     expect(out.verification!.status).toBe('verified'); // run completed normally
 
-    // No plan receipt was faked.
-    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+    // No plan CARD was faked — a card is a 'plan' event carrying a `.plan` brief.
+    expect(trace().some((e) => e.tool === 'plan' && e.plan)).toBe(false);
+    // But the gated-yet-unusable plan is EXPLAINED, not silent: a muted one-line
+    // receipt (a 'plan' event with NO `.plan`) sits where the card would be.
+    const skipped = trace().filter((e) => e.tool === 'plan' && !e.plan);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].status).toBe('ok'); // muted, not an error dot
+    expect(skipped[0].detail).toMatch(/plan skipped — model returned no usable brief/);
     // No plan note leaked into the executor context.
     const execMessages = mockComplete.mock.calls[1][1] as { role: string; content: string }[];
     expect(execMessages.some((m) => m.role === 'system' && m.content.includes('Insight to surface:'))).toBe(false);
     // The verifier saw no intended insight either.
     const verifyMessages = mockComplete.mock.calls[2][1] as { role: string; content: string }[];
     expect(verifyMessages.find((m) => m.role === 'user')!.content).not.toMatch(/Intended insight:/);
+  });
+
+  it('an ungated (simple) question emits NO plan-skipped receipt — planning never ran', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask(SIMPLE, cb);
+
+    // Neither a plan card nor a plan-skipped receipt: the gate never opened.
+    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
   });
 
   it('a simple question makes NO planning call (zero extra cost)', async () => {

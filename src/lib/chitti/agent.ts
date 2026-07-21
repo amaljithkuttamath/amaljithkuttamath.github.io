@@ -997,7 +997,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
-            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye), signal);
+            const r = await fetchWorldbank(id, codes, ys, ye, signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -1011,7 +1011,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
           } else {
             // No countries → every real country, batched internally.
-            const r = await fetchWorldbankAll(id, Number(ys), Number(ye), signal);
+            const r = await fetchWorldbankAll(id, ys, ye, signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -1227,8 +1227,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               rawIds,
-              Number(a.year_start),
-              Number(a.year_end),
+              // Conditional coercion (matching fetch_series): a missing bound
+              // stays undefined, never Number(undefined)===NaN leaking into the
+              // World Bank URL as "date=YS:NaN".
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
               sourceIds
             );
             break;
@@ -1238,8 +1241,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               undefined, // no countries → every-country path
-              Number(a.year_start),
-              Number(a.year_end),
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
               sourceIds
             );
             break;
@@ -1625,18 +1628,35 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           content: `Question: ${q}\n\nActive databases: ${sourceList}`,
         },
       ];
+      // Planning was gated IN, so the absence of a plan card must be EXPLAINED,
+      // never silent: whenever the brief turns out unusable (the planning call
+      // errored, or its output didn't parse), emit a muted one-line receipt so
+      // the reader knows the plan was attempted and skipped — NOT an error dot,
+      // and NOT a faked/empty plan card (that carries no `plan` field).
+      const skipReceipt = () =>
+        pushTrace({
+          tool: 'plan',
+          argSummary: '',
+          status: 'ok',
+          detail: 'plan skipped — model returned no usable brief',
+        });
       let res;
       try {
         res = await complete(cfg, planMessages, [], completeDeps);
       } catch (err) {
         // A user-stop unwinds to the aborted output; any other provider error
-        // just means "no plan" — proceed without one.
+        // just means "no plan" — proceed without one, but say so.
         if (err instanceof AbortedError || signal?.aborted) throw new AbortedError();
+        skipReceipt();
         return null;
       }
       totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
       const brief = parsePlanBrief(res.text);
-      if (!brief) return null; // malformed → no plan, no receipt, run unchanged
+      if (!brief) {
+        // Unusable brief → no plan card, but the muted receipt explains why.
+        skipReceipt();
+        return null;
+      }
       pushTrace({
         tool: 'plan',
         argSummary: '',
