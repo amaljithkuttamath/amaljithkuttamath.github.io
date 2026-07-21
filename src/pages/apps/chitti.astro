@@ -107,6 +107,12 @@ const PRESETS = [
         <div class="ch-status" style="display:none" role="status" aria-live="polite" aria-atomic="true">
           <span class="ch-status-dot" aria-hidden="true"></span>
           <span class="ch-status-msg">Planning…</span>
+          <!-- Stop control: shown only while THIS turn is running. A real button
+               (keyboard-reachable, focus-visible), mono/muted to match the
+               receipt style — never amber. Clicking aborts the turn; the run
+               ends in an honest "stopped by you" state and the state change is
+               announced through this same polite status line. -->
+          <button type="button" class="ch-stop" style="display:none" aria-label="Stop this run">stop</button>
         </div>
 
         <!-- The agent's work comes first — reasoning, then answer, reading
@@ -353,7 +359,7 @@ const PRESETS = [
             <span class="ch-byok-cta" id="ch-byok-cta">Add a free key to run it</span>
           </button>
           <div class="ch-composer-actions">
-            <button type="button" class="ch-new-convo" id="ch-new-convo" style="display:none">+ new</button>
+            <button type="button" class="ch-new-convo" id="ch-new-convo" style="display:none">+ new question</button>
             <button type="submit" class="ch-send" id="ch-composer-btn" aria-label="Ask">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
             </button>
@@ -551,6 +557,7 @@ const PRESETS = [
     statusRow: HTMLElement;
     statusDot: HTMLElement;
     statusMsg: HTMLElement;
+    stopBtn: HTMLButtonElement;
     panel: HTMLDetailsElement;
     panelDot: HTMLElement;
     panelLabel: HTMLElement;
@@ -612,6 +619,7 @@ const PRESETS = [
       statusRow: q(root, '.ch-status'),
       statusDot: q(root, '.ch-status-dot'),
       statusMsg: q(root, '.ch-status-msg'),
+      stopBtn: q<HTMLButtonElement>(root, '.ch-stop'),
       panel: q<HTMLDetailsElement>(root, '.ch-panel'),
       panelDot: q(root, '.ch-panel-dot'),
       panelLabel: q(root, '.ch-panel-label'),
@@ -1202,7 +1210,10 @@ const PRESETS = [
   // A successful run reads from the answer itself; the status line only
   // carries in-flight and error states, so it hides on 'ok' instead of
   // leaving a redundant "Done" chip above the finding.
-  function setStatus(tb: TurnBlock, kind: 'loading' | 'ok' | 'error', msg: string) {
+  function setStatus(tb: TurnBlock, kind: 'loading' | 'ok' | 'error' | 'stopped', msg: string) {
+    // 'ok' hides the line (success reads from the answer); every other kind —
+    // including the neutral 'stopped' — keeps it visible. 'stopped' is styled
+    // muted (not the red error dot): a user-cancel is not a failure.
     tb.statusRow.style.display = kind === 'ok' ? 'none' : 'flex';
     tb.statusDot.className = 'ch-status-dot ch-status-' + kind;
     tb.statusMsg.textContent = msg;
@@ -2360,8 +2371,56 @@ const PRESETS = [
       '<ol class="ch-cite-list">' + rows.join('') + '</ol>';
   }
 
+  // ── "+ new question" (non-destructive two-step reset) ────────────────────
+  // The reset is genuinely destructive: it wipes the whole thread AND unlocks
+  // the source picker (the session's databases can only be changed by starting
+  // over). This thread model keeps every turn as full history — there is no
+  // collapsed-turn pattern to fold prior turns into — so rather than silently
+  // discarding history on one accidental tap, the chip ARMS a confirm: the
+  // first click turns it into "wipe N turns + start fresh?" for a few seconds;
+  // only a second click within that window actually resets. Any click
+  // elsewhere, or the timeout, disarms it. No window.confirm (kept inline).
+  let newQuestionArmed = false;
+  let newQuestionTimer: number | null = null;
+
+  function resetNewQuestionChip() {
+    newQuestionArmed = false;
+    if (newQuestionTimer !== null) {
+      clearTimeout(newQuestionTimer);
+      newQuestionTimer = null;
+    }
+    newConvoBtn.textContent = '+ new question';
+    newConvoBtn.classList.remove('ch-new-convo-armed');
+  }
+
+  function performNewQuestion() {
+    resetNewQuestionChip();
+    session = null;
+    unlockSources();
+    // Dispose live charts before clearing the DOM so ECharts releases its
+    // global registry entry and resize listener.
+    for (const tb of liveChartTurns) {
+      tb.chartInstance?.dispose();
+      tb.chartInstance = null;
+    }
+    threadEl.innerHTML = '';
+    allTurns.length = 0;
+    liveChartTurns.length = 0;
+    // Back to the empty state: the setup panel (chips + BYOK) returns; the
+    // composer drops back to the first-question placeholder; the chip hides.
+    consoleEl.style.display = '';
+    newConvoBtn.style.display = 'none';
+    composerQ.placeholder = 'Ask about the world…';
+    composerQ.value = '';
+    composerQ.focus();
+  }
+
   // ── Run ────────────────────────────────────────────────────────────────
   let running = false;
+  // The AbortController for the turn currently in flight (null when idle). The
+  // per-turn stop button and "+ new question" both abort through it, so a run
+  // can never leave the app wedged with no escape.
+  let runController: AbortController | null = null;
 
   askForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -2396,6 +2455,8 @@ const PRESETS = [
     };
 
     running = true;
+    const controller = new AbortController();
+    runController = controller;
     askBtn.disabled = true;
     askBtn.classList.add('ch-send-working');
     openByok(false);
@@ -2411,13 +2472,25 @@ const PRESETS = [
     liveChartTurns.push(tb);
     tb.canvasEl.classList.add('ch-canvas-pending');
     setStatus(tb, 'loading', 'Planning…');
+    // Reveal + wire this turn's stop control. It aborts THIS run's controller;
+    // ask() then resolves with an honest aborted output (handled below).
+    tb.stopBtn.style.display = '';
+    tb.stopBtn.disabled = false;
+    tb.stopBtn.onclick = () => {
+      controller.abort();
+      tb.stopBtn.disabled = true;
+      // Announce intent immediately through the polite status line; the final
+      // "stopped by you — N receipts completed" lands when ask() resolves.
+      setStatus(tb, 'stopped', 'Stopping…');
+    };
     tb.panel.style.display = 'block';
     // The conversation has started: hide the setup panel (chips + BYOK) and
-    // reveal the "+ new conversation" control. The bottom composer is always
+    // reveal the "+ new question" control. The bottom composer is always
     // present and is the sole input.
     consoleEl.style.display = 'none';
+    resetNewQuestionChip();
     newConvoBtn.style.display = '';
-    composerQ.placeholder = 'Ask a follow-up…';
+    composerQ.placeholder = 'Ask a follow-up — or + new question for a fresh start…';
     // Bring the just-created turn up to the top of the scroll area so the
     // active exchange sits under the header and reads top-to-bottom down to
     // the pinned composer, instead of the answer landing far from the input.
@@ -2443,7 +2516,34 @@ const PRESETS = [
         onChart: (spec) => { void renderChart(tb, spec); },
         onStatus: (msg, kind) => setStatus(tb, kind, msg),
         onModel: (served) => { tb.railModelEl.textContent = `${served} (fallback) / ${cfg.provider}`; },
-      });
+      }, controller.signal);
+
+      // Honest stopped state (the user hit stop). NOT an error and NOT verified:
+      // no VERIFIED stamp, neutral wording. Any rows/citations fetched before the
+      // stop are real data with provenance — show them so the work isn't lost.
+      // The session stays usable; the composer is re-enabled in `finally`.
+      if (out.aborted) {
+        if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
+        const completed = tb.trace.filter((ev) => ev.status === 'ok').length;
+        if (out.rows.length) {
+          tb.metaSection.style.display = 'block';
+          renderTable(tb, out.rows, out.csv);
+          renderCitations(tb, out.citations);
+        }
+        if (out.finding) {
+          tb.answerSection.style.display = 'block';
+          renderFinding(tb, out.finding);
+        }
+        renderRunningTotal(tb, tb.trace, out.cost);
+        setStatus(
+          tb,
+          'stopped',
+          `stopped by you — ${completed} receipt${completed === 1 ? '' : 's'} completed`
+        );
+        tb.panelDot.className = 'ch-panel-dot';
+        tb.panelLabel.textContent = `stopped — ${completed} receipt${completed === 1 ? '' : 's'} completed`;
+        return;
+      }
 
       if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
 
@@ -2500,7 +2600,13 @@ const PRESETS = [
       tb.panelDot.className = 'ch-panel-dot ch-panel-dot-error';
       tb.panelLabel.textContent = 'run failed — expand for details';
     } finally {
+      // The single place the composer is re-enabled — EVERY terminal path
+      // (success, error, aborted) lands here, so a run can never leave the app
+      // stuck with a disabled input. The stop control is retired with the run.
       running = false;
+      runController = null;
+      tb.stopBtn.style.display = 'none';
+      tb.stopBtn.onclick = null;
       askBtn.disabled = false;
       askBtn.classList.remove('ch-send-working');
     }
@@ -2528,27 +2634,33 @@ const PRESETS = [
   });
 
   newConvoBtn.addEventListener('click', () => {
-    session = null;
-    unlockSources();
-    // The latest turn is never collapsed (collapse only runs on prior turns
-    // at submit), so its chart is still live here. Dispose before clearing the
-    // DOM so ECharts releases its global registry entry and resize listener,
-    // same teardown collapseTurn() does for superseded turns.
-    for (const tb of liveChartTurns) {
-      tb.chartInstance?.dispose();
-      tb.chartInstance = null;
+    // Never-stuck: a mid-run click stops the current turn first, so the reset
+    // proceeds against a settled session instead of racing an in-flight ask().
+    if (running && runController) runController.abort();
+
+    if (!newQuestionArmed) {
+      const n = allTurns.length;
+      newQuestionArmed = true;
+      newConvoBtn.textContent = `wipe ${n} turn${n === 1 ? '' : 's'} + start fresh?`;
+      newConvoBtn.classList.add('ch-new-convo-armed');
+      // Auto-disarm so an armed chip never lingers into the next glance.
+      newQuestionTimer = window.setTimeout(resetNewQuestionChip, 4000);
+      return;
     }
-    threadEl.innerHTML = '';
-    allTurns.length = 0;
-    liveChartTurns.length = 0;
-    // Back to the empty state: the setup panel (chips + BYOK) returns; the
-    // composer stays put at the bottom (it is always present) and drops back to
-    // the first-question placeholder; the "+ new conversation" control hides.
-    consoleEl.style.display = '';
-    newConvoBtn.style.display = 'none';
-    composerQ.placeholder = 'Ask about the world…';
-    composerQ.value = '';
-    composerQ.focus();
+    // Second, deliberate click within the window → actually reset.
+    performNewQuestion();
+  });
+
+  // A click anywhere other than the chip disarms the confirm, so the second
+  // (destructive) click has to be a deliberate one on the chip itself.
+  document.addEventListener('click', (e) => {
+    if (
+      newQuestionArmed &&
+      e.target !== newConvoBtn &&
+      !newConvoBtn.contains(e.target as Node)
+    ) {
+      resetNewQuestionChip();
+    }
   });
 
   // Test-only seam. When the page is opened with ?chittidebug in the URL, the
@@ -2652,6 +2764,56 @@ const PRESETS = [
         const p = dbg.chart?.convertToPixel({ seriesIndex }, [dataIndex, value]);
         const rect = dbg.chart?.getDom()?.getBoundingClientRect();
         return p && rect ? { x: rect.left + p[0], y: rect.top + p[1] } : null;
+      },
+      // Stop-control harness: drive the REAL submit handler with a stubbed
+      // session so the actual running/stopped DOM is exercised with no network.
+      // The injected session's ask() streams a couple of receipts, then waits;
+      // when the user clicks the (real) stop button, the (real) AbortSignal
+      // fires and ask() resolves with an honest aborted output — the same path
+      // a live stop takes. Egress stays untouched; this is stubbing, not a run.
+      setKey(k: string) {
+        keyIn.value = k;
+      },
+      injectStopSession(over?: { rows?: DataRow[]; citations?: Citation[]; finding?: string }) {
+        const rows = over?.rows ?? [];
+        const citations = over?.citations ?? [];
+        const fake = {
+          ask(_q: string, cb: any, sig?: AbortSignal) {
+            // Stream a realistic, resolved trace so "N receipts completed" is
+            // non-zero and the collapsed panel reads like a real partial run.
+            const now = Date.now();
+            cb.onTrace([
+              { tool: 'find_series', argSummary: 'child mortality', status: 'ok', ts: now, detail: '3 hits' },
+              { tool: 'fetch_series', argSummary: 'SP.DYN.IMRT.IN', status: 'ok', ts: now + 1, detail: `${rows.length} rows` },
+              { tool: 'execute_js', argSummary: 'rank countries', status: 'running', ts: now + 2 },
+            ]);
+            cb.onStatus('Working…', 'loading');
+            return new Promise((resolve) => {
+              const finish = () =>
+                resolve({
+                  finding: over?.finding ?? '',
+                  chartSpec: null,
+                  rows,
+                  csv: rowsToCSV(rows),
+                  indicators: [],
+                  citations,
+                  confidence: 'low',
+                  verifierReport: '',
+                  verification: null,
+                  cost: 0,
+                  retried: false,
+                  kind: 'chart',
+                  aborted: true,
+                });
+              if (sig?.aborted) finish();
+              else sig?.addEventListener('abort', finish, { once: true });
+            });
+          },
+        };
+        // Same closure as `session` — inject directly and lock the picker, as a
+        // real first ask() would, so the "+ new question" unlock is exercised.
+        session = fake as unknown as ChittiSession;
+        lockSources();
       },
     };
     (window as any).__chittiDebug = dbg;
@@ -2830,6 +2992,13 @@ const PRESETS = [
     transition: color var(--duration) var(--ease), background var(--duration) var(--ease);
   }
   .ch-new-convo:hover { color: var(--fg); background: var(--bg-hover); }
+  /* Armed confirm state: emphasised in ink (not amber), a hairline outline so
+     the "are you sure?" reads clearly without a colour alarm. */
+  .ch-new-convo-armed {
+    color: var(--fg);
+    border: 1px solid var(--fg-faint);
+    background: var(--bg-hover);
+  }
   /* Round send button, filled with ink. */
   .ch-send {
     display: inline-flex;
@@ -3464,6 +3633,26 @@ const PRESETS = [
   .ch-status-loading { background: var(--signal); animation: pulse 1.6s ease-in-out infinite; }
   .ch-status-ok { background: var(--success); }
   .ch-status-error { background: var(--danger); }
+  /* A user-stop is terminal but NOT a failure: a muted dot, no pulse, no red. */
+  .ch-status-stopped { background: var(--fg-muted); }
+  /* The stop control on a running turn: mono/muted, quiet until hovered, never
+     amber. Pushed to the end of the status row. Keyboard focus is handled by
+     the shared :focus-visible rule above (it targets `button`). */
+  .ch-stop {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm);
+    padding: 1px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  .ch-stop:hover { color: var(--fg); border-color: var(--fg-muted); background: var(--bg-hover); }
+  .ch-stop:disabled { opacity: 0.5; cursor: default; }
 
   /* ── Agent trace: one collapsed line, expandable ──────────────────────
      The trace no longer competes with the answer for space. Collapsed, it
