@@ -7,6 +7,7 @@ import {
   complete,
   estimateCost,
   type ChatMessage,
+  type CompleteDeps,
   type ProviderConfig,
   type ToolCall,
 } from './providers';
@@ -177,6 +178,13 @@ export interface AgentOutput {
   cost: number;
   retried: boolean;
   kind: 'chart' | 'explanation';
+  // True when the caller stopped this turn mid-run (the signal fired). An
+  // aborted turn is NOT an error and NOT verified: `verification` is null, no
+  // VERIFIED stamp is earned, and `confidence` is 'low'. Any rows/citations
+  // fetched before the stop are still carried here (real data, real
+  // provenance) and remain in the session for the next turn. False on every
+  // normally-completed turn.
+  aborted: boolean;
 }
 
 export type VerifyStatus = 'verified' | 'unverified' | 'unavailable';
@@ -291,7 +299,24 @@ function summarizeRows(rows: DataRow[]): string {
 }
 
 export interface ChittiSession {
-  ask(question: string, cb: AgentCallbacks): Promise<AgentOutput>;
+  // `signal` is the per-turn "stop" control. When it fires, ask() unwinds at the
+  // next boundary (or the in-flight fetch aborts) and RESOLVES with an honest
+  // AgentOutput carrying `aborted: true` — never a rejection, never a provider
+  // error. The session stays reusable: any rows/citations fetched before the
+  // stop remain in state, and the next ask() picks up from there.
+  ask(question: string, cb: AgentCallbacks, signal?: AbortSignal): Promise<AgentOutput>;
+}
+
+// Thrown internally by ask()'s boundary checks the instant the caller's stop
+// signal is seen, to unwind the tool loop (and any sub-agent loop) promptly. It
+// never escapes ask(): the top-level handler catches it — and any error raised
+// while the signal is already aborted — and converts it to the aborted output.
+// Deliberately NOT a provider ClassifiedError: a user-cancel is not a failure.
+class AbortedError extends Error {
+  constructor() {
+    super('aborted by user');
+    this.name = 'AbortedError';
+  }
 }
 
 export interface SessionOptions {
@@ -347,8 +372,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
   let turnCount = 0;
 
-  async function ask(question: string, cb: AgentCallbacks): Promise<AgentOutput> {
+  async function ask(question: string, cb: AgentCallbacks, signal?: AbortSignal): Promise<AgentOutput> {
     turnCount++;
+    // Forwarded to every complete() this turn makes (main loop, verify, llm(),
+    // sub-agents) so an in-flight provider fetch aborts the moment the user
+    // stops, instead of waiting out the 60s provider timeout.
+    const completeDeps: CompleteDeps = signal ? { signal } : {};
+    // Boundary guard: called between tool calls / loop iterations so a stop
+    // takes effect promptly even when nothing is mid-fetch. Throwing unwinds to
+    // ask()'s top-level handler, which builds the honest aborted output.
+    const throwIfAborted = () => {
+      if (signal?.aborted) throw new AbortedError();
+    };
     const trace: TraceEvent[] = [];
     const vfs = new VFS((files) => {
       Object.assign(vfsFiles, files);
@@ -429,7 +464,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         const started = Date.now();
         const fullPrompt = data !== undefined ? `${p}\n\nDATA (JSON):\n${serialized}` : p;
         try {
-          const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], []);
+          const res = await complete(cfg, [{ role: 'user', content: fullPrompt }], [], completeDeps);
           // Price against the model that actually served the nested call, not
           // cfg.model — OpenRouter's free-fallback chain can serve a different
           // one (matches the main-loop attribution).
@@ -476,7 +511,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let returned = false;
       try {
         while (steps < MAX_SUBAGENT_CALLS) {
-          const res = await complete(cfg, subMessages, subSchemas);
+          throwIfAborted();
+          const res = await complete(cfg, subMessages, subSchemas, completeDeps);
           totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
           if (!res.toolCalls.length) {
             // No tool call — nudge once toward acting, counting it against the
@@ -509,6 +545,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           if (returned) break;
         }
       } catch (err: any) {
+        // A user-stop is not a sub-agent failure — let it unwind to ask()'s
+        // top-level handler so the whole turn ends as "stopped", not as a
+        // degraded "continuing without it" summary.
+        if (err instanceof AbortedError || signal?.aborted) throw err;
         // A hard failure (e.g. a model call rejected). Any rows fetched before
         // it still merged with citations; report and let the main loop continue.
         return {
@@ -594,7 +634,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
-            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye));
+            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye), signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -608,7 +648,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
           } else {
             // No countries → every real country, batched internally.
-            const r = await fetchWorldbankAll(id, Number(ys), Number(ye));
+            const r = await fetchWorldbankAll(id, Number(ys), Number(ye), signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -619,7 +659,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           break;
         }
         case 'owid': {
-          const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye);
+          const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye, signal);
           rows = r.rows;
           requestUrl = r.requestUrl;
           nid = 'owid:' + id.replace(/^owid:/, '');
@@ -629,7 +669,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           break;
         }
         case 'imf': {
-          const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye);
+          const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye, signal);
           rows = r.rows;
           requestUrl = r.requestUrl;
           nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
@@ -641,7 +681,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         case 'who': {
           // GHO IndicatorCodes are case-sensitive, so the code is kept verbatim
           // (never upper-cased) — the id from find_series is used as-is.
-          const r = await fetchWho(id, hasCountries ? codes : undefined, ys, ye);
+          const r = await fetchWho(id, hasCountries ? codes : undefined, ys, ye, signal);
           rows = r.rows;
           requestUrl = r.requestUrl;
           nid = 'who:' + id.replace(/^who:/i, '');
@@ -998,6 +1038,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         updateTrace();
         return result;
       } catch (err: any) {
+        // A user-stop that aborted an in-flight fetch is not a tool error — mark
+        // the receipt neutrally and unwind, rather than recording a torn ERROR
+        // receipt and looping on.
+        if (err instanceof AbortedError || signal?.aborted) {
+          ev.status = 'error';
+          ev.detail = 'stopped';
+          updateTrace();
+          throw new AbortedError();
+        }
         ev.status = 'error';
         ev.detail = err?.message ?? String(err);
         updateTrace();
@@ -1051,10 +1100,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let calls = 0;
       let noopTurns = 0;
       while (calls < MAX_TOOL_CALLS) {
+        throwIfAborted();
         const status = pipelineStatus(state, calls);
         cb.onStatus(status, 'loading');
 
-        const res = await complete(cfg, messages, toolSchemas);
+        const res = await complete(cfg, messages, toolSchemas, completeDeps);
         totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
@@ -1107,6 +1157,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         let finished = false;
         const turnTokens = res.usage.input + res.usage.output;
         for (const [idx, tc] of res.toolCalls.entries()) {
+          throwIfAborted();
           calls++;
           const out = await dispatch(tc, { tokens: idx === 0 ? turnTokens : undefined });
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.name, content: out });
@@ -1126,7 +1177,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             { role: 'system', content: 'Summarize the analysis so far in ONE sentence with a concrete finding. No caveats.' },
             { role: 'user', content: question + '\n\nData summary:\n' + summarizeRows(state.rows) },
           ],
-          []
+          [],
+          completeDeps
         );
         totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
         state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
@@ -1138,7 +1190,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // Hand the verifier the structured ledger entries (truthful URLs +
       // vintages) rather than reconstructed citation strings — light touch, the
       // verdict logic is unchanged (backlog #11 point 5).
-      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c));
+      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c), completeDeps);
       // A genuine pass is the only 'ok' receipt; unverified AND unavailable both
       // read as error receipts (existing torn-receipt styling). The stamp is
       // driven off `pass` alone, so only a real pass can be stamped.
@@ -1153,8 +1205,37 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       return result;
     }
 
-    cb.onStatus('Planning…', 'loading');
-    await agentPass();
+    // Build the citation ledger + indicator list the same way for either exit
+    // (normal or stopped), so a stopped turn still carries every row and
+    // citation it managed to fetch — real data with real provenance.
+    const buildOutput = (over: {
+      confidence: 'ok' | 'low';
+      verification: VerificationVerdict | null;
+      retried: boolean;
+      aborted: boolean;
+    }): AgentOutput => {
+      const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
+      const citations = [...state.citations.values()];
+      return {
+        finding: state.finding,
+        // Only the chart rendered THIS turn. Returning the persistent session
+        // spec made every chart-less follow-up re-display the previous chart.
+        chartSpec: turnChartSpec,
+        rows: state.rows,
+        // Provenance rides along at the top of the export as `#` comment lines,
+        // so a downloaded CSV carries the citation ledger with it (backlog #11).
+        csv: citationsToCsvComments(citations) + rowsToCSV(state.rows),
+        indicators,
+        citations,
+        confidence: over.confidence,
+        verifierReport: over.verification?.report ?? '',
+        verification: over.verification,
+        cost: totalCost,
+        retried: over.retried,
+        kind: turnKind,
+        aborted: over.aborted,
+      };
+    };
 
     let retried = false;
     let confidence: 'ok' | 'low' = 'ok';
@@ -1162,27 +1243,51 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     // does not run for prose answers).
     let verification: VerificationVerdict | null = null;
 
-    if (turnKind === 'chart') {
-      cb.onStatus('Verifying…', 'loading');
-      verification = await runVerify();
-      vfs.write('verifier_report.md', verification.report);
+    try {
+      cb.onStatus('Planning…', 'loading');
+      await agentPass();
 
-      // Retry ONLY on a genuine 'unverified' verdict — the verifier ran and said
-      // the answer isn't good enough. An 'unavailable' verdict (the verify call
-      // itself failed) is NOT retried: re-running the pipeline can't fix a
-      // verifier network/provider error, and doing so would be a wasted round.
-      if (verification.status === 'unverified') {
-        retried = true;
-        cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
-        await agentPass(verification.report);
-        const second = await runVerify(verification.report);
-        vfs.write('verifier_report.md', verification.report + '\n\n---\nRetry verdict:\n' + second.report);
-        verification = second; // the retry's verdict is the turn's final one
+      // A stop between the pipeline and verification must not earn a verify call
+      // (or a stamp): check before running the verifier.
+      throwIfAborted();
+
+      if (turnKind === 'chart') {
+        cb.onStatus('Verifying…', 'loading');
+        verification = await runVerify();
+        vfs.write('verifier_report.md', verification.report);
+
+        // Retry ONLY on a genuine 'unverified' verdict — the verifier ran and
+        // said the answer isn't good enough. An 'unavailable' verdict (the
+        // verify call itself failed) is NOT retried: re-running the pipeline
+        // can't fix a verifier network/provider error, a wasted round.
+        if (verification.status === 'unverified') {
+          throwIfAborted();
+          retried = true;
+          cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
+          await agentPass(verification.report);
+          throwIfAborted();
+          const second = await runVerify(verification.report);
+          vfs.write('verifier_report.md', verification.report + '\n\n---\nRetry verdict:\n' + second.report);
+          verification = second; // the retry's verdict is the turn's final one
+        }
+        // Low confidence when the final verdict is not a clean pass, or the pass
+        // itself came back low-confidence. Verified-but-medium/high stays 'ok'.
+        confidence =
+          verification.status === 'verified' && verification.confidence !== 'low' ? 'ok' : 'low';
       }
-      // Low confidence when the final verdict is not a clean pass, or the pass
-      // itself came back low-confidence. Verified-but-medium/high stays 'ok'.
-      confidence =
-        verification.status === 'verified' && verification.confidence !== 'low' ? 'ok' : 'low';
+    } catch (err: any) {
+      // The user stopped this turn (a boundary check threw, or an in-flight
+      // fetch aborted while the signal was set). This is NOT a failure and NOT
+      // a rejection to the caller: resolve with an honest aborted output. Any
+      // rows/citations fetched so far remain in `state` (and ride out on the
+      // output). Roll this turn's messages back to the pre-turn boundary so the
+      // shared history stays well-formed (no dangling assistant tool_calls
+      // without their tool results) and the session is immediately reusable.
+      if (err instanceof AbortedError || signal?.aborted) {
+        messages.length = turnStartIndex;
+        return buildOutput({ confidence: 'low', verification: null, retried: false, aborted: true });
+      }
+      throw err;
     }
 
     cb.onStatus('Done', 'ok');
@@ -1199,27 +1304,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       }
     }
 
-    const indicators = [...state.indicators.keys()].map((id) => ({ id, name: indicatorName(id) }));
-    const citations = [...state.citations.values()];
-
-    return {
-      finding: state.finding,
-      // Only the chart rendered THIS turn. Returning the persistent session
-      // spec made every chart-less follow-up re-display the previous chart.
-      chartSpec: turnChartSpec,
-      rows: state.rows,
-      // Provenance rides along at the top of the export as `#` comment lines,
-      // so a downloaded CSV carries the citation ledger with it (backlog #11).
-      csv: citationsToCsvComments(citations) + rowsToCSV(state.rows),
-      indicators,
-      citations,
-      confidence,
-      verifierReport: verification?.report ?? '',
-      verification,
-      cost: totalCost,
-      retried,
-      kind: turnKind,
-    };
+    return buildOutput({ confidence, verification, retried, aborted: false });
   }
 
   return { ask };
@@ -1342,7 +1427,8 @@ async function verify(
   spec: ChartSpec | null,
   finding: string,
   citations: Citation[],
-  addCost: (c: number) => void
+  addCost: (c: number) => void,
+  deps: CompleteDeps = {}
 ): Promise<VerificationVerdict> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
   // The ledger's own entries — truthful source, indicator, URL and vintage,
@@ -1374,7 +1460,7 @@ async function verify(
     },
   ];
   try {
-    const res = await complete(cfg, messages, []);
+    const res = await complete(cfg, messages, [], deps);
     addCost(estimateCost(res.servedModel ?? cfg.model, res.usage));
     const text = res.text.trim();
     const tokens = res.usage.input + res.usage.output;

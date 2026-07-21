@@ -308,7 +308,8 @@ export async function fetchWorldbank(
   indicatorId: string,
   countryIds: string[],
   yearStart: number,
-  yearEnd: number
+  yearEnd: number,
+  signal?: AbortSignal
 ): Promise<FetchWorldbankResult> {
   const cleanIds = countryIds.map((c) => c.trim().toUpperCase()).filter(Boolean);
   const truncatedFrom = cleanIds.length > 60 ? cleanIds.length : undefined;
@@ -319,7 +320,7 @@ export async function fetchWorldbank(
   const url =
     `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
     `?format=json&date=${yearStart}:${yearEnd}&per_page=2000`;
-  const resp = await fetch(url);
+  const resp = await fetch(url, signal ? { signal } : undefined);
   if (!resp.ok) throw new Error('World Bank API HTTP ' + resp.status);
   const data = await resp.json();
   if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1])) {
@@ -365,7 +366,8 @@ export interface FetchWorldbankAllResult {
 export async function fetchWorldbankAll(
   indicatorId: string,
   yearStart: number,
-  yearEnd: number
+  yearEnd: number,
+  signal?: AbortSignal
 ): Promise<FetchWorldbankAllResult> {
   const countries = listCountries('all');
   const ids = countries.map((c) => c.id);
@@ -380,7 +382,7 @@ export async function fetchWorldbankAll(
   let requestUrl = '';
   let sourceUpdated: string | undefined;
   for (const batch of batches) {
-    const r = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd);
+    const r = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd, signal);
     allRows.push(...r.rows);
     // The batches share one indicator/vintage; keep the first batch's URL and
     // lastupdated as the representative citation for the whole every-country set.
@@ -563,13 +565,14 @@ export async function fetchOwid(
   slug: string,
   countryIds?: string[],
   yearStart?: number,
-  yearEnd?: number
+  yearEnd?: number,
+  signal?: AbortSignal
 ): Promise<{ rows: DataRow[]; metric: string; requestUrl: string }> {
   const clean = slug.replace(/^owid:/, '');
   const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
   let resp: Response;
   try {
-    resp = await fetch(url);
+    resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
     throw new Error(
       `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, fetch a World Bank series (a plain-code id) via fetch_series for this question instead.`
@@ -616,7 +619,8 @@ export async function fetchImf(
   code: string,
   countryIds?: string[],
   yearStart?: number,
-  yearEnd?: number
+  yearEnd?: number,
+  signal?: AbortSignal
 ): Promise<{ rows: DataRow[]; requestUrl: string }> {
   const clean = code.replace(/^imf:/, '').toUpperCase();
   const path = countryIds?.length
@@ -625,7 +629,7 @@ export async function fetchImf(
   const url = `https://www.imf.org/external/datamapper/api/v1/${path}`;
   let resp: Response;
   try {
-    resp = await fetch(url);
+    resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
     throw new Error(
       `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series (no forecasts, but similar historical macro data).`
@@ -672,7 +676,8 @@ export async function fetchWho(
   code: string,
   countryIds?: string[],
   yearStart?: number,
-  yearEnd?: number
+  yearEnd?: number,
+  signal?: AbortSignal
 ): Promise<{ rows: DataRow[]; requestUrl: string }> {
   const clean = code.replace(/^who:/i, '');
   // Build the OData $filter as an AND of clauses. Country-level always; then the
@@ -690,7 +695,7 @@ export async function fetchWho(
   const url = `https://ghoapi.azureedge.net/api/${encodeURIComponent(clean)}?$filter=${encodeURIComponent(filter)}`;
   let resp: Response;
   try {
-    resp = await fetch(url);
+    resp = await fetch(url, signal ? { signal } : undefined);
   } catch (err: any) {
     throw new Error(
       `WHO GHO fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series for this question instead.`
