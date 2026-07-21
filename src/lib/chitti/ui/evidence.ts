@@ -9,7 +9,7 @@ import type { DataRow, Citation } from '../tools';
 import type { AgentOutput, TraceEvent } from '../agent';
 import { matchRowToPoint } from '../chart-link';
 import { verificationCueText, verificationStampLabel } from '../a11y';
-import { esc, mdToHtml, fmtRange, fmtFetchedAt, formatTokens } from './dom';
+import { esc, inlineMd, mdToHtml, fmtRange, fmtFetchedAt, formatTokens } from './dom';
 import { highlightPointForRow, downplayPointForRow } from './charts';
 
 // ── Data table + CSV ───────────────────────────────────────────────────
