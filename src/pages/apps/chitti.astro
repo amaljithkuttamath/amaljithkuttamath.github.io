@@ -435,7 +435,7 @@ const PRESETS = [
 </Base>
 
 <script>
-  import { createSession, type ChittiSession } from '../../lib/chitti/agent';
+  import { createSession, refreshDashboard, type ChittiSession, type TileRefreshResult } from '../../lib/chitti/agent';
   import {
     PROVIDERS,
     providerMeta,
@@ -464,6 +464,7 @@ const PRESETS = [
     renameTile,
     renameDashboard,
     moveTile,
+    replaceTile,
     makeTile,
     listDashboards,
     loadDashboard,
@@ -2689,7 +2690,11 @@ const PRESETS = [
     pinReturnFocus = null;
   }
 
-  // Build the "pin into an existing dashboard" list.
+  // Build the "pin into an existing dashboard" list. Each existing dashboard
+  // offers "add as new tile" (the primary button); a dashboard that already has
+  // tiles ALSO offers "replace a tile…", which expands its tiles so the pin can
+  // take an existing tile's slot (increment 2 — reuses replaceTile, position is
+  // inherited).
   function renderPinList() {
     const boards = dashStore ? listDashboards(dashStore) : [];
     if (!boards.length) {
@@ -2698,15 +2703,48 @@ const PRESETS = [
     }
     pinListEl.innerHTML = '';
     for (const d of boards) {
+      const row = document.createElement('div');
+      row.className = 'ch-pin-existing-row';
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ch-pin-existing';
       btn.innerHTML =
         `<span class="ch-pin-existing-name"></span>` +
-        `<span class="ch-pin-existing-meta">${d.tiles.length} tile${d.tiles.length === 1 ? '' : 's'}</span>`;
+        `<span class="ch-pin-existing-meta">${d.tiles.length} tile${d.tiles.length === 1 ? '' : 's'} · add new</span>`;
       (btn.querySelector('.ch-pin-existing-name') as HTMLElement).textContent = d.title;
       btn.addEventListener('click', () => doPin(d));
-      pinListEl.appendChild(btn);
+      row.appendChild(btn);
+
+      if (d.tiles.length) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'ch-pin-replace-toggle';
+        toggle.textContent = 'replace a tile…';
+        toggle.setAttribute('aria-expanded', 'false');
+        const sub = document.createElement('div');
+        sub.className = 'ch-pin-replace-list';
+        sub.hidden = true;
+        sub.setAttribute('role', 'group');
+        sub.setAttribute('aria-label', `Replace a tile in ${d.title}`);
+        for (const t of d.tiles) {
+          const tbtn = document.createElement('button');
+          tbtn.type = 'button';
+          tbtn.className = 'ch-pin-replace-tile';
+          tbtn.textContent = t.title;
+          tbtn.setAttribute('aria-label', `Replace tile "${t.title}"`);
+          tbtn.addEventListener('click', () => doPinReplace(d, t.id));
+          sub.appendChild(tbtn);
+        }
+        toggle.addEventListener('click', () => {
+          const open = sub.hidden;
+          sub.hidden = !open;
+          toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+        row.appendChild(toggle);
+        row.appendChild(sub);
+      }
+      pinListEl.appendChild(row);
     }
   }
 
@@ -2752,6 +2790,50 @@ const PRESETS = [
     announceShare(tb, `pinned to "${title}"`);
   }
 
+  // Replace an existing tile with the captured chart (increment 2). Reloads the
+  // target fresh from storage (so a concurrent edit is not clobbered), builds a
+  // tile from the pin context, and swaps it into the chosen slot via the pure
+  // replaceTile op — the new tile inherits the old one's position. Cap/quota
+  // errors surface inline without closing the dialog.
+  function doPinReplace(target: Dashboard, tileId: string) {
+    if (!pinContext) return;
+    if (!dashStore) {
+      setPinStatus('Browser storage is unavailable — cannot pin.', true);
+      return;
+    }
+    const dash0 = loadDashboard(dashStore, target.id) || target;
+    const tile = makeTile({
+      title: pinContext.spec.title || 'Chart',
+      spec: pinContext.spec,
+      rows: pinContext.rows,
+      citations: pinContext.citations,
+    });
+    let dash: Dashboard;
+    try {
+      dash = replaceTile(dash0, tileId, tile);
+    } catch (e: any) {
+      setPinStatus(e instanceof DashboardCapError ? e.message : 'Could not replace: ' + (e?.message ?? e), true);
+      return;
+    }
+    if (dash === dash0) {
+      // The tile vanished between opening the picker and clicking (concurrent
+      // edit). Refresh the list rather than silently claiming a replacement.
+      setPinStatus('That tile no longer exists — pick another.', true);
+      renderPinList();
+      return;
+    }
+    const saved = saveDashboard(dashStore, dash);
+    if (!saved.ok) {
+      setPinStatus(saved.error, true);
+      return;
+    }
+    updateDashNavCount();
+    const tb = pinContext.tb;
+    const title = dash.title;
+    closePinPicker();
+    announceShare(tb, `replaced a tile in "${title}"`);
+  }
+
   pinNewForm.addEventListener('submit', (e) => {
     e.preventDefault();
     doPin('new', pinNameInput.value);
@@ -2779,6 +2861,13 @@ const PRESETS = [
   // ── Dashboards view ─────────────────────────────────────────────────────
   let currentDashId: string | null = null;
   let dashReturnFocus: HTMLElement | null = null;
+  // The AbortController for an in-flight "refresh data" run (null when idle), so
+  // a refresh is stoppable and cannot start twice. Increment 2.
+  let refreshController: AbortController | null = null;
+  // The last refresh's receipt lines, kept so a re-render of the SAME dashboard
+  // (e.g. after the run applies fresh data) re-shows the log rather than losing
+  // it. Cleared when the dashboard changes.
+  let lastRefreshLog: { dashId: string; lines: { ok: boolean; text: string }[]; done: boolean; aborted: boolean } | null = null;
 
   function disposeDashCharts() {
     for (const t of liveDashCharts) t.inst?.dispose();
@@ -2851,6 +2940,9 @@ const PRESETS = [
     if (!dashStore) return;
     const dash = loadDashboard(dashStore, id);
     if (!dash) { renderDashList(); return; }
+    // A refresh log belongs to the dashboard it ran on; drop it when opening a
+    // different one so an old log never bleeds across dashboards.
+    if (lastRefreshLog && lastRefreshLog.dashId !== id) lastRefreshLog = null;
     currentDashId = id;
     renderDashDetail(dash);
     requestAnimationFrame(() => dashViewBack.focus());
@@ -2864,6 +2956,72 @@ const PRESETS = [
     updateDashNavCount();
     if (!res.ok) { dashViewTitle.textContent = dash.title + ' — ' + res.error; return; }
     renderDashDetail(dash);
+  }
+
+  // One receipt line in the refresh log (mono, receipt-style). ✓ reuses the
+  // success green already used for status dots; ✗ uses the sparing danger tint.
+  function refreshLogLine(line: { ok: boolean; text: string }): HTMLElement {
+    const li = document.createElement('li');
+    li.className = 'ch-refresh-line ' + (line.ok ? 'ch-refresh-ok' : 'ch-refresh-fail');
+    li.textContent = line.text;
+    return li;
+  }
+
+  function buildRefreshLog(log: { lines: { ok: boolean; text: string }[]; done: boolean; aborted: boolean }): HTMLElement {
+    const box = document.createElement('div');
+    box.className = 'ch-refresh-log';
+    box.setAttribute('data-testid', 'refresh-log');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', 'Refresh log');
+    const head = document.createElement('div');
+    head.className = 'ch-refresh-log-head';
+    head.textContent = log.done ? (log.aborted ? 'Refresh stopped' : 'Refresh complete') : 'Refreshing…';
+    box.appendChild(head);
+    const ul = document.createElement('ul');
+    ul.className = 'ch-refresh-log-lines';
+    for (const l of log.lines) ul.appendChild(refreshLogLine(l));
+    box.appendChild(ul);
+    return box;
+  }
+
+  // Run a whole-dashboard "refresh data" pass through the SHARED refreshDashboard
+  // orchestrator (the same code path the agent's refresh_dashboard action uses).
+  // Re-fetches each tile's series from source; success replaces the tile's rows/
+  // citations/vintage, failure marks it stale (data kept). Streams a receipt line
+  // per tile into a live log, then re-renders with the fresh data. Abortable via
+  // the Stop control (reuses the AbortController pattern the turn stop uses).
+  async function runRefresh(dash: Dashboard) {
+    if (!dashStore || refreshController) return;
+    const controller = new AbortController();
+    refreshController = controller;
+    const log = { dashId: dash.id, lines: [] as { ok: boolean; text: string }[], done: false, aborted: false };
+    lastRefreshLog = log;
+    // Re-render so the button flips to "Stop refresh" and an empty log appears.
+    renderDashDetail(dash);
+    const ul = dashViewBody.querySelector('.ch-refresh-log-lines') as HTMLElement | null;
+    try {
+      await refreshDashboard(dashStore, dash.id, {
+        signal: controller.signal,
+        onTile: (r: TileRefreshResult) => {
+          const line = { ok: r.ok, text: `${r.ok ? '✓' : '✗'} ${r.title} — ${r.detail}` };
+          log.lines.push(line);
+          ul?.appendChild(refreshLogLine(line));
+        },
+      });
+      log.aborted = controller.signal.aborted;
+    } catch (e: any) {
+      // refreshDashboard resolves on abort; a genuine throw becomes a log line,
+      // never a crash into the UI.
+      log.lines.push({ ok: false, text: '✗ refresh error — ' + (e?.message ?? e) });
+    } finally {
+      log.done = true;
+      refreshController = null;
+      updateDashNavCount();
+      const fresh = loadDashboard(dashStore, dash.id);
+      // Re-render with fresh tiles (updated data + stale markers) and the
+      // persisted log — but only if the view still shows this dashboard.
+      if (fresh && currentDashId === dash.id && !dashView.hidden) renderDashDetail(fresh);
+    }
   }
 
   function renderDashDetail(dash: Dashboard) {
@@ -2888,7 +3046,44 @@ const PRESETS = [
     );
     head.appendChild(count);
     head.appendChild(renameBtn);
+
+    // Refresh-data control (increment 2). Only when there are tiles to refresh.
+    // Two-step confirm — the data APIs are free, so the confirm copy is honest
+    // that it costs nothing but source calls (no LLM, no key spend). While a
+    // refresh is running the button becomes a Stop control.
+    if (dash.tiles.length) {
+      const seriesCount = dash.tiles.reduce((n, t) => n + t.citations.length, 0);
+      const refreshBtn = document.createElement('button');
+      refreshBtn.type = 'button';
+      refreshBtn.className = 'ch-dash-mini ch-dash-refresh';
+      refreshBtn.setAttribute('data-testid', 'dash-refresh');
+      if (refreshController) {
+        refreshBtn.textContent = 'Stop refresh';
+        refreshBtn.classList.add('ch-confirm-armed');
+        refreshBtn.addEventListener('click', () => refreshController?.abort());
+      } else {
+        refreshBtn.textContent = 'Refresh data';
+        refreshBtn.setAttribute(
+          'aria-label',
+          `Refresh data — re-fetch ${seriesCount} series from source APIs (free, no key cost)`
+        );
+        refreshBtn.addEventListener('click', function (this: HTMLButtonElement) {
+          armConfirm(
+            this,
+            `Re-fetch ${seriesCount} series? (free)`,
+            () => void runRefresh(dash)
+          );
+        });
+      }
+      head.appendChild(refreshBtn);
+    }
     dashViewBody.appendChild(head);
+
+    // Re-show the last refresh log for THIS dashboard, if any (survives the
+    // post-run re-render so the receipts stay visible next to the fresh tiles).
+    if (lastRefreshLog && lastRefreshLog.dashId === dash.id && lastRefreshLog.lines.length) {
+      dashViewBody.appendChild(buildRefreshLog(lastRefreshLog));
+    }
 
     if (!dash.tiles.length) {
       const empty = document.createElement('p');
@@ -2957,6 +3152,26 @@ const PRESETS = [
     if (tile.sourceNote) bits.push(tile.sourceNote);
     source.textContent = bits.join(' · ') || 'pinned chart';
     card.appendChild(source);
+
+    // Refresh state (increment 2). A FAILED refresh marks the tile stale: it
+    // keeps its last-good data (never blank, never fabricated) and says so
+    // honestly, muted — "showing data from <the date of the data on screen>".
+    // A SUCCESSFUL refresh shows a quiet "refreshed <date>" line instead.
+    if (tile.stale) {
+      const stale = document.createElement('div');
+      stale.className = 'ch-dash-tile-stale';
+      const shownFrom = fmtDate(tile.refreshedAt || tile.pinnedAt);
+      stale.textContent =
+        `refresh failed ${fmtDate(tile.stale.failedAt)}` +
+        (tile.stale.reason ? ` (${tile.stale.reason})` : '') +
+        (shownFrom ? ` — showing data from ${shownFrom}` : '');
+      card.appendChild(stale);
+    } else if (tile.refreshedAt) {
+      const r = document.createElement('div');
+      r.className = 'ch-dash-tile-refreshed';
+      r.textContent = `refreshed ${fmtDate(tile.refreshedAt)}`;
+      card.appendChild(r);
+    }
 
     return card;
   }
@@ -3302,6 +3517,19 @@ const PRESETS = [
       tb.stopBtn.onclick = null;
       askBtn.disabled = false;
       askBtn.classList.remove('ch-send-working');
+      // Reflect any dashboard the turn touched (save_to_dashboard / edit_dashboard
+      // both persist to the SAME localStorage the view reads). The nav count is
+      // always cheap to recompute; if the dashboards view is open on a specific
+      // dashboard, reload it fresh from storage and re-render so a conversational
+      // edit (rename/remove/move/refresh) shows up immediately. This is the
+      // cleanest hook: the view and the agent share storage, so a post-turn
+      // reload is the single source-of-truth sync point — no event bus needed.
+      updateDashNavCount();
+      if (!dashView.hidden && currentDashId && dashStore) {
+        const fresh = loadDashboard(dashStore, currentDashId);
+        if (fresh) renderDashDetail(fresh);
+        else { currentDashId = null; renderDashList(); }
+      }
     }
   });
 
@@ -3407,6 +3635,43 @@ const PRESETS = [
         if (!dashStore) return;
         for (const d of listDashboards(dashStore)) deleteDashboard(dashStore, d.id);
         updateDashNavCount();
+      },
+      // Seed a two-tile dashboard (built through the REAL makeTile/addTile ops,
+      // with genuine World Bank citations) so the offline harness can exercise
+      // the refresh flow: overriding window.fetch to succeed for one indicator
+      // and fail for the other yields a live one-✓-one-✗ refresh log with a
+      // stale-marked tile — no LLM, no live egress. Returns the dashboard id.
+      seedRefreshFixture(): string | null {
+        if (!dashStore) return null;
+        const mk = (title: string, indicatorId: string) =>
+          makeTile({
+            title,
+            spec: {
+              type: 'line', title, y_axis: 'per 1,000',
+              series: [{ name: 'India', data: [[2000, 66.6], [2010, 41.9], [2020, 27.3]] }],
+            },
+            rows: [
+              { country: 'India', iso3: 'IND', year: 2000, value: 66.6, indicator: indicatorId },
+              { country: 'India', iso3: 'IND', year: 2010, value: 41.9, indicator: indicatorId },
+              { country: 'India', iso3: 'IND', year: 2020, value: 27.3, indicator: indicatorId },
+            ],
+            citations: [{
+              id: `wb:${indicatorId}|IND|2000:2020`, source: 'worldbank', sourceLabel: 'World Bank Open Data',
+              indicatorId, indicatorName: title, url: `https://data.worldbank.org/indicator/${indicatorId}`,
+              countries: ['IND'], yearRange: { start: 2000, end: 2020 },
+              fetchedAt: '2026-07-01T00:00:00.000Z', sourceUpdated: '2024-06-01', rowCount: 3, cached: false,
+            }],
+          });
+        let d = createDashboard('Health board');
+        d = addTile(d, mk('GDP per capita', 'SP.DYN.IMRT.IN'));
+        d = addTile(d, mk('life expectancy', 'SP.DYN.LE00.IN'));
+        saveDashboard(dashStore, d);
+        updateDashNavCount();
+        return d.id;
+      },
+      openDashboardById(id: string) {
+        if (dashView.hidden) openDashboards();
+        openDashboard(id);
       },
       // Build the share URL for the staged turn without touching the clipboard,
       // so a headless harness can capture it deterministically.
@@ -5419,6 +5684,30 @@ const PRESETS = [
   :global(.ch-pin-existing:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
   :global(.ch-pin-existing:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
   :global(.ch-pin-existing-meta) { color: var(--fg-muted); flex-shrink: 0; }
+  /* Replace-a-tile affordance (increment 2): the primary "add new" button plus a
+     secondary toggle that expands the dashboard's tiles for a slot-preserving
+     replace. */
+  :global(.ch-pin-existing-row) { display: flex; flex-direction: column; gap: 4px; }
+  :global(.ch-pin-existing-row .ch-pin-existing) { width: 100%; }
+  :global(.ch-pin-replace-toggle) {
+    align-self: flex-start;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    background: transparent; border: none; color: var(--fg-muted);
+    padding: 2px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+  }
+  :global(.ch-pin-replace-toggle:hover) { color: var(--fg); }
+  :global(.ch-pin-replace-toggle:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-pin-replace-list) { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 10px; border-left: 1px dashed var(--fg-faint); margin-left: 4px; }
+  :global(.ch-pin-replace-tile) {
+    text-align: left;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint); border-radius: var(--radius-sm, 4px);
+    padding: 5px 9px; color: var(--fg); cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-pin-replace-tile::before) { content: '↔ replace  '; color: var(--fg-muted); }
+  :global(.ch-pin-replace-tile:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-pin-replace-tile:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
   .ch-pin-new { display: flex; flex-direction: column; gap: 5px; border-top: 1px dashed var(--fg-faint); padding-top: 10px; }
   .ch-pin-new-row { display: flex; gap: 8px; }
   .ch-pin-new-row .ch-input { flex: 1; min-width: 0; }
@@ -5552,6 +5841,37 @@ const PRESETS = [
     font-family: var(--font-mono); font-size: var(--text-tag);
     color: var(--fg-muted); margin-top: 8px; overflow-wrap: anywhere;
   }
+  /* A successful refresh: quiet, muted-green to match the success dots. */
+  :global(.ch-dash-tile-refreshed) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: color-mix(in srgb, var(--success) 70%, var(--fg-muted)); margin-top: 4px;
+  }
+  /* A stale tile keeps its data and says so honestly. Muted, NOT alarming — the
+     data on screen is still real, just not freshly re-pulled. A hairline left
+     rule (sparing danger tint) flags it without shouting. */
+  :global(.ch-dash-tile-stale) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--ch-meta); margin-top: 6px; padding-left: 8px; overflow-wrap: anywhere;
+    border-left: 2px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  /* Refresh log: a compact, receipt-style panel of one line per tile. */
+  :global(.ch-refresh-log) {
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: var(--space-md);
+  }
+  :global(.ch-refresh-log-head) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 6px;
+  }
+  :global(.ch-refresh-log-lines) { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  :global(.ch-refresh-line) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-refresh-ok) { color: color-mix(in srgb, var(--success) 78%, var(--fg)); }
+  :global(.ch-refresh-fail) { color: var(--ch-danger, var(--danger)); }
+  /* The refresh button in its running (Stop) state reuses the armed treatment. */
+  :global(.ch-dash-refresh.ch-confirm-armed) { color: var(--ch-danger, var(--danger)); }
 
   @media (max-width: 700px) {
     .ch-panel-meta { display: none; }
