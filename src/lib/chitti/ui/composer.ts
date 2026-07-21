@@ -228,7 +228,19 @@ export async function handleAskSubmit(e: SubmitEvent) {
       renderTable(tb, [], '');
       renderCitations(tb, []);
       renderRunningTotal(tb, tb.trace, out.cost);
-      setStatus(tb, 'error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
+      // Say what was tried before giving up (the executor's corrective nudge and
+      // the free-model substitution both stream as receipts, so read them back).
+      const nudged = tb.trace.some((ev) => ev.tool === 'nudge');
+      const fellBack = tb.trace.some((ev) => ev.tool === 'fallback');
+      const tried =
+        nudged && fellBack
+          ? ' (nudged the model, then tried a fallback model — still nothing)'
+          : nudged
+            ? ' (nudged the model — still nothing)'
+            : out.retried
+              ? ' (retried once, still nothing)'
+              : '';
+      setStatus(tb, 'error', 'No result' + tried);
       return;
     }
 
