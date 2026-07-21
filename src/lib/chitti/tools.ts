@@ -1312,6 +1312,28 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
+    name: 'save_to_dashboard',
+    description:
+      'Pin the chart you rendered THIS turn to a saved dashboard (a cited, client-side collection ' +
+      'of charts the user can revisit). Use ONLY when the user asks to save, pin, or add the chart ' +
+      'to a dashboard — never on your own initiative. Creates the dashboard if the title does not ' +
+      'exist yet. It carries the chart, its rows, and its citations over intact. Refuses cleanly if ' +
+      'no chart was rendered this turn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dashboard_title: {
+          type: 'string',
+          description: 'Which dashboard to pin into (created if absent). Defaults to a title from the question.',
+        },
+        tile_title: {
+          type: 'string',
+          description: 'Label for this pinned chart. Defaults to the chart title.',
+        },
+      },
+    },
+  },
+  {
     name: 'delegate_source',
     description:
       'Delegate ONE database\'s part of the question to a focused sub-agent, and get back a short ' +
@@ -1393,7 +1415,7 @@ export interface SourceDef {
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
   'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
-  'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file',
+  'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file', 'save_to_dashboard',
 ];
 
 export const SOURCES: SourceDef[] = [

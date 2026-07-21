@@ -41,6 +41,15 @@ import {
   type Citation,
 } from './tools';
 import { resolveCountryList, formatResolutions, resolveCountry } from './countries';
+import {
+  createDashboard,
+  addTile,
+  makeTile,
+  saveDashboard,
+  findDashboardByTitle,
+  DashboardCapError,
+  type StorageLike as DashboardStorage,
+} from './dashboard';
 
 const MAX_TOOL_CALLS = 12;
 
@@ -288,7 +297,8 @@ Rules:
 - Hard budget: ${MAX_TOOL_CALLS} tool calls. Never re-fetch data you already have.
 - Use ids from search results verbatim. Years are numbers.
 - Only the active databases listed above are available — do not mention or attempt any other source.
-${provenanceRule}${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- list_countries, write_file, read_file exist but are almost never needed.`;
+${provenanceRule}${many ? `- delegate_source(source, question) runs a focused sub-agent against ONE database and returns a distilled summary; its fetched rows merge into your data with citations intact. Use it ONLY for a question that genuinely spans multiple databases — delegate each source's slice, then combine. For anything one database answers, use the direct tools: delegation spends extra model calls.\n` : ''}- save_to_dashboard(dashboard_title?, tile_title?) pins the chart you just rendered to a saved dashboard — use it ONLY when the user asks to save or pin the chart, never on your own.
+- list_countries, write_file, read_file exist but are almost never needed.`;
 }
 
 // The system prompt for a depth-1 per-source sub-agent — scoped to ONE
@@ -622,11 +632,21 @@ export interface SessionOptions {
   // sandbox binding is the throw-on-call default — the model never learns the
   // capability exists and cannot burn a tool call discovering it is disabled.
   rlm?: boolean;
+  // Persistence for the save_to_dashboard tool. Injected so tests can pass a
+  // Map-backed fake; in the browser the app passes window.localStorage. When
+  // omitted, the tool falls back to a global localStorage if one exists, else
+  // refuses cleanly (never throws).
+  dashboardStore?: DashboardStorage;
 }
 
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
   const activeSources = resolveSources(opts?.sources);
   const rlmEnabled = opts?.rlm ?? false;
+  // Resolve the dashboard store once: explicit injection wins; otherwise use a
+  // global localStorage when the runtime has one; otherwise null (tool refuses).
+  const dashboardStore: DashboardStorage | null =
+    opts?.dashboardStore ??
+    (typeof localStorage !== 'undefined' ? (localStorage as unknown as DashboardStorage) : null);
   const toolSchemas = schemasForSources(opts?.sources);
   const messages: ChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(activeSources, rlmEnabled) },
@@ -1354,6 +1374,61 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             result = 'rendered';
             break;
           }
+          case 'save_to_dashboard': {
+            // Pin THIS turn's rendered chart to a named dashboard (create if
+            // absent). Only real, non-derived state is pinned: the spec the model
+            // rendered, the fetched rows behind it (state.rows — the same source
+            // of truth the CSV/share paths use, which already excludes llm()-
+            // derived content), and the citation ledger. Refuses cleanly when
+            // there is no chart this turn or no storage is available.
+            if (!turnChartSpec) {
+              ev.detail = 'no chart this turn';
+              result =
+                'ERROR: no chart has been rendered this turn, so there is nothing to pin. ' +
+                'Render a chart with render_chart first, then save_to_dashboard.';
+              break;
+            }
+            if (!dashboardStore) {
+              ev.detail = 'no storage';
+              result = 'ERROR: dashboard storage is unavailable in this environment — cannot pin.';
+              break;
+            }
+            const dashTitle =
+              String(a.dashboard_title ?? '').trim() || defaultDashboardTitle(question);
+            const tileTitle =
+              String(a.tile_title ?? '').trim() || turnChartSpec.title || dashTitle;
+            const existing = findDashboardByTitle(dashboardStore, dashTitle);
+            const created = !existing;
+            let dash = existing ?? createDashboard(dashTitle);
+            const tile = makeTile({
+              title: tileTitle,
+              spec: turnChartSpec,
+              rows: state.rows,
+              citations: [...state.citations.values()],
+            });
+            try {
+              dash = addTile(dash, tile);
+            } catch (e: any) {
+              ev.detail = 'over cap';
+              result = 'ERROR: ' + (e instanceof DashboardCapError ? e.message : (e?.message ?? String(e)));
+              break;
+            }
+            const saved = saveDashboard(dashboardStore, dash);
+            if (!saved.ok) {
+              ev.detail = 'save failed';
+              result = 'ERROR: ' + saved.error;
+              break;
+            }
+            const nTiles = dash.tiles.length;
+            const citeNote = tile.citations.length
+              ? ` with ${tile.citations.length} citation${tile.citations.length === 1 ? '' : 's'}`
+              : '';
+            ev.detail = `→ ${dash.title}${created ? ' (new)' : ''} · ${nTiles} tile${nTiles === 1 ? '' : 's'}`;
+            result =
+              `Pinned "${tileTitle}"${citeNote} to ${created ? 'new dashboard' : 'dashboard'} ` +
+              `"${dash.title}" (now ${nTiles} tile${nTiles === 1 ? '' : 's'}).`;
+            break;
+          }
           case 'finish': {
             state.finding = String(a.one_line_finding ?? '').trim();
             turnKind = 'chart';
@@ -1814,6 +1889,15 @@ export async function runAgent(
   return createSession(cfg, opts).ask(question, cb);
 }
 
+// A default dashboard title derived from the question when the model (or user)
+// names none: the question itself, trimmed to a sane length. Pure + exported for
+// its unit table.
+export function defaultDashboardTitle(question: string): string {
+  const q = String(question ?? '').trim().replace(/\s+/g, ' ');
+  if (!q) return 'My dashboard';
+  return q.length > 60 ? q.slice(0, 57).trimEnd() + '…' : q;
+}
+
 function indicatorName(id: string): string {
   // Enrich the raw indicator id with its friendly curated name when we have
   // one — checking the World Bank list first, then the OWID/IMF catalogs.
@@ -2035,6 +2119,8 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
       return String(a.path ?? '');
     case 'render_chart':
       return `${a.type} · ${a.title}`;
+    case 'save_to_dashboard':
+      return String(a.dashboard_title ?? a.tile_title ?? 'current chart');
     case 'finish':
       return String(a.one_line_finding ?? '').slice(0, 80);
     case 'delegate_source':

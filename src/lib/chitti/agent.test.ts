@@ -687,8 +687,10 @@ import {
   parsePlanBrief,
   matchStepToEvent,
   buildRejectionSteer,
+  defaultDashboardTitle,
   type PlanStep,
 } from './agent';
+import { listDashboards, type StorageLike } from './dashboard';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -3790,5 +3792,125 @@ describe('plan mode, driven through createSession', () => {
     expect(mockComplete).toHaveBeenCalledTimes(1);
     // The plan card is absent — a brief was never parsed/pushed.
     expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+  });
+});
+
+// ── save_to_dashboard dispatch (backlog: dashboards, increment 1) ──────────
+// Driven end-to-end through createSession with complete() mocked and a Map-
+// backed dashboard store injected — the same discipline as the other dispatch
+// tests. Egress is never touched: the World Bank fetch is stubbed so the tile
+// pins real rows + a real citation, all offline.
+describe('save_to_dashboard dispatch', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => { mockComplete.mockReset(); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A Map-backed Web Storage fake (getItem/setItem/removeItem/length/key).
+  class FakeStorage implements StorageLike {
+    private m = new Map<string, string>();
+    get length() { return this.m.size; }
+    key(i: number) { return [...this.m.keys()][i] ?? null; }
+    getItem(k: string) { return this.m.has(k) ? (this.m.get(k) as string) : null; }
+    setItem(k: string, v: string) { this.m.set(k, v); }
+    removeItem(k: string) { this.m.delete(k); }
+  }
+
+  // World Bank JSON: [header(lastupdated), rows].
+  const wbBody = () => [
+    { lastupdated: '2024-12-16' },
+    [
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2000', value: 66.6 },
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 27.3 },
+    ],
+  ];
+
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+
+  it('chart exists → creates the dashboard with the tile + its citations attached', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => wbBody() })));
+    const store = new FakeStorage();
+
+    // One assistant turn: fetch (populates rows + citation) → render → pin → finish.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        { id: 'f', name: 'fetch_series', arguments: { id: 'SP.DYN.IMRT.IN', countries: ['IND'], year_start: 2000, year_end: 2020 } },
+        { id: 'r', name: 'render_chart', arguments: { type: 'line', title: 'Infant mortality, India', y_axis: 'per 1,000', series: [{ name: 'India', data: [[2000, 66.6], [2020, 27.3]] }] } },
+        { id: 's', name: 'save_to_dashboard', arguments: { dashboard_title: 'Health board', tile_title: 'India infant mortality' } },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: "India's infant mortality more than halved 2000→2020." } },
+      ],
+      usage: { input: 20, output: 10 },
+    });
+    // Verifier PASS (no retry).
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: answers the question.', toolCalls: [], usage: { input: 5, output: 2 } });
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { sources: ['worldbank'], dashboardStore: store }
+    );
+    const { cb, trace } = capture();
+    await session.ask('How has infant mortality changed in India?', cb);
+
+    const boards = listDashboards(store);
+    expect(boards).toHaveLength(1);
+    const board = boards[0];
+    expect(board.title).toBe('Health board');
+    expect(board.tiles).toHaveLength(1);
+    const tile = board.tiles[0];
+    expect(tile.title).toBe('India infant mortality');
+    expect(tile.spec.title).toBe('Infant mortality, India');
+    expect(tile.rows.length).toBeGreaterThan(0);
+    // The citation ledger from the live fetch rode along onto the tile.
+    expect(tile.citations).toHaveLength(1);
+    expect(tile.citations[0].source).toBe('worldbank');
+    expect(tile.citations[0].sourceUpdated).toBe('2024-12-16');
+    // The tile's source note surfaces the vintage.
+    expect(tile.sourceNote).toContain('2024-12-16');
+
+    // The pin step's receipt confirms the destination.
+    const pin = trace().find((e: any) => e.tool === 'save_to_dashboard');
+    expect(pin.status).toBe('ok');
+    expect(pin.detail).toContain('Health board');
+  });
+
+  it('no chart this turn → clean refusal, nothing persisted', async () => {
+    const store = new FakeStorage();
+
+    // The model pins without ever rendering a chart.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        { id: 's', name: 'save_to_dashboard', arguments: { dashboard_title: 'Health board' } },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: 'Nothing charted.' } },
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    mockComplete.mockResolvedValueOnce({ text: 'PASS.', toolCalls: [], usage: { input: 5, output: 2 } });
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { sources: ['worldbank'], dashboardStore: store }
+    );
+    const { cb, trace } = capture();
+    await session.ask('Save this', cb);
+
+    // No dashboard was created.
+    expect(listDashboards(store)).toHaveLength(0);
+    // The refusal is clean (an ok receipt with a "no chart" detail, not a crash).
+    const pin = trace().find((e: any) => e.tool === 'save_to_dashboard');
+    expect(pin.status).toBe('ok');
+    expect(pin.detail).toMatch(/no chart/i);
+  });
+
+  it('defaultDashboardTitle derives from the question and truncates long ones', () => {
+    expect(defaultDashboardTitle('  How has GDP grown?  ')).toBe('How has GDP grown?');
+    expect(defaultDashboardTitle('')).toBe('My dashboard');
+    const long = 'a'.repeat(100);
+    expect(defaultDashboardTitle(long).length).toBeLessThanOrEqual(60);
+    expect(defaultDashboardTitle(long).endsWith('…')).toBe(true);
   });
 });
