@@ -475,25 +475,10 @@ export function datasetName(id: string): string | undefined {
   return DATASETS.find((d) => d.id === id)?.name;
 }
 
-// Minimal CSV parser: handles quoted cells (OWID entity names contain
-// commas, e.g. "Korea, Rep."). Good enough for machine-generated CSV.
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = '';
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQ) {
-      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-      else if (c === '"') inQ = false;
-      else cur += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ',') { out.push(cur); cur = ''; }
-    else cur += c;
-  }
-  out.push(cur);
-  return out;
-}
+// The CSV read/write helpers now live in ./csv. Imported for internal use by
+// the OWID fetcher below, and re-exported (rowsToCSV) at the module's CSV
+// section so `import { rowsToCSV } from './tools'` keeps working.
+import { parseCsvLine } from './csv';
 
 // fetch_owid: CSV from the OWID grapher. Columns: Entity, Code, Year,
 // <metric...>. First metric column is the value. Aggregates like World use
@@ -780,22 +765,9 @@ export function correlate(
 // type ExecuteJsResult, type LlmFn } from './tools'` keeps working.
 export { executeJs, type ExecuteJsResult, type LlmFn } from './execute-js';
 
-// Build CSV from data rows for the download button.
-export function rowsToCSV(rows: DataRow[]): string {
-  const multi = new Set(rows.map((r) => r.indicator ?? '')).size > 1;
-  const header = multi ? 'indicator,country,iso3,year,value' : 'country,iso3,year,value';
-  const body = rows
-    .map((r) =>
-      (multi ? `${csvCell(r.indicator ?? '')},` : '') +
-      `${csvCell(r.country)},${r.iso3},${r.year},${r.value ?? ''}`
-    )
-    .join('\n');
-  return header + '\n' + body;
-}
-
-function csvCell(s: string): string {
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
+// rowsToCSV (+ its csvCell helper) now lives in ./csv. Re-exported so
+// `import { rowsToCSV } from './tools'` keeps working.
+export { rowsToCSV } from './csv';
 
 // ── Citation ledger ──────────────────────────────────────────────────────
 // A structured, first-class provenance record for one live fetch. Written at
