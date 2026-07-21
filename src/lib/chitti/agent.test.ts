@@ -16,6 +16,8 @@ import {
   parseWhoIndicators,
   parseWorldBankError,
   fetchWho,
+  fetchWorldbank,
+  worldbankDateParam,
   DEFAULT_SOURCE_IDS,
   VFS,
   executeJs,
@@ -413,6 +415,93 @@ describe('fetchWho — GHO OData URL + row parsing', () => {
     expect(rows.every((r) => r.indicator === 'who:WHOSIS_000001')).toBe(true);
     // ISO3 resolves to a display name where known.
     expect(rows.find((r) => r.iso3 === 'IND')?.country).toBe('India');
+  });
+});
+
+describe('worldbankDateParam — open/closed year ranges never leak NaN/undefined', () => {
+  const YEAR = new Date().getFullYear();
+  it('both bounds → date=YS:YE', () => {
+    expect(worldbankDateParam(2000, 2010)).toBe('&date=2000:2010');
+  });
+  it('only a start ("since 1990") → date=YS:<current year>', () => {
+    expect(worldbankDateParam(1990, undefined)).toBe(`&date=1990:${YEAR}`);
+  });
+  it('only an end → date=1960:YE', () => {
+    expect(worldbankDateParam(undefined, 2010)).toBe('&date=1960:2010');
+  });
+  it('neither → the date param is omitted entirely', () => {
+    expect(worldbankDateParam(undefined, undefined)).toBe('');
+  });
+  it('a same-year single range is left as-is', () => {
+    expect(worldbankDateParam(2020, 2020)).toBe('&date=2020:2020');
+  });
+  it('NaN bounds (the live bug: Number(undefined)) are treated as ABSENT, never "NaN"', () => {
+    // The exact pathology that broke the live app: a bare Number(undefined).
+    expect(worldbankDateParam(1990, Number(undefined))).toBe(`&date=1990:${YEAR}`);
+    expect(worldbankDateParam(Number(undefined), Number(undefined))).toBe('');
+    // Nothing the builder emits ever contains these poison strings.
+    for (const out of [
+      worldbankDateParam(1990, Number(undefined)),
+      worldbankDateParam(Number(undefined), 2010),
+      worldbankDateParam(Number(undefined), Number(undefined)),
+    ]) {
+      expect(out).not.toMatch(/NaN|undefined/);
+    }
+  });
+});
+
+describe('fetchWorldbank — built URL for open ranges + "since 1990" live-bug repro', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const YEAR = new Date().getFullYear();
+  // A minimal well-formed World Bank JSON body: [header, rows].
+  const wbOk = (rows: unknown[] = []) => ({
+    ok: true,
+    status: 200,
+    json: async () => [{ lastupdated: '2024-12-16' }, rows],
+  });
+
+  it('year_start only ("since 1990") → date=1990:<current year> and the fetch SUCCEEDS (no rejection)', async () => {
+    // This is the exact live sequence: the model passed year_start (1990) with
+    // no year_end. Before the fix this built `date=1990:NaN`, which the World
+    // Bank rejected with "The provided parameter value is not valid".
+    let seen = '';
+    const wbRows = [
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '1990', value: 100 },
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 200 },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen = String(url);
+      return wbOk(wbRows);
+    }));
+    const r = await fetchWorldbank('NY.GDP.PCAP.CD', ['IND'], 1990, undefined);
+    expect(seen).toContain(`&date=1990:${YEAR}`);
+    expect(seen).not.toMatch(/NaN|undefined/); // the poison strings never reach the URL
+    expect(r.requestUrl).toBe(seen);
+    // The stubbed WB answered normally — the success path, not a rejection.
+    expect(r.rows.length).toBe(2);
+    expect(r.sourceUpdated).toBe('2024-12-16');
+  });
+
+  it('both bounds → date=YS:YE', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA'], 2000, 2010);
+    expect(seen).toContain('&date=2000:2010');
+  });
+
+  it('year_end only → date=1960:YE', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA'], undefined, 2010);
+    expect(seen).toContain('&date=1960:2010');
+  });
+
+  it('no bounds → no date param at all', async () => {
+    let seen = '';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen = String(url); return wbOk(); }));
+    await fetchWorldbank('X', ['USA']);
+    expect(seen).not.toContain('date=');
+    expect(seen).not.toMatch(/NaN|undefined/);
   });
 });
 

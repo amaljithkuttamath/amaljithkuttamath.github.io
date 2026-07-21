@@ -997,7 +997,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
-            const r = await fetchWorldbank(id, codes, Number(ys), Number(ye), signal);
+            const r = await fetchWorldbank(id, codes, ys, ye, signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -1011,7 +1011,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
           } else {
             // No countries → every real country, batched internally.
-            const r = await fetchWorldbankAll(id, Number(ys), Number(ye), signal);
+            const r = await fetchWorldbankAll(id, ys, ye, signal);
             rows = r.rows;
             requestUrl = r.requestUrl;
             sourceUpdated = r.sourceUpdated;
@@ -1227,8 +1227,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               rawIds,
-              Number(a.year_start),
-              Number(a.year_end),
+              // Conditional coercion (matching fetch_series): a missing bound
+              // stays undefined, never Number(undefined)===NaN leaking into the
+              // World Bank URL as "date=YS:NaN".
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
               sourceIds
             );
             break;
@@ -1238,8 +1241,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ev,
               String(a.indicator_id ?? ''),
               undefined, // no countries → every-country path
-              Number(a.year_start),
-              Number(a.year_end),
+              a.year_start !== undefined ? Number(a.year_start) : undefined,
+              a.year_end !== undefined ? Number(a.year_end) : undefined,
               sourceIds
             );
             break;

@@ -356,11 +356,31 @@ export interface FetchWorldbankResult {
   sourceUpdated?: string;
 }
 
+// Build the World Bank `&date=…` query fragment for an OPEN or closed year
+// range, defensively. The bug this replaces: passing `Number(undefined)` (NaN)
+// as a bound emitted `date=1990:NaN`, which the World Bank rejects with "The
+// provided parameter value is not valid". The rule set:
+//   both bounds       → date=YS:YE
+//   only a start      → date=YS:<current year>   (WB wants a CLOSED range, so an
+//                                                  open end is pinned to now)
+//   only an end       → date=1960:YE             (1960 is WB's earliest year)
+//   neither / invalid → omit the date param       (WB returns its full range)
+// A bound that is not a finite number (NaN, undefined) is treated as ABSENT, so
+// the strings "NaN"/"undefined" can never reach the URL.
+export function worldbankDateParam(yearStart?: number, yearEnd?: number): string {
+  const ys = Number.isFinite(yearStart) ? (yearStart as number) : undefined;
+  const ye = Number.isFinite(yearEnd) ? (yearEnd as number) : undefined;
+  if (ys !== undefined && ye !== undefined) return `&date=${ys}:${ye}`;
+  if (ys !== undefined) return `&date=${ys}:${new Date().getFullYear()}`;
+  if (ye !== undefined) return `&date=1960:${ye}`;
+  return '';
+}
+
 export async function fetchWorldbank(
   indicatorId: string,
   countryIds: string[],
-  yearStart: number,
-  yearEnd: number,
+  yearStart?: number,
+  yearEnd?: number,
   signal?: AbortSignal
 ): Promise<FetchWorldbankResult> {
   const cleanIds = countryIds.map((c) => c.trim().toUpperCase()).filter(Boolean);
@@ -368,10 +388,11 @@ export async function fetchWorldbank(
   const codes = cleanIds.slice(0, 60).join(';');
   // Semicolons must stay literal in the path segment; only the indicator id
   // needs escaping (WB ids are dot-delimited alnum, so this is a no-op in
-  // practice, but keeps us safe).
+  // practice, but keeps us safe). The date fragment is built defensively so an
+  // open range ("since 1990") never leaks NaN/undefined into the URL.
   const url =
     `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
-    `?format=json&date=${yearStart}:${yearEnd}&per_page=2000`;
+    `?format=json${worldbankDateParam(yearStart, yearEnd)}&per_page=2000`;
   const resp = await fetch(url, signal ? { signal } : undefined);
   if (!resp.ok) throw new Error('World Bank API HTTP ' + resp.status);
   const data = await resp.json();
@@ -428,8 +449,8 @@ export interface FetchWorldbankAllResult {
 
 export async function fetchWorldbankAll(
   indicatorId: string,
-  yearStart: number,
-  yearEnd: number,
+  yearStart?: number,
+  yearEnd?: number,
   signal?: AbortSignal
 ): Promise<FetchWorldbankAllResult> {
   const countries = listCountries('all');
