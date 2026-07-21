@@ -687,8 +687,24 @@ import {
   parsePlanBrief,
   matchStepToEvent,
   buildRejectionSteer,
+  defaultDashboardTitle,
+  resolveTileRef,
+  refreshTile,
+  refreshDashboard,
   type PlanStep,
 } from './agent';
+import {
+  listDashboards,
+  loadDashboard,
+  createDashboard,
+  addTile,
+  makeTile,
+  saveDashboard,
+  type StorageLike,
+  type Dashboard,
+  type Tile,
+} from './dashboard';
+import type { ChartSpec, Citation } from './tools';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -3790,5 +3806,419 @@ describe('plan mode, driven through createSession', () => {
     expect(mockComplete).toHaveBeenCalledTimes(1);
     // The plan card is absent — a brief was never parsed/pushed.
     expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+  });
+});
+
+// ── save_to_dashboard dispatch (backlog: dashboards, increment 1) ──────────
+// Driven end-to-end through createSession with complete() mocked and a Map-
+// backed dashboard store injected — the same discipline as the other dispatch
+// tests. Egress is never touched: the World Bank fetch is stubbed so the tile
+// pins real rows + a real citation, all offline.
+describe('save_to_dashboard dispatch', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => { mockComplete.mockReset(); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A Map-backed Web Storage fake (getItem/setItem/removeItem/length/key).
+  class FakeStorage implements StorageLike {
+    private m = new Map<string, string>();
+    get length() { return this.m.size; }
+    key(i: number) { return [...this.m.keys()][i] ?? null; }
+    getItem(k: string) { return this.m.has(k) ? (this.m.get(k) as string) : null; }
+    setItem(k: string, v: string) { this.m.set(k, v); }
+    removeItem(k: string) { this.m.delete(k); }
+  }
+
+  // World Bank JSON: [header(lastupdated), rows].
+  const wbBody = () => [
+    { lastupdated: '2024-12-16' },
+    [
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2000', value: 66.6 },
+      { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 27.3 },
+    ],
+  ];
+
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+
+  it('chart exists → creates the dashboard with the tile + its citations attached', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => wbBody() })));
+    const store = new FakeStorage();
+
+    // One assistant turn: fetch (populates rows + citation) → render → pin → finish.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        { id: 'f', name: 'fetch_series', arguments: { id: 'SP.DYN.IMRT.IN', countries: ['IND'], year_start: 2000, year_end: 2020 } },
+        { id: 'r', name: 'render_chart', arguments: { type: 'line', title: 'Infant mortality, India', y_axis: 'per 1,000', series: [{ name: 'India', data: [[2000, 66.6], [2020, 27.3]] }] } },
+        { id: 's', name: 'save_to_dashboard', arguments: { dashboard_title: 'Health board', tile_title: 'India infant mortality' } },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: "India's infant mortality more than halved 2000→2020." } },
+      ],
+      usage: { input: 20, output: 10 },
+    });
+    // Verifier PASS (no retry).
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: answers the question.', toolCalls: [], usage: { input: 5, output: 2 } });
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { sources: ['worldbank'], dashboardStore: store }
+    );
+    const { cb, trace } = capture();
+    await session.ask('How has infant mortality changed in India?', cb);
+
+    const boards = listDashboards(store);
+    expect(boards).toHaveLength(1);
+    const board = boards[0];
+    expect(board.title).toBe('Health board');
+    expect(board.tiles).toHaveLength(1);
+    const tile = board.tiles[0];
+    expect(tile.title).toBe('India infant mortality');
+    expect(tile.spec.title).toBe('Infant mortality, India');
+    expect(tile.rows.length).toBeGreaterThan(0);
+    // The citation ledger from the live fetch rode along onto the tile.
+    expect(tile.citations).toHaveLength(1);
+    expect(tile.citations[0].source).toBe('worldbank');
+    expect(tile.citations[0].sourceUpdated).toBe('2024-12-16');
+    // The tile's source note surfaces the vintage.
+    expect(tile.sourceNote).toContain('2024-12-16');
+
+    // The pin step's receipt confirms the destination.
+    const pin = trace().find((e: any) => e.tool === 'save_to_dashboard');
+    expect(pin.status).toBe('ok');
+    expect(pin.detail).toContain('Health board');
+  });
+
+  it('no chart this turn → clean refusal, nothing persisted', async () => {
+    const store = new FakeStorage();
+
+    // The model pins without ever rendering a chart.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        { id: 's', name: 'save_to_dashboard', arguments: { dashboard_title: 'Health board' } },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: 'Nothing charted.' } },
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    mockComplete.mockResolvedValueOnce({ text: 'PASS.', toolCalls: [], usage: { input: 5, output: 2 } });
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { sources: ['worldbank'], dashboardStore: store }
+    );
+    const { cb, trace } = capture();
+    await session.ask('Save this', cb);
+
+    // No dashboard was created.
+    expect(listDashboards(store)).toHaveLength(0);
+    // The refusal is clean (an ok receipt with a "no chart" detail, not a crash).
+    const pin = trace().find((e: any) => e.tool === 'save_to_dashboard');
+    expect(pin.status).toBe('ok');
+    expect(pin.detail).toMatch(/no chart/i);
+  });
+
+  it('defaultDashboardTitle derives from the question and truncates long ones', () => {
+    expect(defaultDashboardTitle('  How has GDP grown?  ')).toBe('How has GDP grown?');
+    expect(defaultDashboardTitle('')).toBe('My dashboard');
+    const long = 'a'.repeat(100);
+    expect(defaultDashboardTitle(long).length).toBeLessThanOrEqual(60);
+    expect(defaultDashboardTitle(long).endsWith('…')).toBe(true);
+  });
+});
+
+// ── edit_dashboard + refresh (increment 2) ─────────────────────────────────
+// Shared fixtures for the conversational-edit + refresh suites.
+class FakeStore implements StorageLike {
+  private m = new Map<string, string>();
+  private failSet = false;
+  setFail(v: boolean) { this.failSet = v; }
+  get length() { return this.m.size; }
+  key(i: number) { return [...this.m.keys()][i] ?? null; }
+  getItem(k: string) { return this.m.has(k) ? (this.m.get(k) as string) : null; }
+  setItem(k: string, v: string) { if (this.failSet) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; } this.m.set(k, v); }
+  removeItem(k: string) { this.m.delete(k); }
+}
+
+const edSpec: ChartSpec = {
+  type: 'line', title: 'Infant mortality, India', y_axis: 'per 1,000',
+  series: [{ name: 'India', data: [[2000, 66.6], [2020, 27.3]] }],
+};
+const edRows: DataRow[] = [
+  { country: 'India', iso3: 'IND', year: 2000, value: 66.6, indicator: 'SP.DYN.IMRT.IN' },
+  { country: 'India', iso3: 'IND', year: 2020, value: 27.3, indicator: 'SP.DYN.IMRT.IN' },
+];
+function edCite(id: string, over?: Partial<Citation>): Citation {
+  return {
+    id: `wb:${id}|IND|2000:2020`, source: 'worldbank', sourceLabel: 'World Bank Open Data',
+    indicatorId: id, indicatorName: id, url: `https://data.worldbank.org/indicator/${id}`,
+    countries: ['IND'], yearRange: { start: 2000, end: 2020 },
+    fetchedAt: '2026-07-01T00:00:00.000Z', sourceUpdated: '2024-12-16', rowCount: 2, cached: false, ...over,
+  };
+}
+// World Bank JSON envelope: [header(lastupdated), rows].
+const wbJson = (lastupdated: string, pts: [number, number][]) => [
+  { lastupdated },
+  pts.map(([year, value]) => ({ country: { value: 'India' }, countryiso3code: 'IND', date: String(year), value })),
+];
+
+describe('resolveTileRef', () => {
+  function board(titles: string[]): Dashboard {
+    let d = createDashboard('Board');
+    for (const t of titles) d = addTile(d, makeTile({ title: t, spec: edSpec, rows: edRows, citations: [edCite('SP.DYN.IMRT.IN')] }));
+    return d;
+  }
+  it('resolves by exact title first', () => {
+    const d = board(['GDP', 'Life expectancy']);
+    const r = resolveTileRef(d, { title: 'Life expectancy' });
+    expect(r.ok && r.tile.title).toBe('Life expectancy');
+  });
+  it('falls back to case-insensitive title', () => {
+    const d = board(['GDP', 'Life Expectancy']);
+    const r = resolveTileRef(d, { title: 'life expectancy' });
+    expect(r.ok && r.tile.title).toBe('Life Expectancy');
+  });
+  it('resolves by 1-based index when no title given', () => {
+    const d = board(['GDP', 'Life expectancy', 'CO2']);
+    const r = resolveTileRef(d, { index: 2 });
+    expect(r.ok && r.tile.title).toBe('Life expectancy');
+  });
+  it('prefers an exact title over an index collision (title wins)', () => {
+    const d = board(['GDP', 'Life expectancy']);
+    const r = resolveTileRef(d, { title: 'GDP', index: 2 });
+    expect(r.ok && r.tile.title).toBe('GDP');
+  });
+  it('errors (listing tiles) when two tiles share the exact title', () => {
+    const d = board(['GDP', 'GDP']);
+    const r = resolveTileRef(d, { title: 'GDP' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) { expect(r.error).toMatch(/more than one/i); expect(r.error).toMatch(/1\. "GDP", 2\. "GDP"/); }
+  });
+  it('errors (listing tiles) for a missing title or out-of-range index', () => {
+    const d = board(['GDP', 'Life expectancy']);
+    const miss = resolveTileRef(d, { title: 'Nope' });
+    expect(miss.ok).toBe(false);
+    if (!miss.ok) expect(miss.error).toMatch(/no tile titled "Nope"/i);
+    const oob = resolveTileRef(d, { index: 9 });
+    expect(oob.ok).toBe(false);
+    if (!oob.ok) expect(oob.error).toMatch(/no tile at position 9/i);
+  });
+});
+
+describe('refreshTile / refreshDashboard (stubbed fetch)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function tile(title: string, id = 'SP.DYN.IMRT.IN'): Tile {
+    return makeTile({ title, spec: edSpec, rows: edRows, citations: [edCite(id)] });
+  }
+
+  it('all-success: replaces rows + citations, refreshes vintage, resolves country codes identically (router semantics)', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { seen.push(url); return { ok: true, json: async () => wbJson('2025-06-30', [[2000, 60.1], [2020, 25.0]]) }; }));
+    const t = tile('India infant mortality');
+    const res = await refreshTile(t);
+    expect(res.ok).toBe(true);
+    expect(res.rows!.map((r) => r.value)).toEqual([60.1, 25.0]); // fresh rows
+    expect(res.citations![0].sourceUpdated).toBe('2025-06-30'); // vintage updated (was 2024-12-16)
+    expect(res.citations![0].countries).toEqual(['IND']); // resolveCountryList fixpoint on stored codes
+    expect(res.detail).toMatch(/2 rows · WB · source updated 2025-06-30/);
+    // The fetch went through the SAME World Bank URL a live run builds (country IND, indicator id in path).
+    expect(seen[0]).toContain('/country/IND/indicator/SP.DYN.IMRT.IN');
+  });
+
+  it('failure: refreshTile reports stale reason and does NOT touch the tile', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const t = tile('Life expectancy');
+    const res = await refreshTile(t);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('network error');
+    expect(res.detail).toMatch(/network error, kept previous data/);
+  });
+
+  it('a tile with no citations is a clean failure (never blanked)', async () => {
+    const t = makeTile({ title: 'No source', spec: edSpec, rows: edRows, citations: [] });
+    const res = await refreshTile(t);
+    expect(res.ok).toBe(false);
+    expect(res.detail).toMatch(/no citations to refresh from/);
+  });
+
+  it('refreshDashboard partial failure: one tile touched (fresh rows + vintage), the other stale with UNCHANGED rows, persisted', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('SP.DYN.LE00.IN')) throw new TypeError('Failed to fetch');
+      return { ok: true, json: async () => wbJson('2025-06-30', [[2000, 60.1], [2020, 25.0]]) };
+    }));
+    const store = new FakeStore();
+    let d = createDashboard('Health board');
+    d = addTile(d, tile('India infant mortality', 'SP.DYN.IMRT.IN'));
+    d = addTile(d, tile('Life expectancy', 'SP.DYN.LE00.IN'));
+    saveDashboard(store, d);
+    const bStaleRowsBefore = d.tiles[1].rows;
+
+    const out = await refreshDashboard(store, d.id);
+    expect(out.aborted).toBe(false);
+    expect(out.results.map((r) => r.ok)).toEqual([true, false]);
+
+    // Persisted: reload and inspect.
+    const saved = loadDashboard(store, d.id)!;
+    // Tile A: refreshed rows + new vintage + refreshedAt, no stale marker.
+    expect(saved.tiles[0].rows.map((r) => r.value)).toEqual([60.1, 25.0]);
+    expect(saved.tiles[0].citations[0].sourceUpdated).toBe('2025-06-30');
+    expect(saved.tiles[0].refreshedAt).toBeTruthy();
+    expect(saved.tiles[0].stale).toBeUndefined();
+    // Tile B: UNCHANGED rows, stale marker present (honest, never blank).
+    expect(saved.tiles[1].rows).toEqual(bStaleRowsBefore);
+    expect(saved.tiles[1].stale?.reason).toBe('network error');
+  });
+
+  it('abort mid-refresh: remaining tiles untouched', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls++;
+      if (calls === 1) controller.abort(); // abort right after the first tile fetches
+      return { ok: true, json: async () => wbJson('2025-06-30', [[2000, 60.1], [2020, 25.0]]) };
+    }));
+    const store = new FakeStore();
+    let d = createDashboard('Board');
+    d = addTile(d, tile('A', 'SP.DYN.IMRT.IN'));
+    d = addTile(d, tile('B', 'NY.GDP.MKTP.CD'));
+    saveDashboard(store, d);
+    const bBefore = d.tiles[1];
+
+    const out = await refreshDashboard(store, d.id, { signal: controller.signal });
+    expect(out.aborted).toBe(true);
+    expect(out.results).toHaveLength(1); // only tile A processed
+    const saved = loadDashboard(store, d.id)!;
+    expect(saved.tiles[0].refreshedAt).toBeTruthy(); // A was refreshed + saved
+    expect(saved.tiles[1].refreshedAt).toBeUndefined(); // B untouched
+    expect(saved.tiles[1].rows).toEqual(bBefore.rows);
+    expect(saved.tiles[1].stale).toBeUndefined();
+    expect(calls).toBe(1); // B never fetched
+  });
+});
+
+describe('edit_dashboard dispatch (driven through createSession)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => { mockComplete.mockReset(); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+
+  function seed(store: StorageLike, titles = ['India infant mortality', 'Life expectancy']) {
+    let d = createDashboard('Health board');
+    for (const t of titles) d = addTile(d, makeTile({ title: t, spec: edSpec, rows: edRows, citations: [edCite('SP.DYN.IMRT.IN')] }));
+    saveDashboard(store, d);
+    return d;
+  }
+
+  // Drive one assistant turn that calls edit_dashboard then finish, then a PASS verifier.
+  async function runEdit(store: StorageLike, args: Record<string, unknown>) {
+    mockComplete.mockResolvedValueOnce({
+      text: '', usage: { input: 10, output: 5 },
+      toolCalls: [
+        { id: 'e', name: 'edit_dashboard', arguments: args },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: 'Edited the dashboard.' } },
+      ],
+    });
+    mockComplete.mockResolvedValueOnce({ text: 'PASS.', toolCalls: [], usage: { input: 5, output: 2 } });
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'], dashboardStore: store });
+    const { cb, trace } = capture();
+    await session.ask('edit my dashboard', cb);
+    return trace().find((e: any) => e.tool === 'edit_dashboard');
+  }
+
+  it('rename_dashboard: applies through the pure op, persists, receipt text', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'rename_dashboard', new_title: 'Vital signs' });
+    expect(ev.status).toBe('ok');
+    expect(ev.detail).toBe('dashboard "Health board": renamed to "Vital signs"');
+    expect(listDashboards(store).map((d) => d.title)).toEqual(['Vital signs']);
+  });
+
+  it('rename_tile by title: persists the new tile title', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'rename_tile', tile_title: 'Life expectancy', new_title: 'Life expectancy at birth' });
+    expect(ev.detail).toContain('renamed tile "Life expectancy"');
+    const d = listDashboards(store)[0];
+    expect(d.tiles.map((t) => t.title)).toContain('Life expectancy at birth');
+  });
+
+  it('remove_tile by title: drops the tile and persists', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'remove_tile', tile_title: 'Life expectancy' });
+    expect(ev.detail).toBe('dashboard "Health board": removed tile "Life expectancy"');
+    const d = listDashboards(store)[0];
+    expect(d.tiles.map((t) => t.title)).toEqual(['India infant mortality']);
+  });
+
+  it('remove_tile by 1-based index: resolves position when no title given', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'remove_tile', tile_index: 1 });
+    expect(ev.detail).toContain('removed tile "India infant mortality"');
+    expect(listDashboards(store)[0].tiles.map((t) => t.title)).toEqual(['Life expectancy']);
+  });
+
+  it('move_tile down: reorders and persists', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'move_tile', tile_index: 1, direction: 'down' });
+    expect(ev.detail).toContain('moved tile "India infant mortality" down');
+    expect(listDashboards(store)[0].tiles.map((t) => t.title)).toEqual(['Life expectancy', 'India infant mortality']);
+  });
+
+  it('ambiguous tile reference → clean tool error listing the tiles, nothing persisted', async () => {
+    const store = new FakeStore();
+    seed(store, ['GDP', 'GDP']);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'remove_tile', tile_title: 'GDP' });
+    expect(ev.status).toBe('ok'); // a tool-level error is returned as the result, receipt stays ok
+    expect(ev.detail).toBe('tile not resolved');
+    expect(listDashboards(store)[0].tiles).toHaveLength(2); // unchanged
+  });
+
+  it('missing dashboard → error naming the saved dashboards', async () => {
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Nonexistent', action: 'rename_dashboard', new_title: 'X' });
+    expect(ev.detail).toBe('no such dashboard');
+    expect(listDashboards(store).map((d) => d.title)).toEqual(['Health board']); // untouched
+  });
+
+  it('refresh_dashboard: re-fetches every tile through routeFetch semantics, persists fresh vintage + refreshedAt, receipt summarises', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => wbJson('2025-06-30', [[2000, 60.1], [2020, 25.0]]) })));
+    const store = new FakeStore();
+    seed(store);
+    const ev = await runEdit(store, { dashboard_title: 'Health board', action: 'refresh_dashboard' });
+    expect(ev.status).toBe('ok');
+    expect(ev.detail).toBe('dashboard "Health board": refreshed 2 tiles · 2 ok, 0 stale');
+    const d = listDashboards(store)[0];
+    expect(d.tiles.every((t) => t.refreshedAt && t.citations[0].sourceUpdated === '2025-06-30')).toBe(true);
+    expect(d.tiles.every((t) => t.rows.map((r) => r.value).join() === '60.1,25')).toBe(true);
+  });
+
+  it('refuses cleanly when no dashboard store is available', async () => {
+    // No dashboardStore injected AND no global localStorage in the node test env.
+    mockComplete.mockResolvedValueOnce({
+      text: '', usage: { input: 10, output: 5 },
+      toolCalls: [
+        { id: 'e', name: 'edit_dashboard', arguments: { dashboard_title: 'x', action: 'rename_dashboard', new_title: 'y' } },
+        { id: 'd', name: 'finish', arguments: { one_line_finding: 'n/a' } },
+      ],
+    });
+    mockComplete.mockResolvedValueOnce({ text: 'PASS.', toolCalls: [], usage: { input: 5, output: 2 } });
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+    const { cb, trace } = capture();
+    await session.ask('edit', cb);
+    const ev = trace().find((e: any) => e.tool === 'edit_dashboard');
+    expect(ev.detail).toBe('no storage');
   });
 });

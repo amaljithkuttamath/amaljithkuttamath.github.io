@@ -51,6 +51,13 @@ const PRESETS = [
           <span class="badge">byok</span>
           <span class="badge">cited</span>
         </div>
+        <!-- Dashboards entry point: opens the saved-dashboards view. The count
+             appears only once at least one dashboard exists. -->
+        <button type="button" class="ch-dash-nav" id="ch-dash-nav" aria-label="Open dashboards">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Dashboards</span>
+          <span class="ch-dash-nav-count" id="ch-dash-nav-count" hidden></span>
+        </button>
       </div>
       <p class="ch-subtitle">Real answers about the world, charted and cited.</p>
     </header>
@@ -169,6 +176,7 @@ const PRESETS = [
                  itself a button) is invalid and unreachable for some AT. -->
             <summary>Raw data (<span class="ch-data-count">0</span> rows)</summary>
             <div class="ch-data-actions">
+              <button type="button" class="ch-pin" style="display:none" aria-haspopup="dialog" aria-label="Pin this chart to a dashboard">Pin to dashboard</button>
               <button type="button" class="ch-share" style="display:none" aria-label="Copy a shareable link to this answer">Share link</button>
               <button type="button" class="ch-csv">Download CSV</button>
             </div>
@@ -368,6 +376,47 @@ const PRESETS = [
       </form>
     </div>
 
+    <!-- ── Pin-to-dashboard picker ──────────────────────────────────────────
+         A small modal dialog opened by a turn's "Pin to dashboard" button.
+         Lists existing dashboards to pin into, plus an inline "new dashboard"
+         name field. Focus is trapped while open; Escape / backdrop / close all
+         dismiss it. Populated at open time by openPinPicker(). -->
+    <div class="ch-pin-backdrop" id="ch-pin-backdrop" hidden></div>
+    <div class="ch-pin-dialog" id="ch-pin-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="ch-pin-title" tabindex="-1">
+      <div class="ch-pin-head">
+        <span class="ch-pin-title" id="ch-pin-title">Pin to dashboard</span>
+        <button type="button" class="ch-pin-close" id="ch-pin-close" aria-label="Close">✕</button>
+      </div>
+      <p class="ch-pin-sub" id="ch-pin-sub">Save this chart, its data and its citations to a dashboard you can revisit.</p>
+      <div class="ch-pin-list" id="ch-pin-list" role="group" aria-label="Existing dashboards"></div>
+      <form class="ch-pin-new" id="ch-pin-new" autocomplete="off">
+        <label class="ch-field-label" for="ch-pin-name">New dashboard</label>
+        <div class="ch-pin-new-row">
+          <input type="text" id="ch-pin-name" class="ch-input" placeholder="Name it…" spellcheck="false" maxlength="80" />
+          <button type="submit" class="ch-pin-create" id="ch-pin-create">Create &amp; pin</button>
+        </div>
+      </form>
+      <span class="ch-pin-status" id="ch-pin-status" role="status" aria-live="polite"></span>
+    </div>
+
+    <!-- ── Dashboards view ──────────────────────────────────────────────────
+         A full-column overlay listing saved dashboards, and (on open) one
+         dashboard's tile grid. Charts init lazily and are disposed on exit.
+         Everything keyboard-operable; the two sub-views swap in #ch-dashview. -->
+    <section class="ch-dashview" id="ch-dashview" hidden aria-label="Dashboards">
+      <div class="ch-dashview-bar">
+        <button type="button" class="ch-dashview-back" id="ch-dashview-back" aria-label="Back">‹ Back</button>
+        <h2 class="ch-dashview-title" id="ch-dashview-title">Dashboards</h2>
+        <!-- Polite live region for share/export/import confirmations, announced
+             to assistive tech without moving focus. -->
+        <span class="ch-dashview-status" id="ch-dashview-status" role="status" aria-live="polite"></span>
+      </div>
+      <!-- Hidden file input backing the "Import dashboard" button on the list
+           view. A JSON file lands as a NEW local dashboard (never overwrites). -->
+      <input type="file" id="ch-dash-import-file" accept="application/json,.json" hidden />
+      <div class="ch-dashview-body" id="ch-dashview-body"></div>
+    </section>
+
   </div>
 
   <!-- Island: curated indicator names for client-side citation enrichment -->
@@ -392,2551 +441,7 @@ const PRESETS = [
 </Base>
 
 <script>
-  import { createSession, type ChittiSession } from '../../lib/chitti/agent';
-  import {
-    PROVIDERS,
-    providerMeta,
-    fetchModels,
-    formatPricePerM,
-    RECOMMENDED_OPENROUTER_MODELS,
-    type ProviderId,
-    type ProviderConfig,
-    type ModelOption,
-  } from '../../lib/chitti/providers';
-  import type { TraceEvent, AgentOutput, InsightBrief, PlanStep } from '../../lib/chitti/agent';
-  import { matchStepToEvent } from '../../lib/chitti/agent';
-  import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
-  import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
-  import { rowsToCSV } from '../../lib/chitti/tools';
-  import {
-    encodeShareState,
-    decodeShareState,
-    type ShareStateV1,
-  } from '../../lib/chitti/share';
-  import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
-  import {
-    chartAriaLabel,
-    verificationCueText,
-    verificationStampLabel,
-    focusTrapTarget,
-    FOCUSABLE_SELECTOR,
-  } from '../../lib/chitti/a11y';
-
-  // ── Elements ──────────────────────────────────────────────────────────
-  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-
-  const providerSel = $('ch-provider') as HTMLSelectElement;
-  const modelSel = $('ch-model') as HTMLSelectElement;
-  const modelPickList = $('ch-modelpick-list');
-  const modelPickSearch = $('ch-model-search') as HTMLInputElement;
-  const modelPickCount = $('ch-modelpick-count');
-  const modelPickEmpty = $('ch-modelpick-empty');
-  const keyIn = $('ch-key') as HTMLInputElement;
-  const saveChk = $('ch-save') as HTMLInputElement;
-  const keyLinks = $('ch-keylinks');
-  const providerNote = $('ch-provider-note');
-
-  const byokPanel = $('ch-byok') as HTMLDivElement;
-  const byokSum = $('ch-byok-sum') as HTMLButtonElement;
-  const byokState = $('ch-byok-state');
-  const byokCta = $('ch-byok-cta');
-  const byokMore = $('ch-byok-more') as HTMLButtonElement;
-  const byokSettings = $('ch-byok-settings') as HTMLDivElement;
-
-  // Model + databases live behind a disclosure so the sheet is short on mobile
-  // (the keyboard-vs-key-field problem). Key-first: collapsed until there's a
-  // key, then auto-revealed; the toggle overrides either way.
-  function setSettingsOpen(open: boolean) {
-    byokSettings.hidden = !open;
-    byokMore.setAttribute('aria-expanded', String(open));
-  }
-  byokMore.addEventListener('click', () => setSettingsOpen(byokSettings.hidden));
-
-  // Keep the fixed bottom sheet above the on-screen keyboard: visualViewport
-  // shrinks when the keyboard opens, and `--kb` lifts the sheet by that much so
-  // the focused field (the key, at the top) is never covered. No-op on desktop.
-  const vv = window.visualViewport;
-  function syncSheetToKeyboard() {
-    if (!vv || byokPanel.hidden) {
-      byokPanel.style.removeProperty('--kb');
-      return;
-    }
-    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    byokPanel.style.setProperty('--kb', kb + 'px');
-  }
-  if (vv) {
-    vv.addEventListener('resize', syncSheetToKeyboard);
-    vv.addEventListener('scroll', syncSheetToKeyboard);
-  }
-
-  // The config panel is a plain div toggled open/closed (not <details>, so the
-  // trigger button can live inside the composer form). openByok(true/false)
-  // is the single entry point; the chip button and outside-click drive it.
-  // The sheet is a modal dialog: opening moves focus into it and closing
-  // returns focus to the chip that opened it, so a keyboard user never loses
-  // their place. Focus is only pulled back to the trigger when it was still
-  // inside the sheet at close time (an explicit close), never when a run has
-  // already moved focus elsewhere.
-  function openByok(open: boolean) {
-    const wasOpen = !byokPanel.hidden;
-    byokPanel.hidden = !open;
-    $('ch-byok-backdrop').hidden = !open;
-    byokSum.setAttribute('aria-expanded', String(open));
-    if (open) {
-      setSettingsOpen(!!keyIn.value.trim()); // key-first: reveal only once connected
-      // Move focus into the dialog so its label is announced and Tab is
-      // trapped. The container is focusable (tabindex=-1) but not a tab stop.
-      if (!wasOpen) requestAnimationFrame(() => byokPanel.focus());
-    } else if (wasOpen && byokPanel.contains(document.activeElement)) {
-      byokSum.focus();
-    }
-    syncSheetToKeyboard();
-  }
-  byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
-  // Explicit close paths that work everywhere, including iOS where
-  // document-level click delegation from page areas is unreliable.
-  $('ch-byok-close').addEventListener('click', () => openByok(false));
-  $('ch-byok-backdrop').addEventListener('click', () => openByok(false));
-  // Close on outside click / Escape, like a popover.
-  document.addEventListener('click', (e) => {
-    if (byokPanel.hidden) return;
-    const bar = $('ch-inputbar');
-    if (bar && !bar.contains(e.target as Node)) openByok(false);
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !byokPanel.hidden) openByok(false);
-  });
-  // Focus trap: while the sheet is open, Tab cycles within it. The pure
-  // focusTrapTarget() decides when to wrap (at an edge) vs. let the browser
-  // handle a natural in-bounds Tab; querying focusables at each keystroke keeps
-  // the collapsed model/database disclosure (hidden ⇒ not focusable) correct.
-  byokPanel.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab' || byokPanel.hidden) return;
-    const items = Array.from(
-      byokPanel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-    ).filter((el) => el.getClientRects().length > 0 || el === document.activeElement);
-    const active = document.activeElement as HTMLElement | null;
-    const idx = active ? items.indexOf(active) : -1;
-    const target = focusTrapTarget(idx, items.length, e.shiftKey);
-    if (target !== null) {
-      e.preventDefault();
-      items[target]?.focus();
-    }
-  });
-
-  const consoleEl = $('ch-console');
-  const askForm = $('ch-ask') as HTMLFormElement;
-  const qIn = $('ch-q') as HTMLTextAreaElement;
-  const chips = $('ch-chips');
-
-  const composerForm = $('ch-composer') as HTMLFormElement;
-  const composerQ = $('ch-composer-q') as HTMLTextAreaElement;
-  // The composer's Ask button IS the primary (and only) submit button now, so
-  // the run-state "Working…" toggle drives it directly.
-  const askBtn = $('ch-composer-btn') as HTMLButtonElement;
-  const newConvoBtn = $('ch-new-convo') as HTMLButtonElement;
-
-  const threadEl = $('ch-thread');
-  const turnTemplate = $('ch-turn-template') as HTMLTemplateElement;
-
-  // Curated indicator id → friendly name, for citations.
-  const INDICATOR_MAP: Record<string, string> = JSON.parse(
-    ($('ch-indicator-map') as HTMLScriptElement).textContent || '{}'
-  );
-
-  // ── Turn blocks ──────────────────────────────────────────────────────
-  // Every render function and its mutable state used to be a module-level
-  // singleton (one trace, one chart, one table for the whole page). To
-  // support a multi-turn thread, all of that becomes per-turn: each call to
-  // createTurnBlock() clones the turn template, appends it to the thread,
-  // and hands back a TurnBlock scoping every element and every piece of
-  // mutable state (chart instance, last spec, rows, csv, trace, files,
-  // start times) to that one turn.
-  interface TurnBlock {
-    root: HTMLElement;
-    questionEl: HTMLElement;
-    statusRow: HTMLElement;
-    statusDot: HTMLElement;
-    statusMsg: HTMLElement;
-    stopBtn: HTMLButtonElement;
-    panel: HTMLDetailsElement;
-    panelDot: HTMLElement;
-    panelLabel: HTMLElement;
-    railModelEl: HTMLElement;
-    traceEl: HTMLElement;
-    renderFlag: HTMLElement;
-    railTotal: HTMLElement;
-    canvasEl: HTMLElement;
-    chartEl: HTMLElement;
-    chartTitle: HTMLElement;
-    chartUnit: HTMLElement;
-    metaSection: HTMLElement;
-    answerSection: HTMLElement;
-    findingEl: HTMLElement;
-    verifyEl: HTMLElement;
-    dataDetails: HTMLDetailsElement;
-    dataCount: HTMLElement;
-    csvBtn: HTMLButtonElement;
-    shareBtn: HTMLButtonElement;
-    shareStatus: HTMLElement;
-    shareBanner: HTMLElement;
-    tableEl: HTMLTableElement;
-    citeEl: HTMLElement;
-    chartInstance: any | null;
-    lastSpec: ChartSpec | null;
-    lastRows: DataRow[];
-    lastCSV: string;
-    // Answer-level state captured for the share permalink (backlog #15): the
-    // finding text, citations, and verdict this turn ended with. Snapshotted on
-    // completion so the share button encodes exactly what is on screen.
-    lastFinding: string;
-    lastCitations: Citation[];
-    lastVerification: AgentOutput['verification'];
-    // True when this turn was restored from a #share= link (no agent ran).
-    isShared: boolean;
-    // Index (into lastRows) of the evidence row currently highlighted by a
-    // chart click, or -1 when nothing is highlighted. Chart↔table linking.
-    activeRowIndex: number;
-    trace: TraceEvent[];
-    files: Record<string, string>;
-    startTimes: number[];
-    question: string;
-  }
-
-  function q<T extends HTMLElement = HTMLElement>(root: HTMLElement, selector: string): T {
-    const el = root.querySelector(selector);
-    if (!el) throw new Error('Turn block missing expected element: ' + selector);
-    return el as T;
-  }
-
-  function createTurnBlock(): TurnBlock {
-    const fragment = turnTemplate.content.cloneNode(true) as DocumentFragment;
-    const root = fragment.querySelector('.ch-turn') as HTMLElement;
-    threadEl.appendChild(fragment);
-
-    const tb: TurnBlock = {
-      root,
-      questionEl: q(root, '.ch-turn-q'),
-      statusRow: q(root, '.ch-status'),
-      statusDot: q(root, '.ch-status-dot'),
-      statusMsg: q(root, '.ch-status-msg'),
-      stopBtn: q<HTMLButtonElement>(root, '.ch-stop'),
-      panel: q<HTMLDetailsElement>(root, '.ch-panel'),
-      panelDot: q(root, '.ch-panel-dot'),
-      panelLabel: q(root, '.ch-panel-label'),
-      railModelEl: q(root, '.ch-rail-model'),
-      traceEl: q(root, '.ch-trace'),
-      renderFlag: q(root, '.ch-render-flag'),
-      railTotal: q(root, '.ch-rail-total'),
-      canvasEl: q(root, '.ch-canvas'),
-      chartEl: q(root, '.ch-chart'),
-      chartTitle: q(root, '.ch-chart-title'),
-      chartUnit: q(root, '.ch-chart-unit'),
-      metaSection: q(root, '.ch-meta'),
-      answerSection: q(root, '.ch-answer'),
-      findingEl: q(root, '.ch-finding'),
-      verifyEl: q(root, '.ch-verify'),
-      dataDetails: q<HTMLDetailsElement>(root, '.ch-data'),
-      dataCount: q(root, '.ch-data-count'),
-      csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
-      shareBtn: q<HTMLButtonElement>(root, '.ch-share'),
-      shareStatus: q(root, '.ch-share-status'),
-      shareBanner: q(root, '.ch-share-banner'),
-      tableEl: q<HTMLTableElement>(root, '.ch-table'),
-      citeEl: q(root, '.ch-cite'),
-      chartInstance: null,
-      lastSpec: null,
-      lastRows: [],
-      lastCSV: '',
-      lastFinding: '',
-      lastCitations: [],
-      lastVerification: null,
-      isShared: false,
-      activeRowIndex: -1,
-      trace: [],
-      files: {},
-      startTimes: [],
-      question: '',
-    };
-
-    tb.csvBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const blob = new Blob([tb.lastCSV], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'chitti-data.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-
-    tb.shareBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      void shareTurn(tb);
-    });
-
-    return tb;
-  }
-
-  // ── Share permalink (backlog #15) ────────────────────────────────────────
-  // Encode this turn's answer state into a #share= fragment, build an absolute
-  // URL, and copy it to the clipboard (with a select-all fallback). All strings
-  // in the payload come from the turn's own captured state; keys/trace/VFS are
-  // never included (the whitelist encoder in share.ts guarantees it).
-  function announceShare(tb: TurnBlock, msg: string, isError = false) {
-    tb.shareStatus.textContent = msg;
-    tb.shareStatus.classList.toggle('ch-share-status-error', isError);
-    if (msg && !isError) {
-      window.setTimeout(() => {
-        if (tb.shareStatus.textContent === msg) tb.shareStatus.textContent = '';
-      }, 2600);
-    }
-  }
-
-  // Build the shareable URL for a turn's captured state, or null if the answer
-  // is too large even after dropping rows. Returned to the click handler (which
-  // copies it) and to the offline harness (which reads it without a clipboard).
-  async function buildShareUrl(tb: TurnBlock): Promise<{ url: string; lossy: boolean } | null> {
-    const enc = await encodeShareState({
-      question: tb.question,
-      answer: tb.lastFinding,
-      spec: tb.lastSpec,
-      rows: tb.lastRows,
-      citations: tb.lastCitations,
-      verification: tb.lastVerification,
-      ts: new Date().toISOString(),
-    });
-    if (!enc.ok) return null;
-    return { url: location.origin + location.pathname + '#share=' + enc.payload, lossy: enc.lossy };
-  }
-
-  async function shareTurn(tb: TurnBlock) {
-    const built = await buildShareUrl(tb);
-    if (!built) {
-      announceShare(tb, 'answer too large to share as a link — use CSV export', true);
-      return;
-    }
-    const note = built.lossy ? ' (chart only; rows omitted for size)' : '';
-    await copyToClipboard(tb, built.url, 'Link copied' + note);
-  }
-
-  async function copyToClipboard(tb: TurnBlock, text: string, okMsg: string) {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        announceShare(tb, okMsg);
-        return;
-      }
-      throw new Error('clipboard unavailable');
-    } catch {
-      // Fallback: drop a selectable input the user can copy manually. Some
-      // headless/insecure contexts refuse navigator.clipboard.
-      const wrap = tb.shareStatus;
-      wrap.textContent = '';
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.readOnly = true;
-      input.value = text;
-      input.className = 'ch-share-fallback';
-      input.setAttribute('aria-label', 'Shareable link — copy this');
-      wrap.appendChild(input);
-      input.focus();
-      input.select();
-      try {
-        document.execCommand('copy');
-        announceShare(tb, okMsg);
-      } catch {
-        // Leave the input in place for manual copy; announce it.
-        announceShare(tb, 'copy the link above');
-      }
-    }
-  }
-
-  const SESSION_KEY = 'chitti:key';
-  const SESSION_PROVIDER = 'chitti:provider';
-
-  // The multi-turn agent session. Created on the first ask() call and reused
-  // for every subsequent one on this page load, so follow-up questions share
-  // conversation history and fetched data. Cleared by "new conversation".
-  let session: ChittiSession | null = null;
-
-  // ── Provider / model dropdown wiring ───────────────────────────────────
-  function currentProvider(): ProviderId {
-    return providerSel.value as ProviderId;
-  }
-
-  // Renders a list of {id,label,free} options into the model <select>.
-  // OpenRouter's catalog is large enough that a flat alphabetical list
-  // buries the models actually verified to work well on this app's own
-  // tool-calling pipeline — split into a "Recommended" optgroup (from
-  // RECOMMENDED_OPENROUTER_MODELS) plus everything else, rather than a
-  // single "· recommended" suffix a user could easily scroll past.
-  function renderModelOptions(models: ModelOption[], selected?: string, defaultModel?: string, pid?: ProviderId) {
-    modelSel.innerHTML = '';
-    const buildOpt = (m: ModelOption) => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.label;
-      if (m.free) opt.classList.add('ch-free-opt');
-      if (m.reasoning) opt.dataset.reasoning = '1';
-      return opt;
-    };
-    if (pid === 'openrouter') {
-      const recommended = models.filter((m) => RECOMMENDED_OPENROUTER_MODELS.has(m.id));
-      const rest = models.filter((m) => !RECOMMENDED_OPENROUTER_MODELS.has(m.id));
-      if (recommended.length) {
-        const group = document.createElement('optgroup');
-        group.label = 'Recommended — reliable on this app\'s tool-calling pipeline';
-        for (const m of recommended) group.appendChild(buildOpt(m));
-        modelSel.appendChild(group);
-      }
-      if (rest.length) {
-        const group = document.createElement('optgroup');
-        group.label = recommended.length ? 'All models' : 'Models';
-        for (const m of rest) group.appendChild(buildOpt(m));
-        modelSel.appendChild(group);
-      }
-    } else {
-      for (const m of models) modelSel.appendChild(buildOpt(m));
-    }
-    if (selected && models.some((m) => m.id === selected)) {
-      modelSel.value = selected;
-    } else if (defaultModel && models.some((m) => m.id === defaultModel)) {
-      modelSel.value = defaultModel;
-    } else if (models.length) {
-      modelSel.value = models[0].id;
-    }
-    // The hidden <select> above stays the state source of truth; the visible
-    // searchable picker is rendered from the same list and drives it.
-    renderModelPicker(models, pid);
-    updateByokState();
-  }
-
-  // The visible model picker: a searchable, scrollable list mirroring the
-  // database picker. Each row shows the model's human name, a free badge, its
-  // context length, and prompt/completion pricing per 1M tokens — everything a
-  // user needs to actually choose, instead of a truncated slug. Clicking a row
-  // just sets the hidden <select> (so requestReasoning and every other reader
-  // keep working) and refreshes the chip.
-  let modelPickAll: ModelOption[] = [];
-  function renderModelPicker(models: ModelOption[], pid?: ProviderId) {
-    modelPickAll = models;
-    if (!modelPickList) return;
-    modelPickList.innerHTML = '';
-
-    const buildRow = (m: ModelOption): HTMLButtonElement => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'ch-model-item';
-      btn.dataset.id = m.id;
-      const on = m.id === modelSel.value;
-      btn.classList.toggle('is-on', on);
-      btn.setAttribute('aria-pressed', String(on));
-
-      // Top line: human name (fallback to id) + optional free/reasoning badges.
-      const nameRow = document.createElement('span');
-      nameRow.className = 'ch-model-namerow';
-      const name = document.createElement('span');
-      name.className = 'ch-model-name';
-      name.textContent = m.name || m.id;
-      nameRow.appendChild(name);
-      if (m.free) {
-        const badge = document.createElement('span');
-        badge.className = 'ch-model-badge ch-model-badge-free';
-        badge.textContent = 'free';
-        nameRow.appendChild(badge);
-      }
-      if (m.reasoning) {
-        const badge = document.createElement('span');
-        badge.className = 'ch-model-badge';
-        badge.textContent = 'reasoning';
-        nameRow.appendChild(badge);
-      }
-
-      // Sub line: the id (so the exact slug is always visible), then any
-      // context/pricing facts the catalog actually provided — omitted, never
-      // guessed, when absent.
-      const meta = document.createElement('span');
-      meta.className = 'ch-model-meta';
-      // The id sub-line is only worth showing when the top line is a distinct
-      // human name; otherwise it just repeats the id already shown above.
-      if (m.name && m.name !== m.id) {
-        const idEl = document.createElement('code');
-        idEl.className = 'ch-model-id';
-        idEl.textContent = m.id;
-        meta.appendChild(idEl);
-      }
-      const facts: string[] = [];
-      if (typeof m.ctx === 'number' && m.ctx > 0) {
-        facts.push((m.ctx >= 1000 ? Math.round(m.ctx / 1000) + 'K' : String(m.ctx)) + ' ctx');
-      }
-      const inP = formatPricePerM(m.promptPricePerM);
-      const outP = formatPricePerM(m.completionPricePerM);
-      if (inP && outP) facts.push(inP + ' / ' + outP + ' per 1M');
-      else if (inP) facts.push(inP + ' in per 1M');
-      for (const f of facts) {
-        const fact = document.createElement('span');
-        fact.className = 'ch-model-fact';
-        fact.textContent = f;
-        meta.appendChild(fact);
-      }
-
-      const text = document.createElement('span');
-      text.className = 'ch-model-text';
-      text.appendChild(nameRow);
-      text.appendChild(meta);
-      const check = document.createElement('span');
-      check.className = 'ch-model-check';
-      check.setAttribute('aria-hidden', 'true');
-      btn.appendChild(check);
-      btn.appendChild(text);
-
-      btn.addEventListener('click', () => {
-        if (!models.some((x) => x.id === m.id)) return;
-        modelSel.value = m.id;
-        modelPickList.querySelectorAll('.ch-model-item').forEach((el) => {
-          const isSel = (el as HTMLElement).dataset.id === m.id;
-          el.classList.toggle('is-on', isSel);
-          el.setAttribute('aria-pressed', String(isSel));
-        });
-        updateByokState();
-      });
-      // data-search powers the live filter (name + id + badges).
-      btn.dataset.search = `${m.name || ''} ${m.id} ${m.free ? 'free' : ''} ${m.reasoning ? 'reasoning' : ''}`.toLowerCase();
-      return btn;
-    };
-
-    const addGroup = (label: string, list: ModelOption[]) => {
-      if (!list.length) return;
-      const group = document.createElement('div');
-      group.className = 'ch-model-group';
-      const cat = document.createElement('div');
-      cat.className = 'ch-model-cat';
-      cat.textContent = label;
-      group.appendChild(cat);
-      for (const m of list) group.appendChild(buildRow(m));
-      modelPickList.appendChild(group);
-    };
-
-    if (pid === 'openrouter') {
-      const recommended = models.filter((m) => RECOMMENDED_OPENROUTER_MODELS.has(m.id));
-      const rest = models.filter((m) => !RECOMMENDED_OPENROUTER_MODELS.has(m.id));
-      if (recommended.length) addGroup('Recommended for this pipeline', recommended);
-      addGroup(recommended.length ? 'All models' : 'Models', rest);
-    } else {
-      for (const m of models) modelPickList.appendChild(buildRow(m));
-    }
-
-    if (modelPickCount) modelPickCount.textContent = models.length ? `${models.length} available` : '';
-    applyModelFilter();
-  }
-
-  // Live filter: hide non-matching rows and any group left empty.
-  function applyModelFilter() {
-    if (!modelPickList) return;
-    const q = (modelPickSearch?.value || '').trim().toLowerCase();
-    const rows = Array.from(modelPickList.querySelectorAll<HTMLElement>('.ch-model-item'));
-    let anyVisible = false;
-    rows.forEach((r) => {
-      const hit = !q || (r.dataset.search || '').includes(q);
-      r.hidden = !hit;
-      if (hit) anyVisible = true;
-    });
-    modelPickList.querySelectorAll<HTMLElement>('.ch-model-group').forEach((g) => {
-      const vis = Array.from(g.querySelectorAll<HTMLElement>('.ch-model-item')).some((it) => !it.hidden);
-      g.hidden = !vis;
-    });
-    if (modelPickEmpty) modelPickEmpty.hidden = anyVisible;
-  }
-  modelPickSearch?.addEventListener('input', applyModelFilter);
-
-  // Populate the model dropdown — first from the hardcoded fallback (instant),
-  // then replace with the live /models fetch (right values).
-  async function populateModels(pid: ProviderId, selected?: string) {
-    const meta = providerMeta(pid);
-    // 1. Instant paint using the fallback list so the UI is never empty.
-    renderModelOptions(meta.models, selected, meta.defaultModel, pid);
-
-    // 2. Dynamic refresh from the provider's /models endpoint.
-    const key = keyIn.value.trim();
-    const needsKey = pid !== 'openrouter';
-    if (needsKey && !key) {
-      // Direct-provider dropdowns need a key. Signal to the user.
-      const hint = document.createElement('option');
-      hint.value = '__hint__';
-      hint.textContent = '─ enter a key to load available models ─';
-      hint.disabled = true;
-      modelSel.prepend(hint);
-      return;
-    }
-
-    const loadingOpt = document.createElement('option');
-    loadingOpt.value = '__loading__';
-    loadingOpt.textContent = 'loading models…';
-    loadingOpt.disabled = true;
-    modelSel.prepend(loadingOpt);
-
-    try {
-      const live = await fetchModels(pid, key || undefined);
-      // Guard: user may have switched providers while we were fetching.
-      if (currentProvider() !== pid) return;
-      if (live.length) {
-        renderModelOptions(live, modelSel.value, meta.defaultModel, pid);
-      } else {
-        // Fall back cleanly.
-        renderModelOptions(meta.models, modelSel.value, meta.defaultModel, pid);
-      }
-    } catch (err) {
-      console.warn('populateModels dynamic fetch failed', err);
-      renderModelOptions(meta.models, modelSel.value, meta.defaultModel, pid);
-    }
-  }
-
-  function renderKeyLinks(pid: ProviderId) {
-    keyLinks.innerHTML = '';
-    for (const p of PROVIDERS) {
-      const a = document.createElement('a');
-      a.href = p.keyUrl;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = p.keyLabel;
-      a.className = 'ch-keylink' + (p.freeNote ? ' ch-keylink-free' : '');
-      keyLinks.appendChild(a);
-    }
-    const meta = providerMeta(pid);
-    if (meta.note) {
-      providerNote.textContent = meta.note;
-      providerNote.style.display = 'block';
-    } else {
-      providerNote.style.display = 'none';
-    }
-  }
-
-  // One-line summary of the connection, shown even when the panel is closed.
-  // The model name is the whole point of the chip, so it's shown in full (the
-  // CSS wraps it rather than truncating). Prefer the catalog's human name, then
-  // the exact slug — never a lossy label.
-  function updateByokState() {
-    const pid = currentProvider();
-    const meta = providerMeta(pid);
-    const live = modelPickAll.find((m) => m.id === modelSel.value);
-    const curated = meta.models.find((m) => m.id === modelSel.value);
-    const modelName = live?.name || live?.id || curated?.label || modelSel.value || meta.defaultModel;
-    const hasKey = keyIn.value.trim().length > 0;
-    byokState.textContent = pid + ' · ' + modelName + (hasKey ? ' · key ✓' : '');
-    byokState.title = pid + ' · ' + modelName + (hasKey ? ' · key set' : ' · no key');
-    byokState.classList.toggle('ch-byok-ready', hasKey);
-    byokCta.style.display = hasKey ? 'none' : 'inline';
-    byokSum.classList.toggle('ch-byok-missing', !hasKey);
-  }
-
-  function onProviderChange() {
-    const pid = currentProvider();
-    void populateModels(pid);
-    renderKeyLinks(pid);
-    keyIn.placeholder =
-      pid === 'anthropic' ? 'sk-ant-… (never leaves your browser)'
-      : pid === 'openrouter' ? 'sk-or-… (never leaves your browser)'
-      : 'sk-… (never leaves your browser)';
-    if (saveChk.checked) sessionStorage.setItem(SESSION_PROVIDER, pid);
-    updateByokState();
-  }
-
-  providerSel.addEventListener('change', onProviderChange);
-  modelSel.addEventListener('change', updateByokState);
-  keyIn.addEventListener('input', updateByokState);
-
-  // When the user enters a key for OpenAI/Anthropic, refresh the model list.
-  // Debounced so we don't hit the API on every keystroke.
-  let keyDebounce: number | null = null;
-  keyIn.addEventListener('input', () => {
-    const pid = currentProvider();
-    if (pid === 'openrouter') return; // OpenRouter is already loaded (public endpoint)
-    if (keyDebounce) window.clearTimeout(keyDebounce);
-    keyDebounce = window.setTimeout(() => {
-      // Only refresh once the key looks plausibly complete.
-      if (keyIn.value.trim().length >= 20) {
-        void populateModels(pid, modelSel.value);
-      }
-    }, 800);
-  });
-
-  // Restore a session-saved key if the user opted in previously this session.
-  (function restoreSession() {
-    const savedKey = sessionStorage.getItem(SESSION_KEY);
-    const savedProvider = sessionStorage.getItem(SESSION_PROVIDER) as ProviderId | null;
-    if (savedProvider && PROVIDERS.some((p) => p.id === savedProvider)) {
-      providerSel.value = savedProvider;
-    }
-    if (savedKey) {
-      keyIn.value = savedKey;
-      saveChk.checked = true;
-    }
-    // Fires the dynamic model fetch with the key already present, so the
-    // dropdown lands with real slugs on first paint.
-    onProviderChange();
-    updateByokState();
-  })();
-
-  // Persist / clear the session key when the checkbox toggles or key changes.
-  function syncSession() {
-    if (saveChk.checked && keyIn.value) {
-      sessionStorage.setItem(SESSION_KEY, keyIn.value);
-      sessionStorage.setItem(SESSION_PROVIDER, currentProvider());
-    } else {
-      sessionStorage.removeItem(SESSION_KEY);
-      sessionStorage.removeItem(SESSION_PROVIDER);
-    }
-  }
-  saveChk.addEventListener('change', syncSession);
-  keyIn.addEventListener('input', () => { if (saveChk.checked) syncSession(); });
-
-  // ── Preset chips ───────────────────────────────────────────────────────
-  chips.querySelectorAll<HTMLButtonElement>('.ch-chip').forEach((b) => {
-    b.addEventListener('click', () => {
-      // A suggestion chip submits immediately (like a Codex/ChatGPT prompt
-      // starter). Route through qIn (the submit handler's source of truth) and
-      // fire the same ask form the composer delegates to.
-      qIn.value = b.dataset.q || '';
-      askForm.requestSubmit();
-    });
-  });
-
-  // ── Database picker ─────────────────────────────────────────────────────
-  // Toggling chips is a hard filter on which databases the session may use.
-  // At least one must stay on; trying to turn the last one off is a no-op.
-  const sourcesBox = $('ch-sources');
-  const sourcesHint = $('ch-sources-hint');
-  const sourcesCount = $('ch-sources-count');
-  const sourcesSearch = $('ch-sources-search') as HTMLInputElement;
-  const sourcesEmpty = $('ch-sources-empty');
-  const sourceItems = Array.from(
-    document.querySelectorAll<HTMLButtonElement>('.ch-source-item')
-  );
-  let sourcesLocked = false;
-
-  function selectedSources(): string[] {
-    return sourceItems.filter((b) => b.classList.contains('is-on')).map((b) => b.dataset.source || '');
-  }
-  function setSource(b: HTMLButtonElement, on: boolean) {
-    b.classList.toggle('is-on', on);
-    b.setAttribute('aria-pressed', String(on));
-  }
-  function updateSourcesCount() {
-    const n = selectedSources().length;
-    if (sourcesCount) sourcesCount.textContent = `${n} of ${sourceItems.length}`;
-    if (!sourcesLocked && sourcesHint) {
-      sourcesHint.textContent = n === 0
-        ? 'Pick at least one database to ask.'
-        : 'Chitti answers only from the selected databases.';
-      sourcesHint.classList.toggle('is-warn', n === 0);
-    }
-  }
-  // The hard filter binds when the session is created (first ask), so the
-  // picker locks for the rest of the conversation. "+ new conversation" clears
-  // the session and calls unlockSources().
-  //
-  // The judgment-call toggle binds at the same moment and for the same
-  // reason: it is read once, when createSession() is called, so letting it
-  // change mid-conversation would show a control that no longer decides
-  // anything. It rides the same lock rather than growing a second mechanism.
-  const rlmBox = $('ch-rlm');
-  const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
-  const rlmHint = $('ch-rlm-hint');
-  const RLM_HINT_DEFAULT = rlmHint?.textContent || '';
-
-  function rlmEnabled(): boolean {
-    return !!rlmToggle?.checked;
-  }
-  function lockSources() {
-    sourcesLocked = true;
-    sourcesBox?.classList.add('is-locked');
-    sourceItems.forEach((b) => b.setAttribute('aria-disabled', 'true'));
-    if (sourcesSearch) sourcesSearch.disabled = true;
-    if (sourcesHint) {
-      sourcesHint.textContent = 'Locked for this conversation — start a new one to change.';
-      sourcesHint.classList.remove('is-warn');
-    }
-    rlmBox?.classList.add('is-locked');
-    if (rlmToggle) rlmToggle.disabled = true;
-    if (rlmHint) {
-      rlmHint.textContent = rlmEnabled()
-        ? 'On for this conversation. Start a new one to turn it off.'
-        : 'Off for this conversation. Start a new one to turn it on.';
-    }
-  }
-  function unlockSources() {
-    sourcesLocked = false;
-    sourcesBox?.classList.remove('is-locked');
-    sourceItems.forEach((b) => b.removeAttribute('aria-disabled'));
-    if (sourcesSearch) sourcesSearch.disabled = false;
-    updateSourcesCount();
-    rlmBox?.classList.remove('is-locked');
-    if (rlmToggle) rlmToggle.disabled = false;
-    if (rlmHint) rlmHint.textContent = RLM_HINT_DEFAULT;
-  }
-  sourceItems.forEach((b) => {
-    b.addEventListener('click', () => {
-      if (sourcesLocked) return;
-      setSource(b, !b.classList.contains('is-on'));
-      updateSourcesCount();
-    });
-  });
-  $('ch-sources-all')?.addEventListener('click', () => {
-    if (sourcesLocked) return;
-    sourceItems.forEach((b) => setSource(b, true));
-    updateSourcesCount();
-  });
-  $('ch-sources-none')?.addEventListener('click', () => {
-    if (sourcesLocked) return;
-    sourceItems.forEach((b) => setSource(b, false));
-    updateSourcesCount();
-  });
-  // Live filter: hide non-matching rows and any category group left empty.
-  sourcesSearch?.addEventListener('input', () => {
-    const q = sourcesSearch.value.trim().toLowerCase();
-    sourceItems.forEach((b) => { b.hidden = !!q && !(b.dataset.search || '').includes(q); });
-    let anyVisible = false;
-    document.querySelectorAll<HTMLElement>('.ch-source-group').forEach((g) => {
-      const vis = Array.from(g.querySelectorAll<HTMLElement>('.ch-source-item')).some((it) => !it.hidden);
-      g.hidden = !vis;
-      if (vis) anyVisible = true;
-    });
-    if (sourcesEmpty) sourcesEmpty.hidden = anyVisible;
-  });
-
-  // ── Status helpers ─────────────────────────────────────────────────────
-  // A successful run reads from the answer itself; the status line only
-  // carries in-flight and error states, so it hides on 'ok' instead of
-  // leaving a redundant "Done" chip above the finding.
-  function setStatus(tb: TurnBlock, kind: 'loading' | 'ok' | 'error' | 'stopped', msg: string) {
-    // 'ok' hides the line (success reads from the answer); every other kind —
-    // including the neutral 'stopped' — keeps it visible. 'stopped' is styled
-    // muted (not the red error dot): a user-cancel is not a failure.
-    tb.statusRow.style.display = kind === 'ok' ? 'none' : 'flex';
-    tb.statusDot.className = 'ch-status-dot ch-status-' + kind;
-    tb.statusMsg.textContent = msg;
-  }
-
-  // ── Trace rendering: a live timeline of the agent's tool calls ────────
-  // Receipt-style: a real per-line timestamp (captured once, at the moment
-  // the event first arrived), a strike-through+fade once a step resolves
-  // ('ch-trace-ok'), an amber glow on whichever single step is in flight
-  // ('ch-trace-running'), and — only for the verify step, only on a pass —
-  // an ink-stamped VERIFIED badge.
-  //
-  // startTimes and the latest trace/files snapshot used to be module-level
-  // singletons; they now live on the TurnBlock passed in (tb.startTimes,
-  // tb.trace, tb.files) so each turn keeps its own.
-
-  // HH:MM:SS.d, tenths precision, matching the spec's receipt timestamp style.
-  function formatTs(ts: number): string {
-    const d = new Date(ts);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    const tenths = Math.floor(d.getMilliseconds() / 100);
-    return `${hh}:${mm}:${ss}.${tenths}`;
-  }
-
-  // Compact token count, receipt-style: "217" -> "217 tok", "1834" -> "1.8k tok".
-  function formatTokens(n: number): string {
-    const val = n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
-    return val + ' tok';
-  }
-
-  // Compact byte count for the nested llm() receipts: "820 B", "4.1 KB".
-  function formatBytes(n: number): string {
-    return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
-  }
-
-  // The plan card (backlog #10): the turn's committed insight brief, rendered
-  // at the top of the trace. The insight sits in Newsreader italic; the steps
-  // are a mono checklist checked off against the turn's later tool events via
-  // the shared matchStepToEvent matcher. State is honest, never faked:
-  //   • matched by ≥1 event         → checked (done).
-  //   • unmatched, run still going   → pending (open box).
-  //   • unmatched, run ended         → "not needed" (neutral strike, NOT a check).
-  // If the model ran data tools that fit no step, a single muted "off-plan" line
-  // appears once — deviation shown honestly, not hidden. Plan token cost shows
-  // on the card like every other receipt.
-  const PLAN_OFF_PLAN_TOOLS = new Set([
-    'find_series', 'fetch_series', 'fetch_worldbank', 'fetch_worldbank_all',
-    'fetch_owid', 'fetch_imf', 'execute_js', 'growth_stats', 'correlate', 'delegate_source',
-  ]);
-  function buildPlanCard(plan: InsightBrief, events: TraceEvent[], tokens?: number): HTMLElement {
-    const card = document.createElement('div');
-    card.className = 'ch-plan';
-
-    // Header: a small "plan" label + the plan's token cost, receipt-style.
-    const header = document.createElement('div');
-    header.className = 'ch-plan-header';
-    const label = document.createElement('span');
-    label.className = 'ch-plan-label';
-    label.textContent = 'plan';
-    header.appendChild(label);
-    if (typeof tokens === 'number' && tokens > 0) {
-      const tok = document.createElement('span');
-      tok.className = 'ch-plan-tokens';
-      tok.textContent = formatTokens(tokens);
-      header.appendChild(tok);
-    }
-    card.appendChild(header);
-
-    // The insight line — the story this turn set out to surface.
-    const insight = document.createElement('p');
-    insight.className = 'ch-plan-insight';
-    insight.textContent = plan.insight;
-    card.appendChild(insight);
-
-    // Only tool events (not the plan itself, reasoning, verify, etc.) can match.
-    const toolEvents = events.filter(
-      (ev) => ev.tool && ev.tool !== 'plan' && ev.tool !== 'reasoning'
-    );
-    // The run has ended once a terminal step is present — after that, an
-    // unmatched step reads as "not needed", not still-pending.
-    const runEnded = toolEvents.some(
-      (ev) => ev.tool === 'verify' || ev.tool === 'finish' || ev.tool === 'finish_explanation'
-    );
-
-    const list = document.createElement('ul');
-    list.className = 'ch-plan-steps';
-    const matchedEventIdx = new Set<number>();
-    (plan.steps || []).forEach((step: PlanStep) => {
-      let matched = false;
-      toolEvents.forEach((ev, idx) => {
-        if (matchStepToEvent(step, ev)) {
-          matched = true;
-          matchedEventIdx.add(idx);
-        }
-      });
-      const li = document.createElement('li');
-      const state = matched ? 'done' : runEnded ? 'skipped' : 'pending';
-      li.className = 'ch-plan-step ch-plan-step-' + state;
-      const box = document.createElement('span');
-      box.className = 'ch-plan-box';
-      // ✓ done · ○ pending · – not-needed. role/aria speaks the state in words.
-      box.textContent = matched ? '✓' : runEnded ? '–' : '○';
-      box.setAttribute('role', 'img');
-      box.setAttribute('aria-label', matched ? 'done' : runEnded ? 'not needed' : 'pending');
-      li.appendChild(box);
-      const what = document.createElement('span');
-      what.className = 'ch-plan-what';
-      what.textContent = step.what;
-      li.appendChild(what);
-      if (step.tool_hint) {
-        const hint = document.createElement('span');
-        hint.className = 'ch-plan-hint';
-        hint.textContent = step.tool_hint;
-        li.appendChild(hint);
-      }
-      list.appendChild(li);
-    });
-    card.appendChild(list);
-
-    // Off-plan: a data tool ran that matched no step. Surface it ONCE, muted —
-    // an honest "the model deviated" note, never a fake check on the checklist.
-    const offPlan = toolEvents.some(
-      (ev, idx) => !matchedEventIdx.has(idx) && ev.tool && PLAN_OFF_PLAN_TOOLS.has(ev.tool)
-    );
-    if (offPlan) {
-      const off = document.createElement('div');
-      off.className = 'ch-plan-off';
-      off.textContent = 'off-plan: ran a step the plan did not call for';
-      card.appendChild(off);
-    }
-    return card;
-  }
-
-  // The could-not-verify receipt: a compact, honest verdict block for a verify
-  // step that ran but did NOT confirm the answer. Shows the verdict, the
-  // verifier's self-confidence, and the issue count, then the concrete doubts
-  // in an expandable <details> (the same receipt-detail motif used elsewhere in
-  // the trace). Muted throughout — never amber.
-  function buildVerifyReceipt(e: TraceEvent): HTMLElement {
-    const wrap = document.createElement('div');
-    wrap.className = 'ch-verify-receipt';
-    const verdict = document.createElement('div');
-    verdict.className = 'ch-verify-verdict';
-    verdict.textContent = 'could not verify';
-    wrap.appendChild(verdict);
-    const meta = document.createElement('div');
-    meta.className = 'ch-trace-detail';
-    const conf = e.confidence && e.confidence !== 'none' ? 'confidence: ' + e.confidence : 'confidence: unknown';
-    const n = (e.issues && e.issues.length) || 0;
-    meta.textContent = conf + ' · ' + n + (n === 1 ? ' issue' : ' issues');
-    wrap.appendChild(meta);
-    if (e.issues && e.issues.length) {
-      const det = document.createElement('details');
-      det.className = 'ch-verify-issues';
-      const sum = document.createElement('summary');
-      sum.textContent = 'what was doubted';
-      det.appendChild(sum);
-      const ul = document.createElement('ul');
-      ul.className = 'ch-verify-issue-list';
-      for (const iss of e.issues) {
-        const li = document.createElement('li');
-        li.textContent = iss;
-        ul.appendChild(li);
-      }
-      det.appendChild(ul);
-      wrap.appendChild(det);
-    }
-    return wrap;
-  }
-
-  // The search-receipt card: find_series streams as a visible receipt of the
-  // scorer's work — how many databases were searched, how many candidates were
-  // weighed, the top match with its source, and which query terms/synonyms
-  // actually fired for it. Built as DOM (not template) so it lives in the
-  // JS-rendered trace; its styles are :global() for the same reason.
-  function buildReceiptCard(r: NonNullable<TraceEvent['receipt']>): HTMLElement {
-    const card = document.createElement('div');
-    card.className = 'ch-receipt';
-
-    // Stat line: N databases → K candidates → top match.
-    const stats = document.createElement('div');
-    stats.className = 'ch-receipt-stats';
-    const nDb = r.sourcesSearched.length;
-    const addStat = (n: number, label: string) => {
-      const wrap = document.createElement('span');
-      wrap.className = 'ch-receipt-stat';
-      const num = document.createElement('span');
-      num.className = 'ch-receipt-num';
-      num.textContent = String(n);
-      wrap.appendChild(num);
-      wrap.appendChild(document.createTextNode(' ' + label));
-      stats.appendChild(wrap);
-    };
-    const arrow = () => {
-      const a = document.createElement('span');
-      a.className = 'ch-receipt-arrow';
-      a.textContent = '→';
-      stats.appendChild(a);
-    };
-    addStat(nDb, nDb === 1 ? 'database' : 'databases');
-    arrow();
-    addStat(r.candidateCount, r.candidateCount === 1 ? 'candidate' : 'candidates');
-    if (r.topMatch) {
-      arrow();
-      const tm = document.createElement('span');
-      tm.className = 'ch-receipt-toplabel';
-      tm.textContent = 'top match';
-      stats.appendChild(tm);
-    }
-    card.appendChild(stats);
-
-    if (r.topMatch) {
-      // The match itself: indicator name (Newsreader italic) + source tag.
-      const match = document.createElement('div');
-      match.className = 'ch-receipt-match';
-      const name = document.createElement('span');
-      name.className = 'ch-receipt-name';
-      name.textContent = r.topMatch.name;
-      match.appendChild(name);
-      const src = document.createElement('span');
-      src.className = 'ch-receipt-source';
-      src.textContent = r.topMatch.sourceLabel;
-      match.appendChild(src);
-      card.appendChild(match);
-
-      // Which terms/synonyms fired. Synonym expansions read "gdp → economy"
-      // with the expansion in amber; plain base-term hits are chips.
-      const base = r.topMatch.matchedBase;
-      const syns = r.topMatch.matchedSynonyms;
-      if (base.length || syns.length) {
-        const terms = document.createElement('div');
-        terms.className = 'ch-receipt-terms';
-        const lead = document.createElement('span');
-        lead.className = 'ch-receipt-lead';
-        lead.textContent = 'matched';
-        terms.appendChild(lead);
-        for (const t of base) {
-          const chip = document.createElement('code');
-          chip.className = 'ch-receipt-term';
-          chip.textContent = t;
-          terms.appendChild(chip);
-        }
-        for (const s of syns) {
-          const exp = document.createElement('span');
-          exp.className = 'ch-receipt-syn';
-          const from = document.createElement('code');
-          from.className = 'ch-receipt-term';
-          from.textContent = s.term;
-          const via = document.createElement('code');
-          via.className = 'ch-receipt-term ch-receipt-term-syn';
-          via.textContent = s.synonym;
-          exp.appendChild(from);
-          exp.appendChild(document.createTextNode(' → '));
-          exp.appendChild(via);
-          terms.appendChild(exp);
-        }
-        card.appendChild(terms);
-      }
-    }
-    return card;
-  }
-
-  // Keep the collapsed <details> summary honest: while a step is in flight it
-  // names that step; once the run settles it becomes a terse step count. The
-  // token/cost totals land separately via renderRunningTotal().
-  function updatePanelSummary(tb: TurnBlock, events: TraceEvent[]) {
-    const steps = events.filter((e) => e.tool !== 'reasoning');
-    const runningEv = steps.find((e) => e.status === 'running');
-    const hasError = steps.some((e) => e.status === 'error');
-    if (!steps.length) {
-      // Run just started, nothing traced yet.
-      tb.panelLabel.textContent = 'Working…';
-      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-running';
-    } else if (runningEv) {
-      tb.panelLabel.textContent = runningEv.tool + '…';
-      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-running';
-    } else {
-      tb.panelLabel.textContent =
-        'How it got this · ' + steps.length + (steps.length === 1 ? ' step' : ' steps');
-      tb.panelDot.className = 'ch-panel-dot' + (hasError ? ' ch-panel-dot-error' : ' ch-panel-dot-ok');
-    }
-  }
-
-  function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
-    tb.panel.style.display = 'block';
-    updatePanelSummary(tb, events);
-    tb.trace = events;
-    const stick =
-      tb.traceEl.scrollHeight - tb.traceEl.scrollTop - tb.traceEl.clientHeight < 40;
-    // Preserve open/closed state of any inline-expanded file across re-renders
-    // (renderTrace re-runs on every trace AND every file event).
-    const openPaths = new Set(
-      Array.from(tb.traceEl.querySelectorAll<HTMLDetailsElement>('details[open]')).map(
-        (d) => d.dataset.path || ''
-      )
-    );
-    tb.traceEl.innerHTML = '';
-    // Index of the LAST verify event: a failing verify that is followed by
-    // another verify is a pre-retry attempt ("not verified — retrying"); only
-    // the final verify event renders the full could-not-verify / unavailable
-    // treatment, so the receipt reflects the turn's actual outcome.
-    let lastVerifyIdx = -1;
-    events.forEach((e, idx) => { if (e.tool === 'verify') lastVerifyIdx = idx; });
-    events.forEach((e, i) => {
-      if (tb.startTimes[i] === undefined) tb.startTimes[i] = performance.now();
-
-      // Reasoning is a synthetic, already-settled event (see agent.ts) — not
-      // a tool call, so no dot/glow/duration/token treatment implying one,
-      // and no label or toggle calling it out as a distinct internal
-      // artifact. It just reads as the agent's own words, in place, like the
-      // rest of the terse narration — a clamped line count keeps a long
-      // thinking block from dominating the trace.
-      if (e.tool === 'reasoning') {
-        const rrow = document.createElement('p');
-        rrow.className = 'ch-trace-thinking';
-        rrow.textContent = e.detail || '';
-        tb.traceEl.appendChild(rrow);
-        return;
-      }
-
-      // The insight brief (backlog #10) renders as a plan card at the TOP of the
-      // trace — the insight line in Newsreader italic, the steps as a mono
-      // checklist that checks off against later tool events. Not a tool row: no
-      // dot/glow/duration column implying one.
-      if (e.tool === 'plan' && e.plan) {
-        tb.traceEl.appendChild(buildPlanCard(e.plan, events, e.tokens));
-        return;
-      }
-      // A gated plan whose brief was unusable (parse failed or the planning call
-      // errored) renders a muted one-line receipt in place of the card — so the
-      // missing plan is explained, never silent. Not a tool row: no dot/glow.
-      if (e.tool === 'plan' && !e.plan) {
-        const skip = document.createElement('p');
-        skip.className = 'ch-plan-skipped';
-        skip.textContent = e.detail || 'plan skipped';
-        tb.traceEl.appendChild(skip);
-        return;
-      }
-
-      const row = document.createElement('div');
-      // A recursive llm() step renders as an indented child line-item under the
-      // execute_js step that spawned it, so the RLM recursion is visible.
-      row.className =
-        'ch-trace-row ch-trace-' + e.status + (e.nested ? ' ch-trace-nested' : '');
-      const dot = document.createElement('span');
-      dot.className = 'ch-trace-dot';
-      const body = document.createElement('div');
-      body.className = 'ch-trace-body';
-      // Head: timestamp, then tool_name · arg_summary on one line.
-      const head = document.createElement('div');
-      head.className = 'ch-trace-head';
-      const stamp = document.createElement('span');
-      stamp.className = 'ch-trace-ts';
-      stamp.textContent = formatTs(e.ts);
-      head.appendChild(stamp);
-      const name = document.createElement('span');
-      name.className = 'ch-trace-name';
-      name.textContent = e.tool;
-      head.appendChild(name);
-      // A write_file/read_file row whose path matches a real VFS entry
-      // becomes expandable in place — no separate "workspace" list
-      // duplicating the same content elsewhere on the page.
-      const filePath = (e.tool === 'write_file' || e.tool === 'read_file') ? e.argSummary : '';
-      const fileContent = filePath ? tb.files[filePath] : undefined;
-      if (e.argSummary && fileContent === undefined) {
-        const sep = document.createElement('span');
-        sep.className = 'ch-trace-sep';
-        sep.textContent = '·';
-        head.appendChild(sep);
-        const arg = document.createElement('span');
-        arg.className = 'ch-trace-arg';
-        arg.textContent = e.argSummary;
-        head.appendChild(arg);
-        body.appendChild(head);
-      } else if (fileContent !== undefined) {
-        const det = document.createElement('details');
-        det.className = 'ch-trace-file';
-        det.dataset.path = filePath;
-        if (openPaths.has(filePath)) det.open = true;
-        const sum = document.createElement('summary');
-        sum.appendChild(head);
-        const sep = document.createElement('span');
-        sep.className = 'ch-trace-sep';
-        sep.textContent = '·';
-        head.appendChild(sep);
-        const arg = document.createElement('span');
-        arg.className = 'ch-trace-arg';
-        arg.textContent = filePath;
-        head.appendChild(arg);
-        const ext = document.createElement('span');
-        ext.className = 'ch-file-ext ch-file-ext-' + fileExt(filePath);
-        ext.textContent = fileExt(filePath);
-        sum.appendChild(ext);
-        const pre = document.createElement('pre');
-        pre.className = 'ch-file-body';
-        pre.textContent = fileContent;
-        det.appendChild(sum);
-        det.appendChild(pre);
-        body.appendChild(det);
-      } else {
-        body.appendChild(head);
-      }
-      // find_series carries a structured receipt — render the dedicated
-      // search-receipt card instead of the plain "N hits" detail line.
-      if (e.tool === 'find_series' && e.receipt) {
-        body.appendChild(buildReceiptCard(e.receipt));
-      } else if (e.detail && e.tool !== 'verify') {
-        const d = document.createElement('div');
-        d.className = 'ch-trace-detail';
-        d.textContent = e.detail;
-        body.appendChild(d);
-      }
-      // Provenance: a write_file whose content came from llm() is model-derived,
-      // never fetched data — labelled here so it can never be read as measured.
-      if (e.derived) {
-        const prov = document.createElement('span');
-        prov.className = 'ch-trace-derived';
-        prov.textContent = 'model-derived';
-        body.appendChild(prov);
-      }
-      // The verify receipt renders one of the three honest outcomes. The
-      // ink-stamped amber VERIFIED badge appears ONLY on a genuine pass; the
-      // other states are muted and never borrow amber.
-      if (e.tool === 'verify') {
-        const isLast = i === lastVerifyIdx;
-        if (e.pass === true) {
-          const stampEl = document.createElement('span');
-          stampEl.className = 'ch-stamp';
-          stampEl.textContent = 'verified';
-          // The rubber-stamp styling carries the "passed a check" meaning
-          // visually; role="img" + aria-label speak it in plain words.
-          stampEl.setAttribute('role', 'img');
-          stampEl.setAttribute('aria-label', verificationStampLabel());
-          body.appendChild(stampEl);
-          if (e.confidence && e.confidence !== 'none') {
-            const c = document.createElement('div');
-            c.className = 'ch-trace-detail';
-            c.textContent = 'confidence: ' + e.confidence;
-            body.appendChild(c);
-          }
-        } else if (!isLast) {
-          // A failing verify with another verify still to come = a retry follows.
-          const note = document.createElement('div');
-          note.className = 'ch-trace-detail';
-          note.textContent = 'not verified — retrying';
-          body.appendChild(note);
-        } else if (e.verifyStatus === 'unavailable') {
-          const note = document.createElement('div');
-          note.className = 'ch-trace-detail ch-trace-unavailable';
-          note.textContent = 'verification unavailable — provider error';
-          body.appendChild(note);
-        } else {
-          // Final could-not-verify: verdict + confidence + issue count, with the
-          // concrete doubts in an expandable detail (reusing the trace's
-          // details/summary receipt pattern).
-          body.appendChild(buildVerifyReceipt(e));
-        }
-      }
-      const metaCol = document.createElement('div');
-      metaCol.className = 'ch-trace-meta-col';
-      const meta = document.createElement('span');
-      meta.className = 'ch-trace-meta';
-      if (e.status === 'ok') {
-        // Prefer a measured duration when the event carries one (llm() steps do,
-        // so a staged/offline render still shows a real time); otherwise fall
-        // back to this render's own timer.
-        const ms =
-          typeof e.durationMs === 'number'
-            ? e.durationMs
-            : Math.round(performance.now() - tb.startTimes[i]);
-        meta.textContent = ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's';
-      } else if (e.status === 'error') {
-        meta.textContent = 'error';
-      } else {
-        meta.textContent = '…';
-      }
-      metaCol.appendChild(meta);
-      // Per-step token count, right-aligned, receipt-style. Omitted entirely
-      // (not shown as 0) when this step has no attributable LLM usage.
-      if (typeof e.tokens === 'number' && e.tokens > 0) {
-        const tok = document.createElement('span');
-        tok.className = 'ch-trace-tokens';
-        tok.textContent = formatTokens(e.tokens);
-        metaCol.appendChild(tok);
-      }
-      row.appendChild(dot);
-      row.appendChild(body);
-      row.appendChild(metaCol);
-      tb.traceEl.appendChild(row);
-    });
-    if (stick) tb.traceEl.scrollTop = tb.traceEl.scrollHeight;
-  }
-
-  // ── Virtual-FS rendering ───────────────────────────────────────────────
-  function fileExt(path: string): string {
-    const dot = path.lastIndexOf('.');
-    return dot === -1 ? 'txt' : path.slice(dot + 1).toLowerCase();
-  }
-
-  // No separate "workspace" list — a write_file trace row inline-expands its
-  // own content (see renderTrace) instead of duplicating the same file in a
-  // second section below the trace. This just keeps the latest VFS snapshot
-  // around for renderTrace to read from, and re-renders the trace so a file
-  // written moments after its trace row appeared becomes expandable.
-  function renderFiles(tb: TurnBlock, files: Record<string, string>) {
-    tb.panel.style.display = 'block';
-    tb.files = files;
-    renderTrace(tb, tb.trace);
-  }
-
-  // ── ECharts (dynamic CDN import, dark-theme aware) ─────────────────────
-  // The loaded module itself stays a true module-level singleton; it's a
-  // shared CDN import cache, not per-turn state. Each turn's own chart
-  // instance and its last-rendered spec live on the TurnBlock instead
-  // (tb.chartInstance, tb.lastSpec).
-  let echartsMod: any = null;
-
-  async function loadECharts() {
-    if (echartsMod) return echartsMod;
-    echartsMod = await import(
-      /* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.esm.min.js'
-    );
-    return echartsMod;
-  }
-
-  function cssVar(name: string): string {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  }
-
-  // Minimal HTML escape for values interpolated into the tooltip's HTML
-  // string (series names, unit, axis label all originate from model/spec text).
-  function escapeHtml(s: string): string {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-    );
-  }
-
-  function buildOption(spec: ChartSpec) {
-    const signal = cssVar('--signal') || '#d9a13b';
-    const muted = cssVar('--fg-muted') || '#79817c';
-    const fg = cssVar('--fg') || '#e6e9e7';
-    const faint = cssVar('--fg-faint') || 'rgba(255,255,255,0.08)';
-    const bg = cssVar('--bg') || '#0b0d0c';
-
-    // Palette: primary in signal amber, the rest in muted-derived tones.
-    const palette = [signal, muted, fg, '#6b8ab8', '#5fa97c', '#c0605a', '#9a7cc0', '#b8946b'];
-
-    const baseText = { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 };
-    // No y-axis `name` inside the canvas at all: long unit strings ("deaths
-    // per 1,000 live births") clipped against the container edges no matter
-    // where ECharts anchored them. The unit renders in the chart card's
-    // header instead (see renderChart / .ch-chart-unit).
-    // containLabel keeps rotated category labels and axis ticks inside the
-    // grid instead of spilling past the right/bottom edges.
-    // A long line series gets a bottom dataZoom slider; reserve room for it so
-    // it never overlaps the x-axis tick labels.
-    const hasZoom = needsDataZoom(spec);
-    const grid = { left: 12, right: 18, top: 40, bottom: hasZoom ? 34 : 8, containLabel: true };
-    const axisLine = { lineStyle: { color: faint } };
-    const splitLine = { lineStyle: { color: faint, type: 'dashed' as const } };
-
-    // The unit lives in spec.y_axis (also shown in the card header). Only the
-    // axis tick and tooltip number formatting consult it — via formatAxisValue,
-    // which appends % for percent units and otherwise just compacts magnitudes.
-    const unit = spec.y_axis || '';
-    const reduce = prefersReducedMotion();
-
-    // A themed legend. type:'scroll' with paged arrows only when there are
-    // enough series to warrant it (legendMode); otherwise a plain legend that
-    // still wraps. Show/hide (legend click) behavior is ECharts' default in
-    // both modes, so chart-link's "row with a hidden series does nothing"
-    // contract is unchanged.
-    const legend = {
-      textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 10 },
-      top: 0,
-      left: 0,
-      type: legendMode(spec),
-      icon: 'roundRect',
-      // Themed pager arrows: muted when active, faint when there's no more to
-      // page. Amber is reserved for the dataZoom handle, so the arrows stay
-      // monochrome with the rest of the axis furniture.
-      pageIconColor: muted,
-      pageIconInactiveColor: faint,
-      pageTextStyle: baseText,
-    };
-
-    // Value-axis tick labels: compact, unit-aware. Safe on single-point /
-    // all-equal series — formatAxisValue never divides by a data range.
-    const valueAxisLabel = { ...baseText, formatter: (v: number) => formatAxisValue(v, unit) };
-
-    // Shared-axis tooltip: monospace, values formatted like the axis, the unit
-    // shown once in the header, series ordered by value descending at that x.
-    // Rows whose series has no point here (null) are dropped, so a hidden or
-    // absent series contributes nothing — never a blank "null" line.
-    function axisTooltipFormatter(params: any): string {
-      const arr = Array.isArray(params) ? params : [params];
-      if (!arr.length) return '';
-      const rows = arr
-        .map((p: any) => {
-          const raw = Array.isArray(p?.value) ? p.value[1] : p?.value;
-          const num = raw == null ? null : Number(raw);
-          return { name: p?.seriesName ?? '', marker: p?.marker ?? '', num };
-        })
-        .filter((r: any) => r.num != null && Number.isFinite(r.num))
-        .sort((a: any, b: any) => b.num - a.num);
-      if (!rows.length) return '';
-      const head = arr[0]?.axisValueLabel ?? arr[0]?.axisValue ?? '';
-      const unitTag = unit ? ` · ${escapeHtml(unit)}` : '';
-      const headHtml = `<div style="opacity:.7;margin-bottom:2px">${escapeHtml(String(head))}${unitTag}</div>`;
-      const body = rows
-        .map(
-          (r: any) =>
-            `<div style="display:flex;justify-content:space-between;gap:14px">` +
-            `<span>${r.marker}${escapeHtml(r.name)}</span>` +
-            `<span>${escapeHtml(formatAxisValue(r.num, unit))}</span></div>`
-        )
-        .join('');
-      return headHtml + body;
-    }
-
-    const tooltip = {
-      trigger: 'axis' as const,
-      backgroundColor: bg,
-      borderColor: faint,
-      textStyle: { color: fg, fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
-      formatter: axisTooltipFormatter,
-    };
-
-    // Minimal toolbox: save-as-image only, dark background baked in, filename
-    // from the title slug. No zoom/restore/dataView clutter.
-    const toolbox = {
-      show: true,
-      right: 8,
-      top: 0,
-      itemSize: 13,
-      feature: {
-        saveAsImage: {
-          title: 'Save',
-          name: titleSlug(spec.title),
-          backgroundColor: bg || '#0b0d0c',
-          pixelRatio: 2,
-          iconStyle: { borderColor: muted },
-          emphasis: { iconStyle: { borderColor: fg } },
-        },
-      },
-    };
-
-    // A themed dataZoom pair for long line series: inside (wheel/pinch) + a
-    // slim slider with an amber handle. Empty [] for short charts. Zoom
-    // animation is disabled under prefers-reduced-motion.
-    const dataZoom = hasZoom
-      ? [
-          { type: 'inside' as const, zoomLock: false, zoomOnMouseWheel: true, moveOnMouseWheel: false },
-          {
-            type: 'slider' as const,
-            height: 16,
-            bottom: 4,
-            borderColor: faint,
-            backgroundColor: 'transparent',
-            fillerColor: 'rgba(217,161,59,0.10)',
-            dataBackground: { lineStyle: { color: faint }, areaStyle: { color: faint } },
-            selectedDataBackground: { lineStyle: { color: signal }, areaStyle: { color: 'rgba(217,161,59,0.15)' } },
-            handleStyle: { color: signal, borderColor: signal },
-            moveHandleStyle: { color: muted },
-            textStyle: { color: muted, fontFamily: 'JetBrains Mono, monospace', fontSize: 9 },
-            labelFormatter: '',
-          },
-        ]
-      : [];
-
-    if (spec.type === 'scatter') {
-      return {
-        animation: !reduce,
-        color: palette,
-        textStyle: baseText,
-        grid,
-        legend,
-        toolbox,
-        // Scatter is per-point (item trigger), not a shared axis — its value is
-        // a coordinate pair, so it keeps a dedicated single-point formatter.
-        tooltip: {
-          ...tooltip,
-          trigger: 'item' as const,
-          formatter: (p: any) =>
-            `${p?.marker ?? ''}${escapeHtml(p?.seriesName ?? '')}<br/>` +
-            `${escapeHtml(String(p?.value?.[0] ?? ''))}, ${escapeHtml(formatAxisValue(Number(p?.value?.[1]), unit))}`,
-        },
-        xAxis: { type: 'value', name: spec.x_axis, nameLocation: 'middle' as const, nameGap: 28, nameTextStyle: baseText, axisLine, splitLine, axisLabel: baseText },
-        yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
-        series: spec.series.map((s) => ({
-          name: s.name,
-          type: 'scatter',
-          symbolSize: 8,
-          data: s.data,
-        })),
-      };
-    }
-
-    if (spec.type === 'bar' || spec.type === 'grouped-bar') {
-      // Categories come from the union of x values across series.
-      const cats: (string | number)[] = [];
-      for (const s of spec.series) for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
-      return {
-        animation: !reduce,
-        color: palette,
-        textStyle: baseText,
-        grid,
-        legend: spec.series.length > 1 ? legend : { show: false },
-        toolbox,
-        tooltip,
-        xAxis: {
-          type: 'category',
-          data: cats,
-          // No axis `name` for category bars — the categories are
-          // self-describing and the trailing name label was clipping at the
-          // container's right edge.
-          axisLine,
-          axisLabel: { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
-        },
-        yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
-        series: spec.series.map((s) => {
-          const map = new Map(s.data.map(([x, y]) => [x, y]));
-          return {
-            name: s.name,
-            type: 'bar',
-            barMaxWidth: 28,
-            data: cats.map((c) => map.get(c) ?? null),
-            itemStyle: spec.series.length === 1 ? { color: signal } : {},
-          };
-        }),
-      };
-    }
-
-    // Default: line time-series.
-    // x-axis is category-type (a fixed list of year labels), so series data
-    // must be plain y-values indexed positionally against that category
-    // list — NOT [x, y] coordinate pairs. Passing raw pairs here (the
-    // previous bug) makes ECharts read each pair as [categoryIndex, value],
-    // which almost never matches the literal year number, so every line
-    // silently renders with zero points and no error. Same fix already
-    // applied correctly in the bar/grouped-bar branch above: build the
-    // shared category list once, then map each series onto it by year.
-    const lineCats: (string | number)[] = [];
-    for (const s of spec.series) for (const [x] of s.data) if (!lineCats.includes(x)) lineCats.push(x);
-    lineCats.sort((a, b) => Number(a) - Number(b));
-    return {
-      animation: !reduce,
-      color: palette,
-      textStyle: baseText,
-      grid,
-      legend: spec.series.length > 1 ? legend : { show: false },
-      toolbox,
-      tooltip,
-      dataZoom,
-      xAxis: {
-        type: 'category',
-        boundaryGap: false,
-        axisLine,
-        axisLabel: baseText,
-        data: lineCats,
-      },
-      yAxis: { type: 'value', axisLine, splitLine, axisLabel: valueAxisLabel },
-      series: spec.series.map((s, i) => {
-        const map = new Map(s.data.map(([x, y]) => [x, y]));
-        return {
-          name: s.name,
-          type: 'line',
-          smooth: false,
-          showSymbol: false,
-          lineStyle: { width: i === 0 ? 2 : 1.4 },
-          data: lineCats.map((c) => map.get(c) ?? null),
-        };
-      }),
-    };
-  }
-
-  // ── Chart ↔ evidence-table linking ─────────────────────────────────────
-  // Pure index math lives in chart-link.ts (matchPointToRow / matchRowToPoint);
-  // this half is the DOM/ECharts glue. Nothing here calls the model or mutates
-  // agent state — it only connects a click/hover to the row that backs it.
-
-  function prefersReducedMotion(): boolean {
-    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  }
-
-  // The <tr> elements currently rendered in this turn's evidence table, index
-  // aligned with the first tb.lastRows entries (the table caps at 500 rows).
-  function tableRows(tb: TurnBlock): HTMLTableRowElement[] {
-    return Array.from(tb.tableEl.querySelectorAll<HTMLTableRowElement>('tbody tr[data-row]'));
-  }
-
-  function clearRowHighlight(tb: TurnBlock) {
-    if (tb.activeRowIndex < 0) return;
-    const prev = tb.tableEl.querySelector('tbody tr.ch-row-active');
-    if (prev) prev.classList.remove('ch-row-active');
-    tb.activeRowIndex = -1;
-  }
-
-  // Highlight the evidence row at lastRows[index] and bring it into view.
-  // Toggling: clicking the already-active row's point clears it instead.
-  function highlightRow(tb: TurnBlock, index: number) {
-    if (index < 0) return;
-    if (tb.activeRowIndex === index) { clearRowHighlight(tb); return; }
-    clearRowHighlight(tb);
-    const rows = tableRows(tb);
-    const tr = rows[index];
-    if (!tr) return; // row is past the 500-row table cap — nothing to show
-    tb.dataDetails.open = true; // reveal the collapsed evidence section
-    tr.classList.add('ch-row-active');
-    tb.activeRowIndex = index;
-    tr.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-  }
-
-  // Chart point → evidence row: the shared body of the chart-click handler,
-  // named so it's one code path whether triggered by a real ECharts click or
-  // an offline harness. Maps the (series,data) index to its backing row and
-  // toggles that row's highlight.
-  function activateChartPoint(tb: TurnBlock, seriesIndex: number, dataIndex: number) {
-    const row = matchPointToRow(tb.lastSpec, seriesIndex, dataIndex, tb.lastRows);
-    if (!row) return;
-    highlightRow(tb, tb.lastRows.indexOf(row));
-  }
-
-  // (Re)bind click + hover linking to tb.chartInstance. Called on every render
-  // (renderChart) and on theme re-init, always after a fresh init or with
-  // `off` first, so listeners never stack across turns.
-  function bindChartLinking(tb: TurnBlock) {
-    const chart = tb.chartInstance;
-    if (!chart) return;
-    chart.off('click');
-    chart.on('click', (params: any) => {
-      if (params?.componentType !== 'series') return;
-      activateChartPoint(tb, params.seriesIndex, params.dataIndex);
-    });
-    // Click on empty chart space (no series target) clears the highlight.
-    const zr = chart.getZr();
-    zr.off('click');
-    zr.on('click', (e: any) => { if (!e.target) clearRowHighlight(tb); });
-  }
-
-  // Table row → chart: highlight + tooltip for the matching point on hover /
-  // keyboard focus; clear on leave / blur. Graceful no-op when the row has no
-  // visible point (e.g. its series is hidden by the legend, or type=scatter).
-  function highlightPointForRow(tb: TurnBlock, row: DataRow) {
-    const chart = tb.chartInstance;
-    if (!chart) return;
-    const p = matchRowToPoint(tb.lastSpec, row);
-    if (!p) return;
-    chart.dispatchAction({ type: 'highlight', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
-    chart.dispatchAction({ type: 'showTip', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
-  }
-  function downplayPointForRow(tb: TurnBlock, row: DataRow) {
-    const chart = tb.chartInstance;
-    if (!chart) return;
-    const p = matchRowToPoint(tb.lastSpec, row);
-    if (!p) return;
-    chart.dispatchAction({ type: 'downplay', seriesIndex: p.seriesIndex, dataIndex: p.dataIndex });
-    chart.dispatchAction({ type: 'hideTip' });
-  }
-
-  async function renderChart(tb: TurnBlock, spec: ChartSpec) {
-    tb.lastSpec = spec;
-    tb.canvasEl.classList.remove('ch-canvas-pending');
-    tb.renderFlag.style.display = 'inline';
-    // NOTE: this used to also do `chartWrap.style.display = 'block'` — a
-    // leftover from before the chart moved into `.ch-canvas` (task 1), back
-    // when `#ch-chart-wrap` literally wrapped the chart itself. That id now
-    // belongs to the *answer* section (finding text, confidence badge, data
-    // table, citations) below the panel, so flipping it here was prematurely
-    // revealing an empty answer section mid-run, every time the chart
-    // rendered. The canvas panel's own visibility is handled by `panel`
-    // (`.ch-panel`, set to display:grid when the run starts) — the chart
-    // itself needs no separate reveal.
-    const echarts = await loadECharts();
-    if (tb.chartInstance) tb.chartInstance.dispose();
-    tb.chartInstance = echarts.init(tb.chartEl, null, { renderer: 'canvas' });
-    tb.chartInstance.setOption(buildOption(spec));
-    // A fresh chart instance and (soon) a fresh evidence table — drop any
-    // highlight carried over from a previous render/turn, then (re)bind the
-    // click/hover linking to this instance.
-    clearRowHighlight(tb);
-    bindChartLinking(tb);
-    tb.chartTitle.textContent = spec.title;
-    // The canvas reads as nothing to a screen reader, so the container carries
-    // a text summary of what it plots (type + title + unit + series).
-    tb.chartEl.setAttribute('aria-label', chartAriaLabel(spec));
-    // Unit/axis description lives in the card header, not as an ECharts
-    // y-axis `name` — long unit strings ("deaths per 1,000 live births")
-    // were clipping against the container's left edge when rendered inside
-    // the canvas.
-    tb.chartUnit.textContent = spec.y_axis || '';
-    tb.renderFlag.style.display = 'none';
-  }
-
-  // Turn blocks whose chart is still "live" (wired to theme/resize), i.e.
-  // not yet superseded by a later turn. Task 5 removes an entry from this
-  // array when that turn's chart is frozen.
-  const liveChartTurns: TurnBlock[] = [];
-
-  // Re-theme every live turn's chart if the site theme toggles.
-  const themeObserver = new MutationObserver(() => {
-    for (const tb of liveChartTurns) {
-      if (tb.chartInstance && tb.lastSpec) {
-        tb.chartInstance.dispose();
-        tb.chartInstance = echartsMod.init(tb.chartEl, null, { renderer: 'canvas' });
-        tb.chartInstance.setOption(buildOption(tb.lastSpec));
-        // New instance ⇒ its listeners are gone; re-bind linking. The table
-        // DOM (and any active-row highlight) is untouched by a re-theme, so
-        // don't clear it here — only re-wire the chart-side events.
-        bindChartLinking(tb);
-      }
-    }
-  });
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  window.addEventListener('resize', () => {
-    for (const tb of liveChartTurns) tb.chartInstance?.resize();
-  });
-
-  // Every turn block created so far, regardless of whether it has a chart.
-  // Separate from liveChartTurns (which only tracks turns with a live
-  // chart) so the new-conversation reset can dispose every chart at once.
-  const allTurns: TurnBlock[] = [];
-
-  // The user's question, shown chat-style at the top of its turn.
-  function renderQuestion(tb: TurnBlock, question: string) {
-    tb.questionEl.textContent = question;
-    tb.questionEl.style.display = 'block';
-  }
-
-  // ── Data table + CSV ───────────────────────────────────────────────────
-  function renderTable(tb: TurnBlock, rows: DataRow[], csv: string) {
-    tb.lastRows = rows;
-    tb.lastCSV = csv;
-    tb.activeRowIndex = -1; // fresh table DOM ⇒ no highlight carried over
-    if (!rows.length) { tb.dataDetails.style.display = 'none'; return; }
-    tb.dataDetails.style.display = 'block';
-    tb.dataCount.textContent = String(rows.length);
-    const head = '<thead><tr><th scope="col">Country</th><th scope="col">ISO3</th><th scope="col">Year</th><th scope="col">Value</th></tr></thead>';
-    const shown = rows.slice(0, 500);
-    const body =
-      '<tbody>' +
-      shown
-        .map(
-          (r, i) =>
-            `<tr data-row="${i}"><td>${esc(r.country)}</td><td>${esc(r.iso3)}</td><td>${r.year}</td><td>${
-              r.value === null ? '—' : r.value
-            }</td></tr>`
-        )
-        .join('') +
-      (rows.length > 500 ? `<tr><td colspan="4" class="ch-table-more">… ${rows.length - 500} more rows (in CSV)</td></tr>` : '') +
-      '</tbody>';
-    tb.tableEl.innerHTML = head + body;
-    wireTableLinking(tb, shown);
-  }
-
-  // Make every evidence row that corresponds to a visible chart point
-  // interactive: hover/focus highlights the point (+ tooltip), leave/blur
-  // clears it, and the row becomes keyboard-focusable with an aria-label.
-  // Rows with no matching point (chart not built yet, scatter, or a value not
-  // plotted) are left as plain, inert text.
-  function wireTableLinking(tb: TurnBlock, shown: DataRow[]) {
-    if (!tb.lastSpec) return;
-    for (const tr of tb.tableEl.querySelectorAll<HTMLTableRowElement>('tbody tr[data-row]')) {
-      const idx = Number(tr.dataset.row);
-      const row = shown[idx];
-      if (!row || !matchRowToPoint(tb.lastSpec, row)) continue;
-      tr.classList.add('ch-row-linkable');
-      tr.tabIndex = 0;
-      tr.setAttribute('aria-label', 'highlight this point on the chart');
-      const enter = () => highlightPointForRow(tb, row);
-      const leave = () => downplayPointForRow(tb, row);
-      tr.addEventListener('pointerenter', enter);
-      tr.addEventListener('pointerleave', leave);
-      tr.addEventListener('focus', enter);
-      tr.addEventListener('blur', leave);
-    }
-  }
-
-  function esc(s: string): string {
-    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
-  }
-
-  // ── Minimal markdown ────────────────────────────────────────────────────
-  // The model's answers arrive as markdown (bold, lists, headings). A tiny
-  // renderer — escape first, then transform — instead of a library: the
-  // subset the agent actually emits is small and everything is escaped
-  // before any HTML is introduced, so no injection surface.
-  function inlineMd(escaped: string): string {
-    return escaped
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-  }
-  function mdToHtml(text: string): string {
-    const lines = esc(text).split(/\r?\n/);
-    const out: string[] = [];
-    let list: 'ul' | 'ol' | null = null;
-    let para: string[] = [];
-    const flushPara = () => { if (para.length) { out.push('<p>' + inlineMd(para.join(' ')) + '</p>'); para = []; } };
-    const flushList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) { flushPara(); flushList(); continue; }
-      const h = line.match(/^(#{1,4})\s+(.*)$/);
-      const ul = line.match(/^[-*]\s+(.*)$/);
-      const ol = line.match(/^\d+[.)]\s+(.*)$/);
-      if (h) { flushPara(); flushList(); out.push('<h4>' + inlineMd(h[2]) + '</h4>'); }
-      else if (ul) { flushPara(); if (list !== 'ul') { flushList(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inlineMd(ul[1]) + '</li>'); }
-      else if (ol) { flushPara(); if (list !== 'ol') { flushList(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inlineMd(ol[1]) + '</li>'); }
-      else { flushList(); para.push(line); }
-    }
-    flushPara();
-    flushList();
-    return out.join('');
-  }
-
-  // ── Confidence-tinted finding text ─────────────────────────────────────
-  // Per-word log-probability, when known. `null`/undefined means "no signal
-  // for this word" — rendered as plain default-color text, no tint, no
-  // underline, no title. Real logprobs are provider-dependent (OpenAI only,
-  // today — see the design spec's "Logprob availability is provider-
-  // dependent" section) and agent.ts/providers.ts do not plumb them through
-  // yet; wiring that up is explicitly a stretch goal/follow-up, not part of
-  // this pass. `runAgent()` never returns logprobs today, so in the live app
-  // this always takes the "no data" branch below and renders plain text —
-  // real graceful degradation, not a fallback that merely looks like one.
-  interface WordLogprob { word: string; logprob: number }
-
-  // Below this logprob, a word is tinted "uncertain". Roughly -1.5 nats is a
-  // reasonable rule of thumb for "the model wasn't very sure of this token."
-  const LOW_CONFIDENCE_THRESHOLD = -1.5;
-
-  function renderFinding(tb: TurnBlock, text: string, logprobs?: WordLogprob[]) {
-    tb.findingEl.textContent = '';
-    if (!text) return;
-    if (!logprobs || !logprobs.length) {
-      // No confidence signal available for this run. Render the model's
-      // markdown: full block rendering for prose explanations, inline-only
-      // (bold/code/em) for the one-line finding.
-      tb.findingEl.innerHTML = tb.findingEl.classList.contains('ch-finding-prose')
-        ? mdToHtml(text)
-        : inlineMd(esc(text));
-      return;
-    }
-    // Confidence data is present: render word-by-word so low-confidence
-    // words get the dotted-underline tint and a hover title with the exact
-    // logprob value, per spec.
-    logprobs.forEach((wl, i) => {
-      const span = document.createElement('span');
-      span.textContent = wl.word + (i < logprobs.length - 1 ? ' ' : '');
-      if (wl.logprob < LOW_CONFIDENCE_THRESHOLD) {
-        span.className = 'ch-conf-word ch-conf-word-lo';
-        span.title = `logprob ${wl.logprob.toFixed(2)}`;
-      }
-      tb.findingEl.appendChild(span);
-    });
-  }
-
-  // ── Answer-level verification cue ───────────────────────────────────────
-  // The three honest states, keyed off the structured verdict (never a
-  // defaulted pass). Verified → nothing here (the amber VERIFIED stamp lives in
-  // the trace receipt; the answer stays clean). Could-not-verify → a muted,
-  // dashed "unverified" tag naming the first doubted claim. Verification
-  // unavailable → a muted, dotted tag saying so plainly. Amber is never used
-  // here — it is reserved for the genuine stamp.
-  function renderVerification(tb: TurnBlock, v: AgentOutput['verification']) {
-    const el = tb.verifyEl;
-    el.textContent = '';
-    el.className = 'ch-verify';
-    const text = verificationCueText(v);
-    if (!text) { el.style.display = 'none'; return; }
-    el.style.display = 'block';
-    const tag = document.createElement('span');
-    tag.className = 'ch-verify-tag';
-    // The tag's own text is the full screen-reader equivalent — the dashed vs.
-    // dotted border only tints the two states apart visually.
-    el.classList.add(v!.status === 'unavailable' ? 'ch-verify-unavailable' : 'ch-verify-unverified');
-    tag.textContent = text;
-    el.appendChild(tag);
-  }
-
-  // ── Shared-answer verification (backlog #15) ─────────────────────────────
-  // A restored permalink has no live trace, so the amber VERIFIED stamp (which
-  // lives in the trace receipt on a live run) is never shown. Instead ALL three
-  // verdicts render here as a muted, "at time of generation" tag — a frozen
-  // snapshot must never masquerade as freshly verified.
-  function renderSharedVerification(tb: TurnBlock, v: AgentOutput['verification']) {
-    const el = tb.verifyEl;
-    el.textContent = '';
-    el.className = 'ch-verify ch-verify-shared';
-    if (!v) { el.style.display = 'none'; return; }
-    el.style.display = 'block';
-    let text: string;
-    if (v.status === 'verified') {
-      text = 'verified at time of generation — passed a second-model check';
-    } else if (v.status === 'unavailable') {
-      text = 'verification unavailable at time of generation — provider error';
-      el.classList.add('ch-verify-unavailable');
-    } else {
-      const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
-      text = 'could not verify at time of generation — ' + reason;
-      el.classList.add('ch-verify-unverified');
-    }
-    const tag = document.createElement('span');
-    tag.className = 'ch-verify-tag';
-    tag.textContent = text;
-    el.appendChild(tag);
-  }
-
-  // ── Shared-answer banner + restore (backlog #15) ─────────────────────────
-  function fmtShareDate(iso: string): string {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return 'an earlier session';
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-  }
-
-  function renderShareBanner(tb: TurnBlock, state: ShareStateV1) {
-    const el = tb.shareBanner;
-    el.textContent = '';
-    el.style.display = 'block';
-    const lead = document.createElement('span');
-    lead.className = 'ch-share-banner-lead';
-    lead.textContent =
-      `Shared answer — generated ${fmtShareDate(state.ts)} · data as fetched then` +
-      (state.lossy ? ' · showing charted data only' : '');
-    const link = document.createElement('a');
-    link.className = 'ch-share-banner-link';
-    // Clears the fragment and returns to the live app (a full reload to a clean
-    // URL — no share state, fresh session).
-    link.href = location.pathname;
-    link.textContent = 'ask your own live question →';
-    el.appendChild(lead);
-    el.appendChild(document.createTextNode(' '));
-    el.appendChild(link);
-  }
-
-  // Restore a full answer view from a decoded permalink — no agent run, no key.
-  // Reuses the live render paths (renderChart / renderTable / renderCitations),
-  // all of which write text via textContent or escape through esc() before any
-  // innerHTML, so nothing from the payload is ever injected as markup.
-  async function restoreSharedAnswer(state: ShareStateV1) {
-    const tb = createTurnBlock();
-    tb.isShared = true;
-    tb.question = state.q;
-    allTurns.push(tb);
-    renderShareBanner(tb, state);
-    renderQuestion(tb, state.q);
-    // No trace panel on a shared view (there is no run to show).
-    if (state.spec) {
-      liveChartTurns.push(tb); // keep it re-theming/resizing like a live chart
-      tb.canvasEl.classList.remove('ch-canvas-pending');
-      await renderChart(tb, state.spec);
-      tb.renderFlag.style.display = 'none';
-    }
-    tb.answerSection.style.display = 'block';
-    tb.metaSection.style.display = 'block';
-    renderFinding(tb, state.answer);
-    renderSharedVerification(tb, state.verification);
-    renderTable(tb, state.rows, rowsToCSV(state.rows));
-    renderCitations(tb, state.citations);
-    // Hide the setup console and switch the composer to "new conversation".
-    consoleEl.style.display = 'none';
-    newConvoBtn.style.display = '';
-    composerQ.placeholder = 'Ask your own live question…';
-  }
-
-  function renderShareError() {
-    consoleEl.style.display = 'none';
-    const tb = createTurnBlock();
-    allTurns.push(tb);
-    const el = tb.shareBanner;
-    el.style.display = 'block';
-    el.classList.add('ch-share-banner-error');
-    el.textContent = '';
-    const lead = document.createElement('span');
-    lead.className = 'ch-share-banner-lead';
-    lead.textContent = 'This share link is invalid — it may be corrupted, truncated, or from a newer version.';
-    const link = document.createElement('a');
-    link.className = 'ch-share-banner-link';
-    link.href = location.pathname;
-    link.textContent = 'ask your own live question →';
-    el.appendChild(lead);
-    el.appendChild(document.createTextNode(' '));
-    el.appendChild(link);
-  }
-
-  // On load, if the URL carries a #share= fragment, restore that answer view
-  // instead of the empty app. Defensive: any decode failure shows a clear
-  // invalid-link state and never crashes the page or executes payload content.
-  async function maybeRestoreFromFragment() {
-    const hash = location.hash || '';
-    const m = hash.match(/^#share=(.+)$/);
-    if (!m) return;
-    let state: ShareStateV1 | null = null;
-    try {
-      state = await decodeShareState(decodeURIComponent(m[1]));
-    } catch {
-      state = null;
-    }
-    if (!state) { renderShareError(); return; }
-    try {
-      await restoreSharedAnswer(state);
-    } catch (err) {
-      console.error('share restore failed', err);
-      renderShareError();
-    }
-  }
-  void maybeRestoreFromFragment();
-
-  // ── Running token + cost total ──────────────────────────────────────────
-  // Per spec: a dashed-rule totals line near the bottom of the rail,
-  // combining the run's total token count (summed from each trace event's
-  // own per-step `tokens`, which agent.ts already attributes one turn's
-  // usage to) with the run-level `estimateCost` dollar figure computed by
-  // agent.ts and returned once as `out.cost`.
-  function renderRunningTotal(tb: TurnBlock, trace: TraceEvent[], cost: number) {
-    const totalTokens = trace.reduce((sum, e) => sum + (e.tokens ?? 0), 0);
-    if (!totalTokens && !cost) { tb.railTotal.style.display = 'none'; return; }
-    tb.railTotal.style.display = 'inline';
-    const costTxt = cost > 0 ? `$${cost.toFixed(4)}` : 'free';
-    tb.railTotal.textContent = `${formatTokens(totalTokens)} · ${costTxt}`;
-  }
-
-  // ── Citations ──────────────────────────────────────────────────────────
-  // The citation ledger (backlog #11): one structured record per distinct live
-  // fetch, rendered as a references section on a receipt — compact, mono,
-  // understated. Every field comes straight from the fetch (source, indicator,
-  // human URL, resolved countries, year range, fetched-at, and — when the
-  // source gave one — its data vintage). Model-derived (llm()) artifacts never
-  // reach this list: only fetched data produces a Citation.
-  function fmtRange(r: Citation['yearRange']): string {
-    if (!r) return 'all years';
-    if (r.start !== undefined && r.end !== undefined) return r.start === r.end ? `${r.start}` : `${r.start}–${r.end}`;
-    if (r.start !== undefined) return `${r.start}–`;
-    if (r.end !== undefined) return `–${r.end}`;
-    return 'all years';
-  }
-  function fmtFetchedAt(iso: string): string {
-    // Compact "2026-07-19 14:03 UTC" — a receipt timestamp, not a full ISO string.
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-  }
-  function renderCitations(tb: TurnBlock, citations: Citation[]) {
-    if (!citations.length) { tb.citeEl.style.display = 'none'; tb.citeEl.innerHTML = ''; return; }
-    tb.citeEl.style.display = 'block';
-    const rows = citations.map((c) => {
-      const name = INDICATOR_MAP[c.indicatorId] || c.indicatorName || c.indicatorId;
-      const where = c.countries.length ? c.countries.join(', ') : 'all countries';
-      const vintage = c.sourceUpdated
-        ? `<span class="ch-cite-vintage">source updated ${esc(c.sourceUpdated)}</span>`
-        : '';
-      return (
-        '<li class="ch-cite-item">' +
-        `<span class="ch-cite-src">${esc(c.sourceLabel)}</span>` +
-        `<a class="ch-cite-ind" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(name)} <span class="ch-cite-id">(${esc(c.indicatorId)})</span></a>` +
-        '<span class="ch-cite-facets">' +
-        `<span class="ch-cite-facet">${esc(where)}</span>` +
-        `<span class="ch-cite-facet">${esc(fmtRange(c.yearRange))}</span>` +
-        `<span class="ch-cite-facet">fetched ${esc(fmtFetchedAt(c.fetchedAt))}</span>` +
-        vintage +
-        '</span>' +
-        '</li>'
-      );
-    });
-    tb.citeEl.innerHTML =
-      '<div class="ch-cite-head">References — every number fetched live &amp; cited</div>' +
-      '<ol class="ch-cite-list">' + rows.join('') + '</ol>';
-  }
-
-  // ── "+ new question" (non-destructive two-step reset) ────────────────────
-  // The reset is genuinely destructive: it wipes the whole thread AND unlocks
-  // the source picker (the session's databases can only be changed by starting
-  // over). This thread model keeps every turn as full history — there is no
-  // collapsed-turn pattern to fold prior turns into — so rather than silently
-  // discarding history on one accidental tap, the chip ARMS a confirm: the
-  // first click turns it into "wipe N turns + start fresh?" for a few seconds;
-  // only a second click within that window actually resets. Any click
-  // elsewhere, or the timeout, disarms it. No window.confirm (kept inline).
-  let newQuestionArmed = false;
-  let newQuestionTimer: number | null = null;
-
-  function resetNewQuestionChip() {
-    newQuestionArmed = false;
-    if (newQuestionTimer !== null) {
-      clearTimeout(newQuestionTimer);
-      newQuestionTimer = null;
-    }
-    newConvoBtn.textContent = '+ new question';
-    newConvoBtn.classList.remove('ch-new-convo-armed');
-  }
-
-  function performNewQuestion() {
-    resetNewQuestionChip();
-    session = null;
-    unlockSources();
-    // Dispose live charts before clearing the DOM so ECharts releases its
-    // global registry entry and resize listener.
-    for (const tb of liveChartTurns) {
-      tb.chartInstance?.dispose();
-      tb.chartInstance = null;
-    }
-    threadEl.innerHTML = '';
-    allTurns.length = 0;
-    liveChartTurns.length = 0;
-    // Back to the empty state: the setup panel (chips + BYOK) returns; the
-    // composer drops back to the first-question placeholder; the chip hides.
-    consoleEl.style.display = '';
-    newConvoBtn.style.display = 'none';
-    composerQ.placeholder = 'Ask about the world…';
-    composerQ.value = '';
-    composerQ.focus();
-  }
-
-  // ── Run ────────────────────────────────────────────────────────────────
-  let running = false;
-  // The AbortController for the turn currently in flight (null when idle). The
-  // per-turn stop button and "+ new question" both abort through it, so a run
-  // can never leave the app wedged with no escape.
-  let runController: AbortController | null = null;
-
-  askForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (running) return;
-    const question = qIn.value.trim() || (qIn.placeholder || '').trim();
-    if (!question) return;
-
-    const apiKey = keyIn.value.trim();
-    if (!apiKey) {
-      openByok(true);
-      byokSum.classList.remove('ch-byok-nudge');
-      void byokSum.offsetWidth;
-      byokSum.classList.add('ch-byok-nudge');
-      keyIn.focus();
-      return;
-    }
-
-    // Hard filter needs at least one database. Only enforced on the first ask,
-    // when the session (and its source set) is created; later turns are locked.
-    if (!session && selectedSources().length === 0) {
-      openByok(true);
-      updateSourcesCount();
-      sourcesSearch?.focus();
-      return;
-    }
-
-    const cfg: ProviderConfig = {
-      provider: currentProvider(),
-      model: modelSel.value,
-      apiKey,
-      requestReasoning: modelSel.selectedOptions[0]?.dataset.reasoning === '1',
-    };
-
-    running = true;
-    const controller = new AbortController();
-    runController = controller;
-    askBtn.disabled = true;
-    askBtn.classList.add('ch-send-working');
-    openByok(false);
-    qIn.value = '';
-
-    // Previous turns stay as full, readable history (chat style). Each turn
-    // renders its own question line, chart, and answer, and its chart stays
-    // live (re-themes/resizes via liveChartTurns). Nothing collapses.
-    const tb = createTurnBlock();
-    tb.question = question;
-    renderQuestion(tb, question);
-    allTurns.push(tb);
-    liveChartTurns.push(tb);
-    tb.canvasEl.classList.add('ch-canvas-pending');
-    setStatus(tb, 'loading', 'Planning…');
-    // Reveal + wire this turn's stop control. It aborts THIS run's controller;
-    // ask() then resolves with an honest aborted output (handled below).
-    tb.stopBtn.style.display = '';
-    tb.stopBtn.disabled = false;
-    tb.stopBtn.onclick = () => {
-      controller.abort();
-      tb.stopBtn.disabled = true;
-      // Announce intent immediately through the polite status line; the final
-      // "stopped by you — N receipts completed" lands when ask() resolves.
-      setStatus(tb, 'stopped', 'Stopping…');
-    };
-    tb.panel.style.display = 'block';
-    // The conversation has started: hide the setup panel (chips + BYOK) and
-    // reveal the "+ new question" control. The bottom composer is always
-    // present and is the sole input.
-    consoleEl.style.display = 'none';
-    resetNewQuestionChip();
-    newConvoBtn.style.display = '';
-    composerQ.placeholder = 'Ask a follow-up — or + new question for a fresh start…';
-    // Bring the just-created turn up to the top of the scroll area so the
-    // active exchange sits under the header and reads top-to-bottom down to
-    // the pinned composer, instead of the answer landing far from the input.
-    requestAnimationFrame(() =>
-      tb.root.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
-    );
-    renderFiles(tb, {});
-
-    const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
-    tb.railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
-
-    try {
-      // Bind the chosen databases to the session on first ask; the selection
-      // is locked for the rest of the conversation. "+ new conversation" clears
-      // `session` and unlocks the picker.
-      if (!session) {
-        session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
-        lockSources();
-      }
-      const out = await session.ask(question, {
-        onTrace: (events) => renderTrace(tb, events),
-        onFiles: (files) => renderFiles(tb, files),
-        onChart: (spec) => { void renderChart(tb, spec); },
-        onStatus: (msg, kind) => setStatus(tb, kind, msg),
-        onModel: (served) => { tb.railModelEl.textContent = `${served} (fallback) / ${cfg.provider}`; },
-      }, controller.signal);
-
-      // Honest stopped state (the user hit stop). NOT an error and NOT verified:
-      // no VERIFIED stamp, neutral wording. Any rows/citations fetched before the
-      // stop are real data with provenance — show them so the work isn't lost.
-      // The session stays usable; the composer is re-enabled in `finally`.
-      if (out.aborted) {
-        if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
-        const completed = tb.trace.filter((ev) => ev.status === 'ok').length;
-        if (out.rows.length) {
-          tb.metaSection.style.display = 'block';
-          renderTable(tb, out.rows, out.csv);
-          renderCitations(tb, out.citations);
-        }
-        if (out.finding) {
-          tb.answerSection.style.display = 'block';
-          renderFinding(tb, out.finding);
-        }
-        renderRunningTotal(tb, tb.trace, out.cost);
-        setStatus(
-          tb,
-          'stopped',
-          `stopped by you — ${completed} receipt${completed === 1 ? '' : 's'} completed`
-        );
-        tb.panelDot.className = 'ch-panel-dot';
-        tb.panelLabel.textContent = `stopped — ${completed} receipt${completed === 1 ? '' : 's'} completed`;
-        return;
-      }
-
-      if (out.chartSpec && !tb.chartInstance) await renderChart(tb, out.chartSpec);
-
-      tb.answerSection.style.display = 'block';
-      tb.metaSection.style.display = 'block';
-
-      if (out.kind === 'chart' && !out.chartSpec) {
-        tb.findingEl.classList.add('ch-finding-empty');
-        renderFinding(
-          tb,
-          out.finding || 'No chart could be built for this question — try rephrasing or narrowing it to a specific indicator.'
-        );
-        renderTable(tb, [], '');
-        renderCitations(tb, []);
-        renderRunningTotal(tb, tb.trace, out.cost);
-        setStatus(tb, 'error', 'No result' + (out.retried ? ' (retried once, still nothing)' : ''));
-        return;
-      }
-
-      if (out.kind === 'explanation') {
-        // Open-ended answer: multi-paragraph prose, not a one-line headline.
-        // pre-wrap (via the class) preserves the model's paragraph breaks,
-        // and body sizing keeps a long answer readable.
-        tb.findingEl.classList.add('ch-finding-prose');
-        renderFinding(tb, out.finding || 'No explanation produced.');
-        renderRunningTotal(tb, tb.trace, out.cost);
-        setStatus(tb, 'ok', 'Done' + (out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free'));
-        return;
-      }
-
-      renderFinding(tb, out.finding || 'No finding produced.');
-      renderVerification(tb, out.verification);
-      renderTable(tb, out.rows, out.csv);
-      renderCitations(tb, out.citations);
-      renderRunningTotal(tb, tb.trace, out.cost);
-
-      // Snapshot the answer state for the share permalink, then reveal the
-      // share action (it lives beside CSV in the raw-data disclosure).
-      tb.lastFinding = out.finding || '';
-      tb.lastCitations = out.citations;
-      tb.lastVerification = out.verification;
-      tb.shareBtn.style.display = '';
-
-      const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
-      setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
-      // No scroll here (or in the branches above): the submit-time scroll is
-      // the only one. Auto-scrolling again when the answer lands was the
-      // second half of the "chat keeps jumping" bug.
-    } catch (err: any) {
-      console.error(err);
-      setStatus(tb, 'error', 'Run failed: ' + (err?.message ?? String(err)));
-      // The trace summary is only updated by trace events, so a failure
-      // before/between events left it pulsing "Working…" forever.
-      tb.panelDot.className = 'ch-panel-dot ch-panel-dot-error';
-      tb.panelLabel.textContent = 'run failed — expand for details';
-    } finally {
-      // The single place the composer is re-enabled — EVERY terminal path
-      // (success, error, aborted) lands here, so a run can never leave the app
-      // stuck with a disabled input. The stop control is retired with the run.
-      running = false;
-      runController = null;
-      tb.stopBtn.style.display = 'none';
-      tb.stopBtn.onclick = null;
-      askBtn.disabled = false;
-      askBtn.classList.remove('ch-send-working');
-    }
-  });
-
-  // The sticky composer delegates to the same submit handler above instead
-  // of duplicating the question-reading logic: it copies its value into the
-  // original top-console textarea (qIn), which stays the actual source of
-  // truth the handler reads from, then re-submits the original form.
-  composerForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    qIn.value = composerQ.value;
-    composerQ.value = '';
-    askForm.requestSubmit();
-  });
-
-  // Enter sends, Shift+Enter inserts a newline (chat convention).
-  // isComposing guards IME input (e.g. Japanese) where Enter commits the
-  // composition, not the message.
-  composerQ.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      composerForm.requestSubmit();
-    }
-  });
-
-  newConvoBtn.addEventListener('click', () => {
-    // Never-stuck: a mid-run click stops the current turn first, so the reset
-    // proceeds against a settled session instead of racing an in-flight ask().
-    if (running && runController) runController.abort();
-
-    if (!newQuestionArmed) {
-      const n = allTurns.length;
-      newQuestionArmed = true;
-      newConvoBtn.textContent = `wipe ${n} turn${n === 1 ? '' : 's'} + start fresh?`;
-      newConvoBtn.classList.add('ch-new-convo-armed');
-      // Auto-disarm so an armed chip never lingers into the next glance.
-      newQuestionTimer = window.setTimeout(resetNewQuestionChip, 4000);
-      return;
-    }
-    // Second, deliberate click within the window → actually reset.
-    performNewQuestion();
-  });
-
-  // A click anywhere other than the chip disarms the confirm, so the second
-  // (destructive) click has to be a deliberate one on the chip itself.
-  document.addEventListener('click', (e) => {
-    if (
-      newQuestionArmed &&
-      e.target !== newConvoBtn &&
-      !newConvoBtn.contains(e.target as Node)
-    ) {
-      resetNewQuestionChip();
-    }
-  });
-
-  // Test-only seam. When the page is opened with ?chittidebug in the URL, the
-  // real render path (createTurnBlock → renderQuestion/renderChart/renderTable)
-  // is exposed so an offline harness can stage a turn through the ACTUAL
-  // functions — same DOM, same chart↔table linking — without an LLM call. The
-  // guard is false in normal use, so nothing is exposed in production; it hands
-  // out render helpers only, never agent/provider/session internals.
-  if (new URLSearchParams(location.search).has('chittidebug')) {
-    const dbg: any = {
-      async stage(
-        question: string,
-        spec: ChartSpec,
-        rows: DataRow[],
-        opts?: { finding?: string; citations?: Citation[]; verification?: AgentOutput['verification'] }
-      ) {
-        const tb = createTurnBlock();
-        allTurns.push(tb);
-        liveChartTurns.push(tb);
-        consoleEl.style.display = 'none';
-        tb.panel.style.display = 'block';
-        tb.question = question;
-        renderQuestion(tb, question);
-        await renderChart(tb, spec);
-        tb.metaSection.style.display = 'block';
-        tb.answerSection.style.display = 'block';
-        const finding = opts?.finding ?? 'Staged turn (offline harness).';
-        renderFinding(tb, finding);
-        if (opts?.verification !== undefined) renderVerification(tb, opts.verification);
-        renderTable(tb, rows, rowsToCSV(rows));
-        if (opts?.citations && opts.citations.length) renderCitations(tb, opts.citations);
-        tb.dataDetails.open = true;
-        // Capture the answer state and reveal the share action, exactly as the
-        // live completion path does, so the harness can exercise real sharing.
-        tb.lastFinding = finding;
-        tb.lastCitations = opts?.citations ?? [];
-        tb.lastVerification = opts?.verification ?? null;
-        tb.shareBtn.style.display = '';
-        dbg.chart = tb.chartInstance;
-        dbg.tb = tb;
-        return tb.root;
-      },
-      // Build the share URL for the staged turn without touching the clipboard,
-      // so a headless harness can capture it deterministically.
-      async shareUrl() {
-        if (!dbg.tb) return null;
-        const built = await buildShareUrl(dbg.tb);
-        return built ? built.url : null;
-      },
-      // Stage a trace through the REAL renderTrace path — same DOM, same
-      // receipt/nesting/provenance rendering — from a supplied TraceEvent[]
-      // (and optional VFS snapshot for inline-expandable write_file rows). No
-      // LLM call: the harness hands over a realistic event sequence (e.g. an
-      // execute_js step with nested llm() child receipts) and this drives the
-      // app's own renderer over it.
-      stageTrace(
-        question: string,
-        events: any[],
-        files?: Record<string, string>,
-        citations?: Citation[],
-        answer?: { finding?: string; verification?: AgentOutput['verification'] }
-      ) {
-        const tb = createTurnBlock();
-        allTurns.push(tb);
-        consoleEl.style.display = 'none';
-        tb.panel.style.display = 'block';
-        (tb.panel as HTMLDetailsElement).open = true;
-        renderQuestion(tb, question);
-        if (files) renderFiles(tb, files);
-        renderTrace(tb, events as TraceEvent[]);
-        // Citations render OUTSIDE the trace, in the evidence section — drive
-        // them through the SAME renderCitations path the live run uses (real
-        // .ch-meta / .ch-cite containers, no floating DOM), so an offline
-        // screenshot exercises the actual references renderer.
-        if (citations && citations.length) {
-          tb.metaSection.style.display = 'block';
-          renderCitations(tb, citations);
-        }
-        // The answer-level verification cue lives in the answer section, not the
-        // trace — drive it through the REAL renderFinding + renderVerification so
-        // an offline screenshot exercises the actual honest-state treatment.
-        if (answer) {
-          tb.answerSection.style.display = 'block';
-          renderFinding(tb, answer.finding ?? 'Staged finding.');
-          renderVerification(tb, answer.verification ?? null);
-        }
-        dbg.tb = tb;
-        return tb.root;
-      },
-      // Run the REAL chart-click activation path (matchPointToRow → highlight)
-      // for a given point. Used by the offline harness because headless
-      // Chromium's synthetic canvas events don't resolve a zrender series-click
-      // target, even though hover does — so the ECharts event is stubbed but
-      // every line of the app's own linking code still runs.
-      activatePoint(seriesIndex: number, dataIndex: number) {
-        if (dbg.tb) activateChartPoint(dbg.tb, seriesIndex, dataIndex);
-      },
-      // Pixel position of a data point, so the harness can issue a real mouse
-      // click on the canvas that flows through the actual ECharts listeners.
-      pointPixel(seriesIndex: number, dataIndex: number, value: number) {
-        const p = dbg.chart?.convertToPixel({ seriesIndex }, [dataIndex, value]);
-        const rect = dbg.chart?.getDom()?.getBoundingClientRect();
-        return p && rect ? { x: rect.left + p[0], y: rect.top + p[1] } : null;
-      },
-      // Stop-control harness: drive the REAL submit handler with a stubbed
-      // session so the actual running/stopped DOM is exercised with no network.
-      // The injected session's ask() streams a couple of receipts, then waits;
-      // when the user clicks the (real) stop button, the (real) AbortSignal
-      // fires and ask() resolves with an honest aborted output — the same path
-      // a live stop takes. Egress stays untouched; this is stubbing, not a run.
-      setKey(k: string) {
-        keyIn.value = k;
-      },
-      injectStopSession(over?: { rows?: DataRow[]; citations?: Citation[]; finding?: string }) {
-        const rows = over?.rows ?? [];
-        const citations = over?.citations ?? [];
-        const fake = {
-          ask(_q: string, cb: any, sig?: AbortSignal) {
-            // Stream a realistic, resolved trace so "N receipts completed" is
-            // non-zero and the collapsed panel reads like a real partial run.
-            const now = Date.now();
-            cb.onTrace([
-              { tool: 'find_series', argSummary: 'child mortality', status: 'ok', ts: now, detail: '3 hits' },
-              { tool: 'fetch_series', argSummary: 'SP.DYN.IMRT.IN', status: 'ok', ts: now + 1, detail: `${rows.length} rows` },
-              { tool: 'execute_js', argSummary: 'rank countries', status: 'running', ts: now + 2 },
-            ]);
-            cb.onStatus('Working…', 'loading');
-            return new Promise((resolve) => {
-              const finish = () =>
-                resolve({
-                  finding: over?.finding ?? '',
-                  chartSpec: null,
-                  rows,
-                  csv: rowsToCSV(rows),
-                  indicators: [],
-                  citations,
-                  confidence: 'low',
-                  verifierReport: '',
-                  verification: null,
-                  cost: 0,
-                  retried: false,
-                  kind: 'chart',
-                  aborted: true,
-                });
-              if (sig?.aborted) finish();
-              else sig?.addEventListener('abort', finish, { once: true });
-            });
-          },
-        };
-        // Same closure as `session` — inject directly and lock the picker, as a
-        // real first ask() would, so the "+ new question" unlock is exercised.
-        session = fake as unknown as ChittiSession;
-        lockSources();
-      },
-    };
-    (window as any).__chittiDebug = dbg;
-    document.documentElement.setAttribute('data-chitti-debug-ready', '1');
-  }
+  import '../../lib/chitti/ui/boot';
 </script>
 
 <style>
@@ -4723,6 +2228,327 @@ const PRESETS = [
   :global(.ch-cite a:hover) { color: var(--fg); }
 
   /* ── Responsive ── */
+  /* ── Dashboards: nav chip, pin action, pin picker, dashboard view ─────── */
+  .ch-dash-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 3px 11px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  .ch-dash-nav:hover { color: var(--fg); background: var(--bg-hover); border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
+  .ch-dash-nav:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-dash-nav svg { flex-shrink: 0; }
+  .ch-dash-nav-count {
+    font-size: 10px;
+    min-width: 16px;
+    text-align: center;
+    padding: 0 4px;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--signal) 20%, transparent);
+    color: var(--fg);
+  }
+
+  /* Pin action: styled to match .ch-csv / .ch-share (same mono underline). */
+  .ch-pin {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--signal);
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    padding: 0;
+  }
+  .ch-pin:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* Pin picker: a centered modal dialog with a dimmed backdrop. */
+  .ch-pin-backdrop:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--bg) 62%, transparent);
+  }
+  .ch-pin-dialog:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ch-pin-dialog {
+    position: fixed;
+    z-index: 41;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(420px, calc(100vw - 32px));
+    max-height: 85vh;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--fg) 6%, var(--bg));
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 48px color-mix(in srgb, var(--bg) 70%, transparent);
+    padding: var(--space-md);
+  }
+  .ch-pin-head { display: flex; align-items: center; justify-content: space-between; }
+  .ch-pin-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg);
+  }
+  .ch-pin-close {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--fg-muted); font-size: 15px; line-height: 1; padding: 4px;
+  }
+  .ch-pin-close:hover { color: var(--fg); }
+  .ch-pin-close:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; border-radius: 3px; }
+  .ch-pin-sub { font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+  .ch-pin-list { display: flex; flex-direction: column; gap: 6px; }
+  /* Rows inside the pin list are built in JS (no Astro scope attribute), so
+     their selectors must be :global — same discipline as the trace/citation
+     renderers elsewhere in this file. */
+  :global(.ch-pin-empty) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+  :global(.ch-pin-existing) {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    text-align: left;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 8px 11px;
+    color: var(--fg);
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-pin-existing:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-pin-existing:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-pin-existing-meta) { color: var(--fg-muted); flex-shrink: 0; }
+  /* Replace-a-tile affordance (increment 2): the primary "add new" button plus a
+     secondary toggle that expands the dashboard's tiles for a slot-preserving
+     replace. */
+  :global(.ch-pin-existing-row) { display: flex; flex-direction: column; gap: 4px; }
+  :global(.ch-pin-existing-row .ch-pin-existing) { width: 100%; }
+  :global(.ch-pin-replace-toggle) {
+    align-self: flex-start;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    background: transparent; border: none; color: var(--fg-muted);
+    padding: 2px 4px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+  }
+  :global(.ch-pin-replace-toggle:hover) { color: var(--fg); }
+  :global(.ch-pin-replace-toggle:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-pin-replace-list) { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 10px; border-left: 1px dashed var(--fg-faint); margin-left: 4px; }
+  :global(.ch-pin-replace-tile) {
+    text-align: left;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint); border-radius: var(--radius-sm, 4px);
+    padding: 5px 9px; color: var(--fg); cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-pin-replace-tile::before) { content: '↔ replace  '; color: var(--fg-muted); }
+  :global(.ch-pin-replace-tile:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-pin-replace-tile:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-pin-new { display: flex; flex-direction: column; gap: 5px; border-top: 1px dashed var(--fg-faint); padding-top: 10px; }
+  .ch-pin-new-row { display: flex; gap: 8px; }
+  .ch-pin-new-row .ch-input { flex: 1; min-width: 0; }
+  .ch-pin-create {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--signal) 16%, var(--bg));
+    color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .ch-pin-create:hover { background: color-mix(in srgb, var(--signal) 26%, var(--bg)); }
+  .ch-pin-create:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-pin-status { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); min-height: 1.1em; }
+  .ch-pin-status-error { color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted)); }
+
+  /* Dashboards view: a full-column overlay over the app. */
+  .ch-dashview:not([hidden]) { display: block; }
+  .ch-dashview {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: var(--bg);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--space-lg) clamp(16px, 5vw, 48px) calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+  }
+  .ch-dashview-bar {
+    display: flex; align-items: center; gap: var(--space-md);
+    max-width: 1100px; margin: 0 auto var(--space-lg);
+  }
+  .ch-dashview-back {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .ch-dashview-back:hover { color: var(--fg); background: var(--bg-hover); }
+  .ch-dashview-back:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-dashview-title { font-size: var(--text-section, 1.2rem); font-weight: 600; margin: 0; color: var(--fg); }
+  .ch-dashview-body { max-width: 1100px; margin: 0 auto; }
+
+  /* Everything below .ch-dashview-body is built in JS, so :global is required
+     for the styles to reach it (Astro scopes template markup only). */
+  :global(.ch-dash-empty) { text-align: center; padding: var(--space-lg) 0; }
+  :global(.ch-dash-empty-title) { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  :global(.ch-dash-empty-sub) { font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+
+  :global(.ch-dash-list) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-md);
+  }
+  :global(.ch-dash-card) {
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+    text-align: left;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-dash-card:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-dash-card:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-dash-card-title) { font-family: var(--font-serif, var(--font-mono)); font-size: 1.02rem; color: var(--fg); font-weight: 600; }
+  :global(.ch-dash-card-meta) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); }
+
+  :global(.ch-dash-detail-head) { display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md); flex-wrap: wrap; }
+  :global(.ch-dash-detail-count) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); }
+  :global(.ch-dash-mini) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-dash-mini:hover:not(:disabled)) { color: var(--fg); background: var(--bg-hover); }
+  :global(.ch-dash-mini:disabled) { opacity: 0.35; cursor: default; }
+  :global(.ch-dash-mini:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-dash-tile-remove:hover:not(:disabled)) { color: var(--ch-danger, var(--danger)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  :global(.ch-confirm-armed) {
+    color: var(--ch-danger, var(--danger));
+    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+
+  :global(.ch-dash-rename) { display: flex; gap: 8px; margin-bottom: var(--space-md); flex-wrap: wrap; }
+  :global(.ch-dash-rename-input) {
+    flex: 1; min-width: 180px;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    padding: 5px 9px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-elevated);
+    color: var(--fg);
+  }
+
+  :global(.ch-dash-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+    gap: var(--space-md);
+  }
+  :global(.ch-dash-tile) {
+    margin: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  :global(.ch-dash-tile-head) { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  :global(.ch-dash-tile-title) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--fg);
+    min-width: 0; overflow-wrap: anywhere;
+  }
+  :global(.ch-dash-tile-controls) { display: flex; gap: 5px; flex-shrink: 0; flex-wrap: wrap; }
+  :global(.ch-dash-tile-chart) { width: 100%; height: 300px; min-width: 0; }
+  :global(.ch-dash-tile-source) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted); margin-top: 8px; overflow-wrap: anywhere;
+  }
+  /* A successful refresh: quiet, muted-green to match the success dots. */
+  :global(.ch-dash-tile-refreshed) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: color-mix(in srgb, var(--success) 70%, var(--fg-muted)); margin-top: 4px;
+  }
+  /* A stale tile keeps its data and says so honestly. Muted, NOT alarming — the
+     data on screen is still real, just not freshly re-pulled. A hairline left
+     rule (sparing danger tint) flags it without shouting. */
+  :global(.ch-dash-tile-stale) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--ch-meta); margin-top: 6px; padding-left: 8px; overflow-wrap: anywhere;
+    border-left: 2px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  /* Refresh log: a compact, receipt-style panel of one line per tile. */
+  :global(.ch-refresh-log) {
+    background: var(--bg-elevated); border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: var(--space-md);
+  }
+  :global(.ch-refresh-log-head) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 6px;
+  }
+  :global(.ch-refresh-log-lines) { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  :global(.ch-refresh-line) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-refresh-ok) { color: color-mix(in srgb, var(--success) 78%, var(--fg)); }
+  :global(.ch-refresh-fail) { color: var(--ch-danger, var(--danger)); }
+  /* The refresh button in its running (Stop) state reuses the armed treatment. */
+  :global(.ch-dash-refresh.ch-confirm-armed) { color: var(--ch-danger, var(--danger)); }
+
+  /* Share/export/import (increment 3). The dashboards-view status line mirrors
+     the per-turn share status: muted, small, polite. */
+  .ch-dashview-status {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted); margin-left: auto; text-align: right;
+    min-height: 1em; overflow-wrap: anywhere;
+  }
+  .ch-dashview-status-error { color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted)); }
+  /* List-level action bar (the Import control sits here, right-aligned). */
+  :global(.ch-dash-list-actions) { display: flex; justify-content: flex-end; margin-bottom: var(--space-md); }
+  /* Read-only shared banner: reuses the answer-share banner treatment; the
+     import control is a banner-link-styled button. */
+  :global(.ch-dash-shared-banner) { margin-bottom: var(--space-lg); }
+  :global(.ch-dash-shared-import) {
+    font-family: inherit; background: transparent; border: 0; padding: 0;
+    cursor: pointer;
+  }
+  /* A lossy tile discloses that only the charted data travelled in the link. */
+  :global(.ch-dash-tile-lossy) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--ch-meta); margin-top: 4px; overflow-wrap: anywhere;
+  }
+
   @media (max-width: 700px) {
     .ch-panel-meta { display: none; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
@@ -4787,5 +2613,10 @@ const PRESETS = [
        natural width instead of collapsing the follow-up textarea. */
     .ch-console .ch-btn { width: 100%; }
     .ch-chart { height: 300px; }
+    /* Dashboards: keep the nav chip but tighten it; single-column tiles. */
+    .ch-dashview { padding: var(--space-md) 16px calc(var(--space-md) + env(safe-area-inset-bottom, 0px)); }
+    :global(.ch-dash-tile-chart) { height: 260px; }
+    :global(.ch-dash-tile-head) { flex-direction: column; }
+    .ch-pin-new-row { flex-direction: column; }
   }
 </style>
