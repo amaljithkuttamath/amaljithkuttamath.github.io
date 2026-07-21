@@ -3,6 +3,7 @@ import {
   chartAriaLabel,
   verificationCueText,
   verificationStampLabel,
+  verifierConfidenceLabel,
   focusTrapTarget,
   FOCUSABLE_SELECTOR,
 } from './a11y';
@@ -82,6 +83,25 @@ describe('verificationCueText', () => {
     expect(verificationCueText({ status: 'unavailable', issues: [] })).toBe(
       'verification unavailable — provider error'
     );
+  });
+
+  it('returns null on a skipped (empty-run) verdict — nothing to announce', () => {
+    expect(verificationCueText({ status: 'skipped', issues: [] })).toBeNull();
+  });
+});
+
+describe('verifierConfidenceLabel', () => {
+  it('labels the confidence as the VERIFIER\'s, never bare "confidence"', () => {
+    // The relabel: 'confidence: X' became 'verifier confidence: X' so it is
+    // never read as answer confidence.
+    expect(verifierConfidenceLabel('high')).toBe('verifier confidence: high');
+    expect(verifierConfidenceLabel('medium')).toBe('verifier confidence: medium');
+    expect(verifierConfidenceLabel('low')).toBe('verifier confidence: low');
+  });
+
+  it('reads "unknown" (not "none") when confidence is none or absent', () => {
+    expect(verifierConfidenceLabel('none')).toBe('verifier confidence: unknown');
+    expect(verifierConfidenceLabel(undefined)).toBe('verifier confidence: unknown');
   });
 });
 

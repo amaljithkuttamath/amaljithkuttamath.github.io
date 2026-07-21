@@ -21,6 +21,7 @@ const PRESETS = [
   'How has global life expectancy changed since 1960, by region?',
   'Compare GDP per capita of India, China, and Brazil since 1990',
   'What does GDP per capita (PPP) actually measure, and why does PPP matter?',
+  'Chart GDP per capita for India since 2000 and save it to a dashboard',
 ];
 ---
 
@@ -2413,6 +2414,35 @@ const PRESETS = [
   :global(.ch-dash-empty) { text-align: center; padding: var(--space-lg) 0; }
   :global(.ch-dash-empty-title) { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
   :global(.ch-dash-empty-sub) { font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+  /* Compact 3-step how-to on the empty dashboards view: numbered, mono,
+     muted — a receipt-style checklist rather than prose. No amber; this is
+     ambient guidance, not a signal. */
+  :global(.ch-dash-howto) {
+    list-style: none;
+    counter-reset: dash-step;
+    margin: 10px auto 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-width: 26rem;
+    text-align: left;
+  }
+  :global(.ch-dash-howto li) {
+    counter-increment: dash-step;
+    display: flex;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+  :global(.ch-dash-howto li::before) {
+    content: counter(dash-step) '.';
+    flex-shrink: 0;
+    width: 1.2em;
+    color: var(--fg-faint);
+  }
 
   :global(.ch-dash-list) {
     display: grid;

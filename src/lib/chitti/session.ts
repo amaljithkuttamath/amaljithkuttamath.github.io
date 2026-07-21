@@ -14,6 +14,7 @@
 import {
   complete,
   estimateCost,
+  buildFreeFallbackChain,
   type ChatMessage,
   type CompleteDeps,
   type ProviderConfig,
@@ -1240,20 +1241,31 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         messages.push({ role: 'user', content: question });
       }
 
+      const norm = (m: string) => m.replace(/:free$/, '');
+      // Which fallback-chain builder to use for a loop-level model substitution
+      // (Fix 2). Injectable via CompleteDeps for tests; the real one otherwise.
+      const buildChain = completeDeps.buildFreeFallbackChain ?? buildFreeFallbackChain;
       let calls = 0;
       let noopTurns = 0;
+      // The model this turn's executor loop is talking to. Starts as the selected
+      // model; after a nudge fails to reform a :free primary it is swapped ONCE to
+      // a substitute free model (Fix 2 — a loop-level substitution, since a
+      // no-tool-call response is not a transport error and must not enter
+      // complete()'s error taxonomy). Every OTHER complete() this turn (verify,
+      // summariser, llm(), sub-agents) stays on the selected cfg.
+      let activeCfg = cfg;
+      let substituted = false;
       while (calls < MAX_TOOL_CALLS) {
         throwIfAborted();
         const status = pipelineStatus(state, calls);
         cb.onStatus(status, 'loading');
 
-        const res = await complete(cfg, messages, toolSchemas, completeDeps);
-        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+        const res = await complete(activeCfg, messages, toolSchemas, completeDeps);
+        totalCost += estimateCost(res.servedModel ?? activeCfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
         // with a different model — visible in the trace and the rail label.
-        const norm = (m: string) => m.replace(/:free$/, '');
-        if (res.servedModel && norm(res.servedModel) !== norm(cfg.model) && !fallbackNoted) {
+        if (res.servedModel && norm(res.servedModel) !== norm(activeCfg.model) && !fallbackNoted) {
           fallbackNoted = true;
           pushTrace({
             tool: 'fallback',
@@ -1262,7 +1274,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // Name both models so the substitution is never silent — Chitti
             // shows its work. e.g. "nemotron-…:free unavailable → fell back to
             // nemotron-super-…:free".
-            detail: `${cfg.model} unavailable → fell back to ${res.servedModel}`,
+            detail: `${activeCfg.model} unavailable → fell back to ${res.servedModel}`,
           });
           cb.onModel?.(res.servedModel);
         }
@@ -1281,18 +1293,71 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             state.finding = extractOneSentence(fallbackText);
             return;
           }
-          if (noopTurns >= 2) return;
-          messages.push({ role: 'assistant', content: res.text });
-          messages.push({
-            role: 'user',
-            content:
-              'Continue by calling a tool. ' +
-              (turnChartSpec
-                ? 'The chart is already rendered — call finish now with the insight.'
-                : 'Pick the next tool in the pipeline, or call finish_explanation if prose answers this better.'),
-          });
-          calls++;
-          continue;
+
+          // FIRST no-op this turn (Fix 1): the model returned prose with no tool
+          // call and no usable answer — it NARRATED instead of acting (the live
+          // failure: a free model describing a fictional "skills" system rather
+          // than calling tools). Inject ONE corrective system nudge and let it
+          // try again; a muted receipt records the nudge. One nudge per turn.
+          if (noopTurns === 1) {
+            pushTrace({
+              tool: 'nudge',
+              argSummary: '',
+              status: 'ok',
+              detail: 'nudged: model narrated instead of acting',
+            });
+            messages.push({ role: 'assistant', content: res.text });
+            messages.push({
+              role: 'system',
+              content: turnChartSpec
+                ? 'You have function TOOLS (tool calls) — there are no "skills". The chart is already rendered: call finish now with the insight. Do not narrate a plan.'
+                : 'You have function TOOLS (tool calls) — there are no "skills". Do not narrate a plan. Call find_series now with a search query for the data you need.',
+            });
+            calls++;
+            continue;
+          }
+
+          // Post-nudge and STILL nothing (Fix 2). If the primary is an OpenRouter
+          // :free model and we have not already substituted this turn, try ONE
+          // substitute free model. This lives in the loop (not complete()): a
+          // no-tool-call response is a semantically empty turn, not a transport
+          // failure — complete() already returned a valid result — so folding it
+          // into the provider error taxonomy would contort it. We reuse
+          // buildFreeFallbackChain + the visible 'fallback' substitution receipt.
+          if (!substituted && activeCfg.provider === 'openrouter' && activeCfg.model.endsWith(':free')) {
+            substituted = true;
+            let chain: string[] = [];
+            try {
+              chain = await buildChain(activeCfg.model);
+            } catch {
+              chain = [];
+            }
+            const substitute = chain.find((m) => norm(m) !== norm(activeCfg.model));
+            if (substitute) {
+              pushTrace({
+                tool: 'fallback',
+                argSummary: substitute,
+                status: 'ok',
+                detail: `${activeCfg.model} narrated instead of calling tools → substituted ${substitute}`,
+              });
+              cb.onModel?.(substitute);
+              activeCfg = { ...cfg, model: substitute };
+              messages.push({ role: 'assistant', content: res.text });
+              messages.push({
+                role: 'user',
+                content:
+                  'You have function TOOLS (tool calls) — there are no "skills". Call find_series now with a search query for the data you need.',
+              });
+              calls++;
+              continue;
+            }
+          }
+
+          // The nudge (and any substitution) failed to produce a single tool
+          // call. Give up — return with an empty run. The turn surfaces honestly
+          // as "no result"; the trace carries the nudge + fallback receipts so
+          // the reader sees what was tried, and verify() is skipped downstream.
+          return;
         }
 
         messages.push({ role: 'assistant', content: res.text, tool_calls: res.toolCalls });
@@ -1473,7 +1538,31 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // (or a stamp): check before running the verifier.
       throwIfAborted();
 
-      if (turnKind === 'chart') {
+      // Empty run (Fix 4): the turn produced no answer text, no chart this turn,
+      // and no fetched rows — there is genuinely nothing to verify. Do NOT call
+      // verify() at all (no LLM spend, no verdict retry). Record a muted
+      // "nothing to verify" receipt (status ok, not error-red) and a distinct
+      // 'skipped' verdict so the UI never mislabels an empty run as could-not-
+      // verify. Only meaningful under turnKind 'chart'; an explanation turn
+      // already skips verification.
+      const emptyRun = !state.finding && !turnChartSpec && !state.rows.length;
+      if (turnKind === 'chart' && emptyRun) {
+        pushTrace({
+          tool: 'verify',
+          argSummary: '',
+          status: 'ok',
+          verifyStatus: 'skipped',
+          detail: 'nothing to verify — the run produced no result',
+        });
+        verification = {
+          status: 'skipped',
+          pass: false,
+          confidence: 'none',
+          issues: [],
+          report: 'nothing to verify — the run produced no result',
+        };
+        confidence = 'low';
+      } else if (turnKind === 'chart') {
         cb.onStatus('Verifying…', 'loading');
         verification = await runVerify(undefined, plan?.insight);
         vfs.write('verifier_report.md', verification.report);

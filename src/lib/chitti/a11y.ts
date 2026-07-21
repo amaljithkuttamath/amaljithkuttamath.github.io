@@ -57,13 +57,27 @@ export function verificationStampLabel(): string {
   return 'Verified: this answer passed a second-model check.';
 }
 
+// The confidence line shown on a verify receipt. This is the VERIFIER's
+// confidence in ITS OWN verdict, not the finding's — so it is labelled
+// "verifier confidence" to keep it from reading as answer confidence. Pure, so
+// the label is asserted without a DOM. 'none'/absent → "unknown".
+export function verifierConfidenceLabel(
+  confidence: 'high' | 'medium' | 'low' | 'none' | undefined
+): string {
+  return confidence && confidence !== 'none'
+    ? 'verifier confidence: ' + confidence
+    : 'verifier confidence: unknown';
+}
+
 // The three honest states, keyed off the structured verdict (never a defaulted
 // pass). Returns null when there is nothing to say (verified, or no verdict) —
 // the caller hides the cue entirely in that case.
 export function verificationCueText(
   v: { status: VerifyStatus; issues?: string[] } | null | undefined
 ): string | null {
-  if (!v || v.status === 'verified') return null;
+  // Nothing to say when verified, when there is no verdict, or when the run was
+  // empty (skipped) — the empty-run "nothing to verify" note lives in the trace.
+  if (!v || v.status === 'verified' || v.status === 'skipped') return null;
   if (v.status === 'unavailable') return 'verification unavailable — provider error';
   const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
   return 'could not verify — ' + reason;

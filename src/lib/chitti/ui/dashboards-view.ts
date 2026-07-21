@@ -388,7 +388,11 @@ export function renderDashList() {
     empty.className = 'ch-dash-empty';
     empty.innerHTML =
       '<p class="ch-dash-empty-title">No dashboards yet</p>' +
-      '<p class="ch-dash-empty-sub">Pin a chart from any answer — use “Pin to dashboard” under an answer’s raw data — or import one below.</p>';
+      '<ol class="ch-dash-howto">' +
+      '<li>Ask a question — every answer’s chart can be pinned.</li>' +
+      '<li>Click “Pin to dashboard” on the answer — or just ask: “…and save it to a dashboard”.</li>' +
+      '<li>Open it here to refresh the data, rearrange tiles, or share a link.</li>' +
+      '</ol>';
     dashViewBody.appendChild(empty);
     return;
   }
