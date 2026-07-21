@@ -25,14 +25,14 @@ import {
   correlate,
   executeJs,
   rowsToCSV,
-  citationSourceLabel,
-  citationHumanUrl,
   citationsToCsvComments,
   INDICATORS,
   ApiRejection,
   resolveSources,
   schemasForSources,
   subAgentSchemasFor,
+  adapterOfId,
+  adapterById,
   type LlmFn,
   type SourceDef,
   type ChartSpec,
@@ -82,22 +82,11 @@ const LLM_DATA_CAP = 20_000;
 const MAX_DELEGATIONS_PER_TURN = 3;
 const MAX_SUBAGENT_CALLS = 6;
 
-// The registry source a fetch id routes to. find_series returns ids that carry
-// their source in the namespace, so the router reads it straight off the id:
-// "owid:<slug>" → OWID, "imf:<code>" → IMF, a bare code (no ':') → World Bank
-// (its ids look like SH.DYN.MORT). A namespaced id whose prefix is neither owid
-// nor imf is 'unknown' — NOT silently treated as a World Bank code, so a bad id
-// surfaces as a clear routing error instead of a confusing downstream API 404.
-// This is the single place fetch source identity is derived (the per-source
-// dispatch branches used to each own it).
-function fetchSourceOf(id: string): 'worldbank' | 'owid' | 'imf' | 'who' | 'unknown' {
-  const s = id.trim().toLowerCase();
-  if (s.startsWith('owid:')) return 'owid';
-  if (s.startsWith('imf:')) return 'imf';
-  if (s.startsWith('who:')) return 'who';
-  if (s.includes(':')) return 'unknown';
-  return 'worldbank';
-}
+// The registry source a fetch id routes to is now derived by the source layer:
+// sourceOfId/adapterOfId (sources/index.ts) read it straight off the id's
+// namespace ("owid:"/"imf:"/"who:" prefix; a bare code → World Bank; an
+// unrecognized namespace → no adapter, surfaced as a clear routing error). The
+// per-source dispatch branches that used to each own this are gone.
 
 // Normalized session-cache key for one fetch: id + resolved country codes +
 // year range. Countries are the RESOLVED codes (so "UK" and "GBR" share a key —
@@ -924,14 +913,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       ye: number | undefined,
       allowedSourceIds: string[]
     ): Promise<string> {
-      const source = fetchSourceOf(id);
-      if (source === 'unknown') {
+      // The adapter that owns this id's namespace (see sources/index.ts). Router
+      // is now generic: no per-source switch — every branch below reads off the
+      // adapter. An unrecognized namespace has no adapter.
+      const adapter = adapterOfId(id);
+      if (!adapter) {
         ev.detail = 'unknown source';
         return (
           `ERROR: cannot route "${id}" — its source namespace is not recognized. Use an id from ` +
           'find_series (a plain World Bank code, "owid:<slug>", or "imf:<code>").'
         );
       }
+      const source = adapter.citationSource;
       if (!allowedSourceIds.includes(source)) {
         ev.detail = 'refused: out-of-source id';
         return (
@@ -955,22 +948,16 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       const idLc = id.trim().toLowerCase();
       const idSeen = seenSeriesIds.has(idLc);
       let unverifiedWbId = false;
-      if (source === 'worldbank') {
-        const known = INDICATORS.some((i) => i.id.toLowerCase() === idLc);
-        unverifiedWbId = !known && !idSeen;
-      } else {
-        const catalogId =
-          source === 'owid' ? 'owid:' + id.replace(/^owid:/i, '')
-            : source === 'imf' ? 'imf:' + id.replace(/^imf:/i, '').toUpperCase()
-            : 'who:' + id.replace(/^who:/i, '');
-        if (datasetName(catalogId) === undefined && !idSeen) {
-          ev.detail = `unknown ${source} id`;
-          const label = source === 'owid' ? 'OWID slug' : source === 'imf' ? 'IMF code' : 'WHO IndicatorCode';
-          return (
-            `ERROR: unknown ${label} "${id}" — it is not in the ${source.toUpperCase()} catalog ` +
-            'or any recent find_series result. Call find_series to get a valid id, then fetch_series with it.'
-          );
-        }
+      if (adapter.openIdSpace) {
+        // Open id space (World Bank): an unknown id PROCEEDS, marked unverified.
+        unverifiedWbId = !adapter.hasCuratedId(id) && !idSeen;
+      } else if (!adapter.hasCuratedId(id) && !idSeen) {
+        // Closed catalog id space (OWID/IMF/WHO): refuse with a find_series steer.
+        ev.detail = `unknown ${source} id`;
+        return (
+          `ERROR: unknown ${adapter.idLabel} "${id}" — it is not in the ${source.toUpperCase()} catalog ` +
+          'or any recent find_series result. Call find_series to get a valid id, then fetch_series with it.'
+        );
       }
 
       // ── Country policy: DROP unresolvable tokens; never send junk to the API ─
@@ -1021,70 +1008,32 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let body = '';
       let detail = '';
       // Provenance captured verbatim from the fetcher, for the citation ledger.
-      let nid = id; // the normalized indicator id used as the citation key part
+      // nid is the adapter's normalized indicator id (the citation key part).
+      const nid = adapter.normalizeId(id);
       let requestUrl = ''; // the exact API URL that was hit
       let sourceUpdated: string | undefined; // source data vintage, when present
       try {
-      switch (source) {
-        case 'worldbank': {
-          if (hasCountries) {
-            const r = await fetchWorldbank(id, codes, ys, ye, signal);
-            rows = r.rows;
-            requestUrl = r.requestUrl;
-            sourceUpdated = r.sourceUpdated;
-            body = resNote + summarizeRows(rows);
-            if (r.truncatedFrom) {
-              body +=
-                `\n\nNOTE: you requested ${r.truncatedFrom} countries but only the first 60 were ` +
-                `fetched (per-call limit). Call fetch_series again with the remaining countries and merge results.`;
-            }
-            detail =
-              resDetail + `${rows.length} rows` + (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : '');
-          } else {
-            // No countries → every real country, batched internally.
-            const r = await fetchWorldbankAll(id, ys, ye, signal);
-            rows = r.rows;
-            requestUrl = r.requestUrl;
-            sourceUpdated = r.sourceUpdated;
-            body = summarizeRows(rows);
-            detail = `${rows.length} rows · ${r.countryCount} countries · ${r.batchCount} batch${r.batchCount === 1 ? '' : 'es'}`;
+        // One generic fetch through the adapter — it owns per-source id handling,
+        // request URL, vintage, and (for World Bank) every-country batching.
+        const r = await adapter.fetchSeries(id, hasCountries ? codes : undefined, ys, ye, signal);
+        rows = r.rows;
+        requestUrl = r.requestUrl;
+        sourceUpdated = r.sourceUpdated;
+        state.indicators.set(nid, adapter.indicatorLabel(nid, r));
+        if (adapter.reportsBatches && !hasCountries) {
+          // Every-country path (World Bank batches internally): its own detail,
+          // and no country-resolution notes (there were no countries to resolve).
+          body = summarizeRows(rows);
+          detail = `${rows.length} rows · ${r.countryCount} countries · ${r.batchCount} batch${r.batchCount === 1 ? '' : 'es'}`;
+        } else {
+          body = resNote + summarizeRows(rows);
+          if (r.truncatedFrom) {
+            body +=
+              `\n\nNOTE: you requested ${r.truncatedFrom} countries but only the first 60 were ` +
+              `fetched (per-call limit). Call fetch_series again with the remaining countries and merge results.`;
           }
-          state.indicators.set(id, id);
-          break;
+          detail = resDetail + `${rows.length} rows` + adapter.detailSuffix(r);
         }
-        case 'owid': {
-          const r = await fetchOwid(id, hasCountries ? codes : undefined, ys, ye, signal);
-          rows = r.rows;
-          requestUrl = r.requestUrl;
-          nid = 'owid:' + id.replace(/^owid:/, '');
-          state.indicators.set(nid, datasetName(nid) ?? r.metric);
-          body = resNote + summarizeRows(rows);
-          detail = resDetail + `${rows.length} rows · OWID`;
-          break;
-        }
-        case 'imf': {
-          const r = await fetchImf(id, hasCountries ? codes : undefined, ys, ye, signal);
-          rows = r.rows;
-          requestUrl = r.requestUrl;
-          nid = 'imf:' + id.replace(/^imf:/, '').toUpperCase();
-          state.indicators.set(nid, datasetName(nid) ?? nid);
-          body = resNote + summarizeRows(rows);
-          detail = resDetail + `${rows.length} rows · IMF (incl. forecasts)`;
-          break;
-        }
-        case 'who': {
-          // GHO IndicatorCodes are case-sensitive, so the code is kept verbatim
-          // (never upper-cased) — the id from find_series is used as-is.
-          const r = await fetchWho(id, hasCountries ? codes : undefined, ys, ye, signal);
-          rows = r.rows;
-          requestUrl = r.requestUrl;
-          nid = 'who:' + id.replace(/^who:/i, '');
-          state.indicators.set(nid, datasetName(nid) ?? nid);
-          body = resNote + summarizeRows(rows);
-          detail = resDetail + `${rows.length} rows · WHO GHO`;
-          break;
-        }
-      }
       } catch (err: any) {
         // A user-stop unwinds untouched. A STRUCTURED rejection (ApiRejection:
         // the API answered "no" to this id/parameter) becomes a model-recoverable
@@ -2102,11 +2051,16 @@ function buildCitation(
   requestUrl: string,
   sourceUpdated: string | undefined
 ): Citation {
-  const humanUrl = citationHumanUrl(source, nid);
+  // Citation identity is now GENERIC over the source adapter (same strings the
+  // legacy citationHumanUrl/citationSourceLabel produced, sourced from the one
+  // registry). source is always one of the four known sources, so adapterById
+  // never misses.
+  const adapter = adapterById(source)!;
+  const humanUrl = adapter.humanUrl(nid);
   return {
     id,
     source,
-    sourceLabel: citationSourceLabel(source),
+    sourceLabel: adapter.sourceLabel,
     indicatorId: nid,
     indicatorName: indicatorName(nid),
     url: humanUrl,
