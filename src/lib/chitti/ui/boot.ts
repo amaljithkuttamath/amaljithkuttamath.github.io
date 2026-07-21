@@ -58,26 +58,9 @@
   } from '../a11y';
   import { $, q, formatTs, formatTokens, formatBytes, fileExt, cssVar, escapeHtml, prefersReducedMotion, esc, inlineMd, mdToHtml, fmtShareDate, fmtRange, fmtFetchedAt, fmtDate } from './dom';
   import { buildOption } from './chart-option';
+  import { run, SESSION_KEY, SESSION_PROVIDER, providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty, keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta, byokMore, byokSettings, consoleEl, askForm, qIn, chips, composerForm, composerQ, askBtn, newConvoBtn, threadEl, turnTemplate, sourcesBox, sourcesHint, sourcesCount, sourcesSearch, sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, dashNavBtn, dashNavCount, pinDialog, pinBackdrop, pinCloseBtn, pinListEl, pinNewForm, pinNameInput, pinStatusEl, dashView, dashViewBack, dashViewTitle, dashViewBody, dashViewStatus, dashImportFile, INDICATOR_MAP, liveChartTurns, liveDashCharts, allTurns, dashStore } from './state';
+  import type { TurnBlock } from './state';
 
-  // ── Elements ──────────────────────────────────────────────────────────
-
-  const providerSel = $('ch-provider') as HTMLSelectElement;
-  const modelSel = $('ch-model') as HTMLSelectElement;
-  const modelPickList = $('ch-modelpick-list');
-  const modelPickSearch = $('ch-model-search') as HTMLInputElement;
-  const modelPickCount = $('ch-modelpick-count');
-  const modelPickEmpty = $('ch-modelpick-empty');
-  const keyIn = $('ch-key') as HTMLInputElement;
-  const saveChk = $('ch-save') as HTMLInputElement;
-  const keyLinks = $('ch-keylinks');
-  const providerNote = $('ch-provider-note');
-
-  const byokPanel = $('ch-byok') as HTMLDivElement;
-  const byokSum = $('ch-byok-sum') as HTMLButtonElement;
-  const byokState = $('ch-byok-state');
-  const byokCta = $('ch-byok-cta');
-  const byokMore = $('ch-byok-more') as HTMLButtonElement;
-  const byokSettings = $('ch-byok-settings') as HTMLDivElement;
 
   // Model + databases live behind a disclosure so the sheet is short on mobile
   // (the keyboard-vs-key-field problem). Key-first: collapsed until there's a
@@ -160,25 +143,7 @@
     }
   });
 
-  const consoleEl = $('ch-console');
-  const askForm = $('ch-ask') as HTMLFormElement;
-  const qIn = $('ch-q') as HTMLTextAreaElement;
-  const chips = $('ch-chips');
 
-  const composerForm = $('ch-composer') as HTMLFormElement;
-  const composerQ = $('ch-composer-q') as HTMLTextAreaElement;
-  // The composer's Ask button IS the primary (and only) submit button now, so
-  // the run-state "Working…" toggle drives it directly.
-  const askBtn = $('ch-composer-btn') as HTMLButtonElement;
-  const newConvoBtn = $('ch-new-convo') as HTMLButtonElement;
-
-  const threadEl = $('ch-thread');
-  const turnTemplate = $('ch-turn-template') as HTMLTemplateElement;
-
-  // Curated indicator id → friendly name, for citations.
-  const INDICATOR_MAP: Record<string, string> = JSON.parse(
-    ($('ch-indicator-map') as HTMLScriptElement).textContent || '{}'
-  );
 
   // ── Turn blocks ──────────────────────────────────────────────────────
   // Every render function and its mutable state used to be a module-level
@@ -188,57 +153,6 @@
   // and hands back a TurnBlock scoping every element and every piece of
   // mutable state (chart instance, last spec, rows, csv, trace, files,
   // start times) to that one turn.
-  interface TurnBlock {
-    root: HTMLElement;
-    questionEl: HTMLElement;
-    statusRow: HTMLElement;
-    statusDot: HTMLElement;
-    statusMsg: HTMLElement;
-    stopBtn: HTMLButtonElement;
-    panel: HTMLDetailsElement;
-    panelDot: HTMLElement;
-    panelLabel: HTMLElement;
-    railModelEl: HTMLElement;
-    traceEl: HTMLElement;
-    renderFlag: HTMLElement;
-    railTotal: HTMLElement;
-    canvasEl: HTMLElement;
-    chartEl: HTMLElement;
-    chartTitle: HTMLElement;
-    chartUnit: HTMLElement;
-    metaSection: HTMLElement;
-    answerSection: HTMLElement;
-    findingEl: HTMLElement;
-    verifyEl: HTMLElement;
-    dataDetails: HTMLDetailsElement;
-    dataCount: HTMLElement;
-    csvBtn: HTMLButtonElement;
-    shareBtn: HTMLButtonElement;
-    pinBtn: HTMLButtonElement;
-    shareStatus: HTMLElement;
-    shareBanner: HTMLElement;
-    tableEl: HTMLTableElement;
-    citeEl: HTMLElement;
-    chartInstance: any | null;
-    lastSpec: ChartSpec | null;
-    lastRows: DataRow[];
-    lastCSV: string;
-    // Answer-level state captured for the share permalink (backlog #15): the
-    // finding text, citations, and verdict this turn ended with. Snapshotted on
-    // completion so the share button encodes exactly what is on screen.
-    lastFinding: string;
-    lastCitations: Citation[];
-    lastVerification: AgentOutput['verification'];
-    // True when this turn was restored from a #share= link (no agent ran).
-    isShared: boolean;
-    // Index (into lastRows) of the evidence row currently highlighted by a
-    // chart click, or -1 when nothing is highlighted. Chart↔table linking.
-    activeRowIndex: number;
-    trace: TraceEvent[];
-    files: Record<string, string>;
-    startTimes: number[];
-    question: string;
-  }
 
 
   function createTurnBlock(): TurnBlock {
@@ -406,13 +320,6 @@
     clipboardFallback(tb.shareStatus, text, okMsg, (m) => announceShare(tb, m));
   }
 
-  const SESSION_KEY = 'chitti:key';
-  const SESSION_PROVIDER = 'chitti:provider';
-
-  // The multi-turn agent session. Created on the first ask() call and reused
-  // for every subsequent one on this page load, so follow-up questions share
-  // conversation history and fetched data. Cleared by "new conversation".
-  let session: ChittiSession | null = null;
 
   // ── Provider / model dropdown wiring ───────────────────────────────────
   function currentProvider(): ProviderId {
@@ -759,14 +666,6 @@
   // ── Database picker ─────────────────────────────────────────────────────
   // Toggling chips is a hard filter on which databases the session may use.
   // At least one must stay on; trying to turn the last one off is a no-op.
-  const sourcesBox = $('ch-sources');
-  const sourcesHint = $('ch-sources-hint');
-  const sourcesCount = $('ch-sources-count');
-  const sourcesSearch = $('ch-sources-search') as HTMLInputElement;
-  const sourcesEmpty = $('ch-sources-empty');
-  const sourceItems = Array.from(
-    document.querySelectorAll<HTMLButtonElement>('.ch-source-item')
-  );
   let sourcesLocked = false;
 
   function selectedSources(): string[] {
@@ -794,9 +693,6 @@
   // reason: it is read once, when createSession() is called, so letting it
   // change mid-conversation would show a control that no longer decides
   // anything. It rides the same lock rather than growing a second mechanism.
-  const rlmBox = $('ch-rlm');
-  const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
-  const rlmHint = $('ch-rlm-hint');
   const RLM_HINT_DEFAULT = rlmHint?.textContent || '';
 
   function rlmEnabled(): boolean {
@@ -1491,14 +1387,7 @@
   }
 
   // Turn blocks whose chart is still "live" (wired to theme/resize), i.e.
-  // not yet superseded by a later turn. Task 5 removes an entry from this
-  // array when that turn's chart is frozen.
-  const liveChartTurns: TurnBlock[] = [];
 
-  // Live dashboard-view tile charts (one per rendered tile in the open
-  // dashboard). Wired into the same theme/resize handlers as turn charts;
-  // disposed and cleared when the dashboard view is exited.
-  const liveDashCharts: { el: HTMLElement; spec: ChartSpec; inst: any }[] = [];
 
   // Re-theme every live turn's chart if the site theme toggles.
   const themeObserver = new MutationObserver(() => {
@@ -1530,9 +1419,6 @@
   });
 
   // Every turn block created so far, regardless of whether it has a chart.
-  // Separate from liveChartTurns (which only tracks turns with a live
-  // chart) so the new-conversation reset can dispose every chart at once.
-  const allTurns: TurnBlock[] = [];
 
   // The user's question, shown chat-style at the top of its turn.
   function renderQuestion(tb: TurnBlock, question: string) {
@@ -1879,31 +1765,7 @@
   // agent: pinning captures the turn's already-rendered chart + rows + citation
   // ledger and writes a Dashboard document; the view re-renders each tile's
   // chart through the SAME buildOption path the live answers use.
-  const dashStore: StorageLike | null = (() => {
-    try {
-      const s = window.localStorage;
-      s.getItem('__chitti_probe'); // throws in some privacy modes
-      return s as unknown as StorageLike;
-    } catch {
-      return null;
-    }
-  })();
 
-  const dashNavBtn = $('ch-dash-nav') as HTMLButtonElement;
-  const dashNavCount = $('ch-dash-nav-count');
-  const pinDialog = $('ch-pin-dialog');
-  const pinBackdrop = $('ch-pin-backdrop');
-  const pinCloseBtn = $('ch-pin-close') as HTMLButtonElement;
-  const pinListEl = $('ch-pin-list');
-  const pinNewForm = $('ch-pin-new') as HTMLFormElement;
-  const pinNameInput = $('ch-pin-name') as HTMLInputElement;
-  const pinStatusEl = $('ch-pin-status');
-  const dashView = $('ch-dashview');
-  const dashViewBack = $('ch-dashview-back') as HTMLButtonElement;
-  const dashViewTitle = $('ch-dashview-title');
-  const dashViewBody = $('ch-dashview-body');
-  const dashViewStatus = $('ch-dashview-status');
-  const dashImportFile = $('ch-dash-import-file') as HTMLInputElement;
 
   // Polite status line for the dashboards view (share/export/import). Mirrors the
   // per-turn announceShare: auto-clears a success message, keeps errors up.
@@ -2879,7 +2741,7 @@
 
   function performNewQuestion() {
     resetNewQuestionChip();
-    session = null;
+    run.session = null;
     unlockSources();
     // Dispose live charts before clearing the DOM so ECharts releases its
     // global registry entry and resize listener.
@@ -2900,15 +2762,10 @@
   }
 
   // ── Run ────────────────────────────────────────────────────────────────
-  let running = false;
-  // The AbortController for the turn currently in flight (null when idle). The
-  // per-turn stop button and "+ new question" both abort through it, so a run
-  // can never leave the app wedged with no escape.
-  let runController: AbortController | null = null;
 
   askForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (running) return;
+    if (run.running) return;
     const question = qIn.value.trim() || (qIn.placeholder || '').trim();
     if (!question) return;
 
@@ -2924,7 +2781,7 @@
 
     // Hard filter needs at least one database. Only enforced on the first ask,
     // when the session (and its source set) is created; later turns are locked.
-    if (!session && selectedSources().length === 0) {
+    if (!run.session && selectedSources().length === 0) {
       openByok(true);
       updateSourcesCount();
       sourcesSearch?.focus();
@@ -2938,9 +2795,9 @@
       requestReasoning: modelSel.selectedOptions[0]?.dataset.reasoning === '1',
     };
 
-    running = true;
+    run.running = true;
     const controller = new AbortController();
-    runController = controller;
+    run.runController = controller;
     askBtn.disabled = true;
     askBtn.classList.add('ch-send-working');
     openByok(false);
@@ -2990,11 +2847,11 @@
       // Bind the chosen databases to the session on first ask; the selection
       // is locked for the rest of the conversation. "+ new conversation" clears
       // `session` and unlocks the picker.
-      if (!session) {
-        session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
+      if (!run.session) {
+        run.session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
         lockSources();
       }
-      const out = await session.ask(question, {
+      const out = await run.session!.ask(question, {
         onTrace: (events) => renderTrace(tb, events),
         onFiles: (files) => renderFiles(tb, files),
         onChart: (spec) => { void renderChart(tb, spec); },
@@ -3092,8 +2949,8 @@
       // The single place the composer is re-enabled — EVERY terminal path
       // (success, error, aborted) lands here, so a run can never leave the app
       // stuck with a disabled input. The stop control is retired with the run.
-      running = false;
-      runController = null;
+      run.running = false;
+      run.runController = null;
       tb.stopBtn.style.display = 'none';
       tb.stopBtn.onclick = null;
       askBtn.disabled = false;
@@ -3138,7 +2995,7 @@
   newConvoBtn.addEventListener('click', () => {
     // Never-stuck: a mid-run click stops the current turn first, so the reset
     // proceeds against a settled session instead of racing an in-flight ask().
-    if (running && runController) runController.abort();
+    if (run.running && run.runController) run.runController.abort();
 
     if (!newQuestionArmed) {
       const n = allTurns.length;
@@ -3389,7 +3246,7 @@
         };
         // Same closure as `session` — inject directly and lock the picker, as a
         // real first ask() would, so the "+ new question" unlock is exercised.
-        session = fake as unknown as ChittiSession;
+        run.session = fake as unknown as ChittiSession;
         lockSources();
       },
     };
