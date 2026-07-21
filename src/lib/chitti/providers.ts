@@ -481,9 +481,13 @@ export type ProviderErrorClass =
   | 'empty_completion' // a 200 that carried no usable output (empty choices,
   //                      missing message, or content:'' with no tool calls) —
   //                      a transient free-model glitch, so retryable AND
-  //                      fallback-eligible, unlike truly unreadable `malformed`.
-  | 'malformed' // the completion body was genuine garbage (non-empty but
-  //               unparseable JSON, or a valid-JSON shape with no choices array)
+  //                      fallback-eligible.
+  | 'malformed' // the completion body was unreadable (non-empty but unparseable
+  //               JSON, or a valid-JSON shape with no choices array). Live
+  //               evidence: free models return unreadable responses at
+  //               meaningful rates, and a retry (or a different free model) most
+  //               often gets a readable one — so this is retryable AND
+  //               fallback-eligible, exactly like empty_completion.
   | 'context_length' // provider says the prompt exceeds the context window
   | 'model_unavailable' // 404 / model-not-found shapes
   | 'insufficient_credits' // 402 / quota / billing shapes (fallback-eligible)
@@ -500,19 +504,23 @@ export interface ClassifiedInfo {
   detail?: string; // a short excerpt of the provider's own message
 }
 
-// Transient transport failures a single retry can plausibly rescue. An
-// empty_completion is included: OpenRouter free models transiently return a
-// 200 with no usable output, and the same model often answers on a second try.
-const RETRYABLE_CLASSES = new Set<ProviderErrorClass>(['rate_limit', 'server', 'timeout', 'network', 'empty_completion']);
+// Transient transport failures a single retry can plausibly rescue. Both
+// empty_completion AND malformed are included: OpenRouter free models
+// transiently return a 200 with no usable output (empty) OR an unreadable body
+// (malformed), and the same model most often answers cleanly on a second try.
+const RETRYABLE_CLASSES = new Set<ProviderErrorClass>(['rate_limit', 'server', 'timeout', 'network', 'empty_completion', 'malformed']);
 // Classes the free-model fallback can actually help with. NEVER bad_key (that
-// would mask the real problem), context_length, or malformed. empty_completion
-// IS eligible — an empty answer from a free model is that model glitching, so
-// substituting a different free model is a genuine fix (with a visible receipt).
+// would mask the real problem) or context_length (a bigger model is the only
+// fix, and a free substitute is not one). empty_completion AND malformed ARE
+// eligible — a free model returning nothing usable or an unreadable body is
+// that model glitching, so substituting a different free model is a genuine fix
+// (with a visible receipt), not a dead end.
 const FALLBACK_CLASSES = new Set<ProviderErrorClass>([
   'model_unavailable',
   'rate_limit',
   'insufficient_credits',
   'empty_completion',
+  'malformed',
 ]);
 
 // A thrown error that already carries its classification. Its `.message` is the
@@ -1181,9 +1189,10 @@ export async function complete(
     }
 
     // Free-model fallback SECOND, only on classes it can help and only where a
-    // real substitute exists (OpenRouter :free primaries). Never on bad_key,
-    // context_length, or malformed — those surface so the user sees the truth.
-    // The substitution receipt stays visible via the served model.
+    // real substitute exists (OpenRouter :free primaries). Never on bad_key or
+    // context_length — those surface so the user sees the truth (a different
+    // free model cannot fix a bad key or an over-long prompt). The substitution
+    // receipt stays visible via the served model.
     if (canFallback) {
       let chain: string[] = [];
       try {

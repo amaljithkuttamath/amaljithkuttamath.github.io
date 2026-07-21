@@ -471,23 +471,29 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     expect(sleeps[0]).toBeGreaterThan(0);
   });
 
-  it('does NOT retry a malformed completion (valid JSON, no choices array) — surfaces at once', async () => {
-    // A non-empty, parseable body that simply isn't a completion shape. This is
-    // genuine garbage → malformed, distinct from an empty body (empty_completion).
+  // A malformed body used to be a dead end (no retry, no fallback), so one
+  // unreadable response from a free model killed the whole run. Live evidence
+  // showed free models return unreadable bodies at meaningful rates, so it is
+  // now RETRYABLE (and fallback-eligible), exactly like empty_completion: one
+  // same-model retry first, then a free substitute where one exists.
+  it('RETRIES a malformed completion (valid JSON, no choices array) once, then surfaces', async () => {
+    // A non-empty, parseable body that simply isn't a completion shape → an
+    // unreadable `malformed`. cfg() is a non-free OpenAI primary, so there is no
+    // free substitute: it retries once (same model) and then surfaces.
     const f = vi.fn(async () => okRaw(JSON.stringify({ not: 'a completion' })));
     await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
       errorClass: 'malformed',
     });
-    expect(f).toHaveBeenCalledTimes(1); // malformed is not retryable
+    expect(f).toHaveBeenCalledTimes(2); // original + one retry (malformed is retryable)
   });
 
-  it('does NOT retry unparseable JSON garbage — surfaces at once as malformed', async () => {
+  it('RETRIES unparseable JSON garbage once, then surfaces as malformed', async () => {
     // Non-empty but not JSON at all (e.g. an HTML error page) → malformed.
     const f = vi.fn(async () => okRaw('<html>gateway error</html>'));
     await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
       errorClass: 'malformed',
     });
-    expect(f).toHaveBeenCalledTimes(1);
+    expect(f).toHaveBeenCalledTimes(2);
   });
 
   // ── empty_completion: transient free-model glitch (backlog #17 regression) ──
@@ -590,6 +596,25 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
       expect(out.text).toBe('hello');
       expect(out.servedModel).toBe('backup:free'); // visible substitution
       expect(f).toHaveBeenCalledTimes(3);
+    });
+
+    it('a free OpenRouter primary: malformed → retry (same model) → fallback that answers → substitution', async () => {
+      // Malformed now behaves exactly like empty_completion for a free primary:
+      // it is retryable AND fallback-eligible, so an unreadable body is no longer
+      // a dead end. 1: unreadable, 2: unreadable retry, 3: fallback chain answers.
+      const freeCfg = cfg({ provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' });
+      let n = 0;
+      const f = vi.fn(async () => {
+        n++;
+        return n < 3 ? okRaw('<html>gateway error</html>') : okChat('backup:free');
+      });
+      const buildChain = vi.fn(async () => ['nvidia/nemotron-3-ultra-550b-a55b:free', 'a:free', 'b:free']);
+      const sleep = vi.fn(async () => {});
+      const out = await complete(freeCfg, [{ role: 'user', content: 'hi' }], [], deps(f, { sleep, buildFreeFallbackChain: buildChain }));
+      expect(out.text).toBe('hello');
+      expect(out.servedModel).toBe('backup:free'); // visible substitution
+      expect(f).toHaveBeenCalledTimes(3); // original + retry + fallback attempt
+      expect(sleep).toHaveBeenCalledTimes(1);
     });
 
     it('content:"" WITH tool_calls is VALID — no retry, no fallback', async () => {
