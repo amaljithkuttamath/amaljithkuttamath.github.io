@@ -721,6 +721,7 @@ import {
   parseVerifierVerdict,
   normalizeSpec,
   salvageToolCall,
+  resolveFetchArgs,
   needsPlan,
   countCountryMentions,
   parsePlanBrief,
@@ -2946,6 +2947,44 @@ describe('salvageToolCall — recover a text-embedded tool call', () => {
     expect(salvageToolCall('I could not find that series, sorry.', valid)).toBeNull();
     expect(salvageToolCall('{"tool":"delete_everything","arguments":{}}', valid)).toBeNull();
     expect(salvageToolCall('{"insight":"gdp rose","confidence":"high"}', valid)).toBeNull();
+  });
+});
+
+// ── resolveFetchArgs: accept the fetch argument-key synonyms models emit ────
+// The schema is id/countries/year_start/year_end, but weak models key the
+// series as `indicator`/`series`/`code` and the range as `start_year`/`end_year`
+// — leaving `id` undefined, routing an empty id into World Bank, and looping on
+// "API rejected id". resolveFetchArgs maps the synonyms so the call runs.
+describe('resolveFetchArgs — fetch argument-key synonyms', () => {
+  it('canonical keys pass straight through', () => {
+    expect(resolveFetchArgs({ id: 'NY.GDP.PCAP.CD', countries: ['IND'], year_start: 2000, year_end: 2024 }))
+      .toEqual({ id: 'NY.GDP.PCAP.CD', countries: ['IND'], ys: 2000, ye: 2024 });
+  });
+
+  it('recovers the live failure: {indicator, countries, start_year, end_year}', () => {
+    expect(resolveFetchArgs({ indicator: 'NY.GDP.PCAP.CD', countries: ['IND'], start_year: 2000, end_year: 2024 }))
+      .toEqual({ id: 'NY.GDP.PCAP.CD', countries: ['IND'], ys: 2000, ye: 2024 });
+  });
+
+  it('accepts indicator_id / series / code / slug for the id, and from/to for the range', () => {
+    expect(resolveFetchArgs({ series: 'owid:co2', from: 1990, to: 2020 }).id).toBe('owid:co2');
+    expect(resolveFetchArgs({ code: 'imf:NGDP_RPCH' }).id).toBe('imf:NGDP_RPCH');
+    expect(resolveFetchArgs({ slug: 'life-expectancy' }).id).toBe('life-expectancy');
+    const r = resolveFetchArgs({ id: 'X', from: 1990, to: 2020 });
+    expect([r.ys, r.ye]).toEqual([1990, 2020]);
+  });
+
+  it('wraps a single country string into an array; accepts country/country_ids/iso3', () => {
+    expect(resolveFetchArgs({ id: 'X', country: 'IND' }).countries).toEqual(['IND']);
+    expect(resolveFetchArgs({ id: 'X', country_ids: ['USA', 'CHN'] }).countries).toEqual(['USA', 'CHN']);
+    expect(resolveFetchArgs({ id: 'X', iso3: ['GBR'] }).countries).toEqual(['GBR']);
+    // No country key at all → undefined ("all countries").
+    expect(resolveFetchArgs({ id: 'X' }).countries).toBeUndefined();
+  });
+
+  it('yields an empty id when no id-like key is present (so routeFetch can steer, not loop)', () => {
+    expect(resolveFetchArgs({ countries: ['IND'] }).id).toBe('');
+    expect(resolveFetchArgs({}).id).toBe('');
   });
 });
 

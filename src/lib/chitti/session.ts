@@ -521,6 +521,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       ye: number | undefined,
       allowedSourceIds: string[]
     ): Promise<string> {
+      // A blank id must never reach adapter routing: World Bank's matchesId is
+      // "no colon present", so an empty string "matches" it, proceeds through the
+      // open id-space as unverified, and fetches nothing — the API rejects it and
+      // the model retries the same empty id forever. Stop it here with a steer.
+      if (!id.trim()) {
+        ev.detail = 'missing id';
+        return (
+          'ERROR: fetch_series needs an `id` from find_series (a World Bank code like NY.GDP.PCAP.CD, ' +
+          '"owid:<slug>", "imf:<code>", or "who:<code>") — none was provided. Call find_series first, ' +
+          'then pass its id to fetch_series.'
+        );
+      }
       // The adapter that owns this id's namespace (see sources/index.ts). Router
       // is now generic: no per-source switch — every branch below reads off the
       // adapter. An unrecognized namespace has no adapter.
@@ -774,16 +786,13 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // namespace. Country resolution + session caching happen once, inside
             // routeFetch, for every source. `sourceIds` is the allowed-source set
             // (all active sources in the main loop; one source in a sub-agent),
-            // so out-of-namespace ids are refused here.
-            const rawCountries = Array.isArray(a.countries) ? (a.countries as string[]) : undefined;
-            result = await routeFetch(
-              ev,
-              String(a.id ?? ''),
-              rawCountries,
-              numOrUndef(a.year_start),
-              numOrUndef(a.year_end),
-              sourceIds
-            );
+            // so out-of-namespace ids are refused here. resolveFetchArgs accepts
+            // the common key synonyms (`indicator`/`start_year`/…) a weak model
+            // emits — without it a call keyed `indicator` left `id` undefined,
+            // routed an EMPTY id into World Bank's open id-space, and looped on
+            // "API rejected id" forever.
+            const { id, countries, ys, ye } = resolveFetchArgs(a);
+            result = await routeFetch(ev, id, countries, ys, ye, sourceIds);
             break;
           }
           // Legacy per-source fetch tool names — retired from the model's schema
@@ -1678,6 +1687,38 @@ function numOrUndef(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+// Resolve fetch_series arguments across the key synonyms models actually emit.
+// The schema is `id`/`countries`/`year_start`/`year_end`, but weak free models
+// (and the hallucinated `fetch_data` shape) key the series as `indicator` /
+// `series` / `code` and the range as `start_year`/`end_year` (OpenAI-style). A
+// mismatch left `id` undefined → an empty id routed into World Bank's open
+// id-space → an endless "API rejected id" loop. Accept the synonyms so the
+// intended call runs. A single country string is wrapped to a one-element array.
+export function resolveFetchArgs(a: Record<string, unknown>): {
+  id: string;
+  countries: string[] | undefined;
+  ys: number | undefined;
+  ye: number | undefined;
+} {
+  const first = (...keys: string[]): unknown => {
+    for (const k of keys) if (a[k] !== undefined && a[k] !== null) return a[k];
+    return undefined;
+  };
+  const rawId = first('id', 'indicator', 'indicator_id', 'series', 'series_id', 'code', 'dataset_id', 'slug');
+  const rawCountries = first('countries', 'country', 'country_ids', 'countryIds', 'iso3', 'countries_iso3');
+  const countries = Array.isArray(rawCountries)
+    ? (rawCountries as unknown[]).map((c) => String(c))
+    : typeof rawCountries === 'string' && rawCountries.trim()
+      ? [rawCountries]
+      : undefined;
+  return {
+    id: String(rawId ?? '').trim(),
+    countries,
+    ys: numOrUndef(first('year_start', 'start_year', 'startYear', 'from', 'start')),
+    ye: numOrUndef(first('year_end', 'end_year', 'endYear', 'to', 'end')),
+  };
+}
+
 // Well-known hallucinated tool names → the real tool. Some free models
 // (observed: OpenRouter NVIDIA models) print a tool call as JSON text and pick
 // a plausible-but-wrong name — `fetch_data` for `fetch_series` was the live
@@ -1774,12 +1815,16 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
     case 'list_countries':
       return String(a.filter ?? 'all');
     case 'fetch_series': {
-      const ids = Array.isArray(a.countries) ? (a.countries as string[]) : [];
+      // Read through the same synonym resolution the dispatcher uses, so the
+      // receipt shows the real id/countries even when the model keyed them as
+      // `indicator`/`country`/`start_year` — never a bare "undefined".
+      const { id, countries, ys, ye } = resolveFetchArgs(a);
+      const ids = countries ?? [];
       const shown = ids.length
         ? ids.slice(0, 4).join(',') + (ids.length > 4 ? `+${ids.length - 4}` : '')
         : 'all countries';
-      const hasYears = a.year_start !== undefined || a.year_end !== undefined;
-      return `${a.id} · ${shown}` + (hasYears ? ` · ${a.year_start ?? ''}–${a.year_end ?? ''}` : '');
+      const hasYears = ys !== undefined || ye !== undefined;
+      return `${id || '(no id)'} · ${shown}` + (hasYears ? ` · ${ys ?? ''}–${ye ?? ''}` : '');
     }
     case 'fetch_worldbank': {
       const ids = Array.isArray(a.country_ids) ? (a.country_ids as string[]) : [];
