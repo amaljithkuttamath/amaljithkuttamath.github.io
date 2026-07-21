@@ -3721,7 +3721,7 @@ describe('plan mode, driven through createSession', () => {
     expect(userMsg!.content).toMatch(/Intended insight: Divergence after 2010\./);
   });
 
-  it('a malformed brief → no plan receipt, no injected note, run proceeds identically', async () => {
+  it('a malformed brief → muted plan-skipped receipt (never a faked card), no injected note, run proceeds', async () => {
     // The planning call still fires (the gate opened), but its output is junk.
     mockComplete.mockResolvedValueOnce({ text: 'the model forgot to answer in JSON', toolCalls: [], usage: { input: 6, output: 3 } });
     mockComplete.mockResolvedValueOnce(chartTurn());
@@ -3732,14 +3732,31 @@ describe('plan mode, driven through createSession', () => {
     expect(out.aborted).toBe(false);
     expect(out.verification!.status).toBe('verified'); // run completed normally
 
-    // No plan receipt was faked.
-    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+    // No plan CARD was faked — a card is a 'plan' event carrying a `.plan` brief.
+    expect(trace().some((e) => e.tool === 'plan' && e.plan)).toBe(false);
+    // But the gated-yet-unusable plan is EXPLAINED, not silent: a muted one-line
+    // receipt (a 'plan' event with NO `.plan`) sits where the card would be.
+    const skipped = trace().filter((e) => e.tool === 'plan' && !e.plan);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].status).toBe('ok'); // muted, not an error dot
+    expect(skipped[0].detail).toMatch(/plan skipped — model returned no usable brief/);
     // No plan note leaked into the executor context.
     const execMessages = mockComplete.mock.calls[1][1] as { role: string; content: string }[];
     expect(execMessages.some((m) => m.role === 'system' && m.content.includes('Insight to surface:'))).toBe(false);
     // The verifier saw no intended insight either.
     const verifyMessages = mockComplete.mock.calls[2][1] as { role: string; content: string }[];
     expect(verifyMessages.find((m) => m.role === 'user')!.content).not.toMatch(/Intended insight:/);
+  });
+
+  it('an ungated (simple) question emits NO plan-skipped receipt — planning never ran', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask(SIMPLE, cb);
+
+    // Neither a plan card nor a plan-skipped receipt: the gate never opened.
+    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
   });
 
   it('a simple question makes NO planning call (zero extra cost)', async () => {

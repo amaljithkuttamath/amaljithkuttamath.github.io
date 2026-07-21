@@ -1628,18 +1628,35 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           content: `Question: ${q}\n\nActive databases: ${sourceList}`,
         },
       ];
+      // Planning was gated IN, so the absence of a plan card must be EXPLAINED,
+      // never silent: whenever the brief turns out unusable (the planning call
+      // errored, or its output didn't parse), emit a muted one-line receipt so
+      // the reader knows the plan was attempted and skipped — NOT an error dot,
+      // and NOT a faked/empty plan card (that carries no `plan` field).
+      const skipReceipt = () =>
+        pushTrace({
+          tool: 'plan',
+          argSummary: '',
+          status: 'ok',
+          detail: 'plan skipped — model returned no usable brief',
+        });
       let res;
       try {
         res = await complete(cfg, planMessages, [], completeDeps);
       } catch (err) {
         // A user-stop unwinds to the aborted output; any other provider error
-        // just means "no plan" — proceed without one.
+        // just means "no plan" — proceed without one, but say so.
         if (err instanceof AbortedError || signal?.aborted) throw new AbortedError();
+        skipReceipt();
         return null;
       }
       totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
       const brief = parsePlanBrief(res.text);
-      if (!brief) return null; // malformed → no plan, no receipt, run unchanged
+      if (!brief) {
+        // Unusable brief → no plan card, but the muted receipt explains why.
+        skipReceipt();
+        return null;
+      }
       pushTrace({
         tool: 'plan',
         argSummary: '',
