@@ -138,7 +138,8 @@ export function renderSharedVerification(tb: TurnBlock, v: AgentOutput['verifica
   const el = tb.verifyEl;
   el.textContent = '';
   el.className = 'ch-verify ch-verify-shared';
-  if (!v) { el.style.display = 'none'; return; }
+  // No verdict, or an empty-run 'skipped' verdict → nothing to show.
+  if (!v || v.status === 'skipped') { el.style.display = 'none'; return; }
   el.style.display = 'block';
   let text: string;
   if (v.status === 'verified') {

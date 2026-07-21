@@ -25,11 +25,14 @@ export interface TraceEvent {
   //   'verified'    — the verifier ran and passed (pass===true; amber stamp).
   //   'unverified'  — the verifier ran and did NOT confirm the answer, or its
   //                   output was unparseable (could-not-verify). pass===false.
-  //   'unavailable' — the verify call itself failed (network/provider error) or
-  //                   was skipped. NEVER implies the answer was verified.
-  // The UI keys its three answer/receipt treatments off this, never off a
+  //   'unavailable' — the verify call itself failed (network/provider error).
+  //                   NEVER implies the answer was verified.
+  //   'skipped'     — the run produced no result (no answer, chart, or rows), so
+  //                   verify() was never called; renders a muted "nothing to
+  //                   verify" line, never a VERIFIED stamp.
+  // The UI keys its answer/receipt treatments off this, never off a
   // defaulted-true pass.
-  verifyStatus?: 'verified' | 'unverified' | 'unavailable';
+  verifyStatus?: 'verified' | 'unverified' | 'unavailable' | 'skipped';
   // The verifier's self-reported confidence in ITS verdict (not the finding's).
   // 'none' when the verifier couldn't run (unavailable). Rendered on the verify
   // receipt beside the verdict.

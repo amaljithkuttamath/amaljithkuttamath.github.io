@@ -5,7 +5,7 @@
 import type { TurnBlock } from './state';
 import type { TraceEvent, InsightBrief, PlanStep } from '../agent';
 import { matchStepToEvent } from '../agent';
-import { verificationStampLabel } from '../a11y';
+import { verificationStampLabel, verifierConfidenceLabel } from '../a11y';
 import { fileExt, formatTokens, formatTs } from './dom';
 
 export const PLAN_OFF_PLAN_TOOLS = new Set([
@@ -110,7 +110,7 @@ export function buildVerifyReceipt(e: TraceEvent): HTMLElement {
   wrap.appendChild(verdict);
   const meta = document.createElement('div');
   meta.className = 'ch-trace-detail';
-  const conf = e.confidence && e.confidence !== 'none' ? 'confidence: ' + e.confidence : 'confidence: unknown';
+  const conf = verifierConfidenceLabel(e.confidence);
   const n = (e.issues && e.issues.length) || 0;
   meta.textContent = conf + ' · ' + n + (n === 1 ? ' issue' : ' issues');
   wrap.appendChild(meta);
@@ -400,9 +400,17 @@ export function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
         if (e.confidence && e.confidence !== 'none') {
           const c = document.createElement('div');
           c.className = 'ch-trace-detail';
-          c.textContent = 'confidence: ' + e.confidence;
+          c.textContent = verifierConfidenceLabel(e.confidence);
           body.appendChild(c);
         }
+      } else if (e.verifyStatus === 'skipped') {
+        // Empty run: nothing was produced, so verify() was never called. A
+        // muted line, never error-red and never a stamp — the run simply had
+        // no result to check.
+        const note = document.createElement('div');
+        note.className = 'ch-trace-detail';
+        note.textContent = e.detail || 'nothing to verify — the run produced no result';
+        body.appendChild(note);
       } else if (!isLast) {
         // A failing verify with another verify still to come = a retry follows.
         const note = document.createElement('div');

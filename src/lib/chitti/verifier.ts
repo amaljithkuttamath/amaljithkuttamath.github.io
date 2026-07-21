@@ -12,7 +12,11 @@ import {
 import type { ChartSpec, Citation } from './tools';
 import { extractJsonObject } from './parse-json';
 
-export type VerifyStatus = 'verified' | 'unverified' | 'unavailable';
+// The honest verification outcomes. 'skipped' is the empty-run state: the turn
+// produced no answer, chart, or fetched rows, so verify() was NEVER called (no
+// LLM spend, no verdict retry) — distinct from 'unavailable' (the verify call
+// itself failed) and never implying the answer was verified.
+export type VerifyStatus = 'verified' | 'unverified' | 'unavailable' | 'skipped';
 
 // The verifier's verdict as it leaves verify()/reaches the UI. `pass` is true
 // only when status==='verified' — the two are kept in lockstep so a caller can
