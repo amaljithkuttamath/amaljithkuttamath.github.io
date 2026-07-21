@@ -56,9 +56,9 @@
     focusTrapTarget,
     FOCUSABLE_SELECTOR,
   } from '../a11y';
+  import { $, q, formatTs, formatTokens, formatBytes, fileExt, cssVar, escapeHtml, prefersReducedMotion, esc, inlineMd, mdToHtml, fmtShareDate, fmtRange, fmtFetchedAt, fmtDate } from './dom';
 
   // ── Elements ──────────────────────────────────────────────────────────
-  const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
   const providerSel = $('ch-provider') as HTMLSelectElement;
   const modelSel = $('ch-model') as HTMLSelectElement;
@@ -239,11 +239,6 @@
     question: string;
   }
 
-  function q<T extends HTMLElement = HTMLElement>(root: HTMLElement, selector: string): T {
-    const el = root.querySelector(selector);
-    if (!el) throw new Error('Turn block missing expected element: ' + selector);
-    return el as T;
-  }
 
   function createTurnBlock(): TurnBlock {
     const fragment = turnTemplate.content.cloneNode(true) as DocumentFragment;
@@ -887,26 +882,8 @@
   // singletons; they now live on the TurnBlock passed in (tb.startTimes,
   // tb.trace, tb.files) so each turn keeps its own.
 
-  // HH:MM:SS.d, tenths precision, matching the spec's receipt timestamp style.
-  function formatTs(ts: number): string {
-    const d = new Date(ts);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    const tenths = Math.floor(d.getMilliseconds() / 100);
-    return `${hh}:${mm}:${ss}.${tenths}`;
-  }
 
-  // Compact token count, receipt-style: "217" -> "217 tok", "1834" -> "1.8k tok".
-  function formatTokens(n: number): string {
-    const val = n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
-    return val + ' tok';
-  }
 
-  // Compact byte count for the nested llm() receipts: "820 B", "4.1 KB".
-  function formatBytes(n: number): string {
-    return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
-  }
 
   // The plan card (backlog #10): the turn's committed insight brief, rendered
   // at the top of the trace. The insight sits in Newsreader italic; the steps
@@ -1367,10 +1344,6 @@
   }
 
   // ── Virtual-FS rendering ───────────────────────────────────────────────
-  function fileExt(path: string): string {
-    const dot = path.lastIndexOf('.');
-    return dot === -1 ? 'txt' : path.slice(dot + 1).toLowerCase();
-  }
 
   // No separate "workspace" list — a write_file trace row inline-expands its
   // own content (see renderTrace) instead of duplicating the same file in a
@@ -1398,17 +1371,7 @@
     return echartsMod;
   }
 
-  function cssVar(name: string): string {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  }
 
-  // Minimal HTML escape for values interpolated into the tooltip's HTML
-  // string (series names, unit, axis label all originate from model/spec text).
-  function escapeHtml(s: string): string {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
-    );
-  }
 
   function buildOption(spec: ChartSpec) {
     const signal = cssVar('--signal') || '#d9a13b';
@@ -1654,9 +1617,6 @@
   // this half is the DOM/ECharts glue. Nothing here calls the model or mutates
   // agent state — it only connects a click/hover to the row that backs it.
 
-  function prefersReducedMotion(): boolean {
-    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  }
 
   // The <tr> elements currently rendered in this turn's evidence table, index
   // aligned with the first tb.lastRows entries (the table caps at 500 rows).
@@ -1866,43 +1826,8 @@
     }
   }
 
-  function esc(s: string): string {
-    return String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
-  }
 
   // ── Minimal markdown ────────────────────────────────────────────────────
-  // The model's answers arrive as markdown (bold, lists, headings). A tiny
-  // renderer — escape first, then transform — instead of a library: the
-  // subset the agent actually emits is small and everything is escaped
-  // before any HTML is introduced, so no injection surface.
-  function inlineMd(escaped: string): string {
-    return escaped
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-  }
-  function mdToHtml(text: string): string {
-    const lines = esc(text).split(/\r?\n/);
-    const out: string[] = [];
-    let list: 'ul' | 'ol' | null = null;
-    let para: string[] = [];
-    const flushPara = () => { if (para.length) { out.push('<p>' + inlineMd(para.join(' ')) + '</p>'); para = []; } };
-    const flushList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) { flushPara(); flushList(); continue; }
-      const h = line.match(/^(#{1,4})\s+(.*)$/);
-      const ul = line.match(/^[-*]\s+(.*)$/);
-      const ol = line.match(/^\d+[.)]\s+(.*)$/);
-      if (h) { flushPara(); flushList(); out.push('<h4>' + inlineMd(h[2]) + '</h4>'); }
-      else if (ul) { flushPara(); if (list !== 'ul') { flushList(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inlineMd(ul[1]) + '</li>'); }
-      else if (ol) { flushPara(); if (list !== 'ol') { flushList(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inlineMd(ol[1]) + '</li>'); }
-      else { flushList(); para.push(line); }
-    }
-    flushPara();
-    flushList();
-    return out.join('');
-  }
 
   // ── Confidence-tinted finding text ─────────────────────────────────────
   // Per-word log-probability, when known. `null`/undefined means "no signal
@@ -1998,12 +1923,6 @@
   }
 
   // ── Shared-answer banner + restore (backlog #15) ─────────────────────────
-  function fmtShareDate(iso: string): string {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return 'an earlier session';
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-  }
 
   function renderShareBanner(tb: TurnBlock, state: ShareStateV1) {
     const el = tb.shareBanner;
@@ -2165,26 +2084,6 @@
   }
 
   // ── Citations ──────────────────────────────────────────────────────────
-  // The citation ledger (backlog #11): one structured record per distinct live
-  // fetch, rendered as a references section on a receipt — compact, mono,
-  // understated. Every field comes straight from the fetch (source, indicator,
-  // human URL, resolved countries, year range, fetched-at, and — when the
-  // source gave one — its data vintage). Model-derived (llm()) artifacts never
-  // reach this list: only fetched data produces a Citation.
-  function fmtRange(r: Citation['yearRange']): string {
-    if (!r) return 'all years';
-    if (r.start !== undefined && r.end !== undefined) return r.start === r.end ? `${r.start}` : `${r.start}–${r.end}`;
-    if (r.start !== undefined) return `${r.start}–`;
-    if (r.end !== undefined) return `–${r.end}`;
-    return 'all years';
-  }
-  function fmtFetchedAt(iso: string): string {
-    // Compact "2026-07-19 14:03 UTC" — a receipt timestamp, not a full ISO string.
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-  }
   function renderCitations(tb: TurnBlock, citations: Citation[]) {
     if (!citations.length) { tb.citeEl.style.display = 'none'; tb.citeEl.innerHTML = ''; return; }
     tb.citeEl.style.display = 'block';
@@ -2266,13 +2165,6 @@
     }
   }
 
-  // A tiny date formatter for cards/tiles ("Jul 21, 2026").
-  function fmtDate(iso: string): string {
-    const d = new Date(iso);
-    return isNaN(d.getTime())
-      ? ''
-      : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  }
 
   // ── Two-step confirm (reused for destructive tile removal, per b5cdcfd) ───
   // First activation arms the button (relabelled, styled); a second within the
