@@ -5,6 +5,14 @@ import {
   formatPricePerM,
   parseOpenRouterCatalog,
   fetchModels,
+  classifyProviderError,
+  parseRetryAfter,
+  ClassifiedError,
+  complete,
+  type ProviderErrorClass,
+  type ProviderId,
+  type ProviderConfig,
+  type CompleteDeps,
 } from './providers';
 
 // A realistic slice of openrouter.ai/api/v1/models. Pricing is USD *per token*
@@ -175,5 +183,302 @@ describe('fetchModels — live fetch with graceful fallback', () => {
     expect(models.length).toBeGreaterThan(0);
     // Curated OpenAI fallback slugs.
     expect(models.some((m) => m.id === 'gpt-5-mini')).toBe(true);
+  });
+});
+
+// ── Provider error classification (backlog #17) ────────────────────────────
+// The three providers' error bodies DIFFER, so the classifier is table-driven
+// across all classes × all three shapes. The stubbed shapes ARE the contract:
+// egress is blocked in the sandbox, so real provider errors can't be reproduced.
+//   OpenRouter/OpenAI : { error: { message, code, type } }
+//   Anthropic         : { type: 'error', error: { type, message } }
+describe('classifyProviderError — taxonomy × 3 provider shapes', () => {
+  // Build a provider-shaped error body for a given semantic message.
+  const orBody = (message: string, code: number | string = 400) => ({ error: { message, code } });
+  const oaBody = (message: string, type: string, code?: string) => ({ error: { message, type, ...(code ? { code } : {}) } });
+  const anBody = (message: string, type: string) => ({ type: 'error', error: { type, message } });
+
+  interface Row {
+    name: string;
+    provider: ProviderId;
+    input: unknown;
+    cls: ProviderErrorClass;
+  }
+
+  const rows: Row[] = [
+    // bad_key — 401/403 on every provider, plus explicit invalid-key bodies.
+    { name: 'openrouter 401', provider: 'openrouter', input: { status: 401, body: orBody('No auth credentials found', 401) }, cls: 'bad_key' },
+    { name: 'openai 401 invalid_api_key', provider: 'openai', input: { status: 401, body: oaBody('Incorrect API key provided', 'invalid_request_error', 'invalid_api_key') }, cls: 'bad_key' },
+    { name: 'anthropic 401 authentication_error', provider: 'anthropic', input: { status: 401, body: anBody('invalid x-api-key', 'authentication_error') }, cls: 'bad_key' },
+    { name: 'openai 403 forbidden', provider: 'openai', input: { status: 403, body: oaBody('forbidden', 'permission_error') }, cls: 'bad_key' },
+
+    // rate_limit — 429 without a credits shape.
+    { name: 'openrouter 429', provider: 'openrouter', input: { status: 429, body: orBody('Rate limit exceeded', 429) }, cls: 'rate_limit' },
+    { name: 'openai 429 rate_limit_exceeded', provider: 'openai', input: { status: 429, body: oaBody('Rate limit reached', 'rate_limit_exceeded') }, cls: 'rate_limit' },
+    { name: 'anthropic 429 rate_limit_error', provider: 'anthropic', input: { status: 429, body: anBody('Number of requests has exceeded your rate limit', 'rate_limit_error') }, cls: 'rate_limit' },
+
+    // insufficient_credits — 402 and the provider-specific 429/400 credit shapes.
+    { name: 'openrouter 402', provider: 'openrouter', input: { status: 402, body: orBody('Insufficient credits', 402) }, cls: 'insufficient_credits' },
+    { name: 'openai 429 insufficient_quota', provider: 'openai', input: { status: 429, body: oaBody('You exceeded your current quota', 'insufficient_quota', 'insufficient_quota') }, cls: 'insufficient_credits' },
+    { name: 'anthropic 400 low balance', provider: 'anthropic', input: { status: 400, body: anBody('Your credit balance is too low to access the Claude API', 'invalid_request_error') }, cls: 'insufficient_credits' },
+
+    // context_length — 400 with a provider-specific over-context message.
+    { name: 'openai context_length_exceeded', provider: 'openai', input: { status: 400, body: oaBody("This model's maximum context length is 8192 tokens, however you requested 9000", 'invalid_request_error', 'context_length_exceeded') }, cls: 'context_length' },
+    { name: 'anthropic prompt too long', provider: 'anthropic', input: { status: 400, body: anBody('prompt is too long: 250000 tokens > 200000 maximum', 'invalid_request_error') }, cls: 'context_length' },
+    { name: 'openrouter context window', provider: 'openrouter', input: { status: 400, body: orBody('input length and max_tokens exceed context window', 400) }, cls: 'context_length' },
+
+    // model_unavailable — 404 on every provider, plus a 400 "no endpoints" body.
+    { name: 'openrouter 404', provider: 'openrouter', input: { status: 404, body: orBody('No endpoints found for foo/bar', 404) }, cls: 'model_unavailable' },
+    { name: 'openai 404 model_not_found', provider: 'openai', input: { status: 404, body: oaBody('The model `gpt-nope` does not exist', 'invalid_request_error', 'model_not_found') }, cls: 'model_unavailable' },
+    { name: 'anthropic 404 not_found_error', provider: 'anthropic', input: { status: 404, body: anBody('model: claude-nope', 'not_found_error') }, cls: 'model_unavailable' },
+    { name: 'openrouter 400 no endpoints', provider: 'openrouter', input: { status: 400, body: orBody('model_not_found: no endpoints found matching your data policy', 400) }, cls: 'model_unavailable' },
+
+    // server — 5xx on every provider, plus OpenRouter's 400 "Provider returned error".
+    { name: 'openrouter 500', provider: 'openrouter', input: { status: 500, body: orBody('internal error', 500) }, cls: 'server' },
+    { name: 'openai 503', provider: 'openai', input: { status: 503, body: oaBody('The server is overloaded', 'server_error') }, cls: 'server' },
+    { name: 'anthropic 529 overloaded', provider: 'anthropic', input: { status: 529, body: anBody('Overloaded', 'overloaded_error') }, cls: 'server' },
+    { name: 'openrouter 400 provider returned error', provider: 'openrouter', input: { status: 400, body: orBody('Provider returned error', 400) }, cls: 'server' },
+
+    // timeout — HTTP 408.
+    { name: 'openai 408', provider: 'openai', input: { status: 408, body: oaBody('Request timeout', 'timeout') }, cls: 'timeout' },
+
+    // unknown — an unmapped 4xx with an unrecognized body.
+    { name: 'openrouter 418 teapot', provider: 'openrouter', input: { status: 418, body: orBody("I'm a teapot", 418) }, cls: 'unknown' },
+  ];
+
+  for (const r of rows) {
+    it(`${r.name} → ${r.cls}`, () => {
+      const info = classifyProviderError(r.input, r.provider);
+      expect(info.errorClass).toBe(r.cls);
+      expect(info.provider).toBe(r.provider);
+      expect(info.message.length).toBeGreaterThan(0);
+    });
+  }
+
+  it('exception shapes: AbortError → timeout, fetch TypeError → network', () => {
+    const abort = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    expect(classifyProviderError(abort, 'openrouter').errorClass).toBe('timeout');
+    const netErr = new TypeError('Failed to fetch');
+    expect(classifyProviderError(netErr, 'anthropic').errorClass).toBe('network');
+    // A CORS-flavoured message still reads as network even without a TypeError.
+    expect(classifyProviderError(new Error('NetworkError when attempting to fetch resource'), 'openai').errorClass).toBe('network');
+  });
+
+  it('assigns retryable/fallbackEligible flags correctly per class', () => {
+    const flags = (input: unknown, p: ProviderId = 'openrouter') => {
+      const i = classifyProviderError(input, p);
+      return { retryable: i.retryable, fallbackEligible: i.fallbackEligible };
+    };
+    // Transient transport classes retry; only model_unavailable/rate_limit/
+    // insufficient_credits are fallback-eligible; bad_key/context_length neither.
+    expect(flags({ status: 429, body: {} })).toEqual({ retryable: true, fallbackEligible: true }); // rate_limit
+    expect(flags({ status: 500, body: {} })).toEqual({ retryable: true, fallbackEligible: false }); // server
+    expect(flags({ status: 404, body: {} })).toEqual({ retryable: false, fallbackEligible: true }); // model_unavailable
+    expect(flags({ status: 402, body: {} })).toEqual({ retryable: false, fallbackEligible: true }); // insufficient_credits
+    expect(flags({ status: 401, body: {} })).toEqual({ retryable: false, fallbackEligible: false }); // bad_key
+    expect(flags(new TypeError('Failed to fetch'))).toEqual({ retryable: true, fallbackEligible: false }); // network
+  });
+
+  it('never throws on garbage input (returns unknown)', () => {
+    for (const junk of [null, undefined, 42, 'string', [], { status: 'nope' }, { status: 400, body: '{{{not json' }, { status: 400, body: { weird: true } }]) {
+      const info = classifyProviderError(junk, 'openrouter');
+      expect(info.errorClass).toBeDefined();
+      expect(typeof info.message).toBe('string');
+    }
+  });
+
+  it('bad_key message names the provider and points at settings; never suggests a fallback', () => {
+    const info = classifyProviderError({ status: 401, body: {} }, 'openrouter');
+    expect(info.message).toMatch(/OpenRouter/);
+    expect(info.message).toMatch(/key/i);
+    expect(info.fallbackEligible).toBe(false);
+  });
+});
+
+describe('parseRetryAfter — header parsing (capping is applied at wait time)', () => {
+  it('parses integer seconds → milliseconds', () => {
+    expect(parseRetryAfter('2')).toBe(2000);
+    expect(parseRetryAfter('0')).toBe(0);
+    expect(parseRetryAfter('600')).toBe(600000);
+  });
+  it('parses an HTTP-date relative to now (never negative)', () => {
+    const now = 1_000_000_000_000;
+    expect(parseRetryAfter(new Date(now + 3000).toUTCString(), now)).toBeGreaterThanOrEqual(0);
+    // A past date clamps to 0, not a negative wait.
+    expect(parseRetryAfter(new Date(now - 5000).toUTCString(), now)).toBe(0);
+  });
+  it('returns undefined for missing/blank/unparseable input', () => {
+    expect(parseRetryAfter(null)).toBeUndefined();
+    expect(parseRetryAfter(undefined)).toBeUndefined();
+    expect(parseRetryAfter('')).toBeUndefined();
+    expect(parseRetryAfter('soon')).toBeUndefined();
+  });
+  it('captures Retry-After through the classifier for a 429', () => {
+    const info = classifyProviderError({ status: 429, body: {}, headers: { 'retry-after': '3' } }, 'openai');
+    expect(info.errorClass).toBe('rate_limit');
+    expect(info.retryAfterMs).toBe(3000);
+  });
+});
+
+// ── complete() orchestration: timeout, retry, and fallback gating ──────────
+// A fake fetch returns provider-shaped Response-likes; injected sleep/random/
+// buildFreeFallbackChain make timing deterministic with no real sleeps.
+describe('complete — transport hardening (retry / fallback / timeout / malformed)', () => {
+  const cfg = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
+    provider: 'openai',
+    model: 'gpt-5-mini',
+    apiKey: 'k',
+    ...over,
+  });
+
+  // A Response-like for the fake fetch.
+  const httpErr = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
+    ok: false,
+    status,
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+    json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
+    headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+  });
+  const okChat = (model = 'served-model') => ({
+    ok: true,
+    status: 200,
+    text: async () => '',
+    json: async () => ({
+      choices: [{ message: { content: 'hello', tool_calls: [] } }],
+      usage: { prompt_tokens: 3, completion_tokens: 4 },
+      model,
+    }),
+    headers: { get: () => null },
+  });
+
+  const deps = (fetchImpl: any, over: Partial<CompleteDeps> = {}): CompleteDeps => ({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    random: () => 0,
+    ...over,
+  });
+
+  it('runs every provider fetch under an AbortController (timeout wiring)', async () => {
+    let sawSignal = false;
+    const f = vi.fn(async (_url: string, init: any) => {
+      sawSignal = init?.signal instanceof AbortSignal;
+      return okChat();
+    });
+    await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+    expect(sawSignal).toBe(true);
+  });
+
+  it('an aborted fetch classifies as timeout and never hangs the turn', async () => {
+    const f = vi.fn(async () => {
+      throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    });
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
+      errorClass: 'timeout',
+    });
+    // A timeout is transient → one retry, so exactly two attempts, then surface.
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a transient server error ONCE, then surfaces (no 3rd attempt)', async () => {
+    const f = vi.fn(async () => httpErr(500, { error: { message: 'internal', code: 500 } }));
+    const sleep = vi.fn(async () => {});
+    await expect(
+      complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { sleep }))
+    ).rejects.toMatchObject({ errorClass: 'server' });
+    expect(f).toHaveBeenCalledTimes(2); // one original + one retry, never a third
+    expect(sleep).toHaveBeenCalledTimes(1);
+    // The surfaced message notes the request was retried.
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toThrow(/after retry/i);
+  });
+
+  it('a transient error that succeeds on the retry returns the completion', async () => {
+    let n = 0;
+    const f = vi.fn(async () => {
+      n++;
+      return n === 1 ? httpErr(503, { error: { message: 'overloaded' } }) : okChat();
+    });
+    const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+    expect(out.text).toBe('hello');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors Retry-After on a 429 retry, capped at a few seconds', async () => {
+    const sleeps: number[] = [];
+    const sleep = vi.fn(async (ms: number) => {
+      sleeps.push(ms);
+    });
+    // 600s Retry-After must be capped (random()=0 → delay == the cap exactly).
+    const f = vi.fn(async () => httpErr(429, { error: { message: 'slow down' } }, { 'retry-after': '600' }));
+    await expect(
+      complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { sleep }))
+    ).rejects.toMatchObject({ errorClass: 'rate_limit' });
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeLessThanOrEqual(4000); // capped, not 600_000ms
+    expect(sleeps[0]).toBeGreaterThan(0);
+  });
+
+  it('does NOT retry a malformed completion (no choices array) — surfaces at once', async () => {
+    const f = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '',
+      json: async () => ({ not: 'a completion' }),
+      headers: { get: () => null },
+    }));
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
+      errorClass: 'malformed',
+    });
+    expect(f).toHaveBeenCalledTimes(1); // malformed is not retryable
+  });
+
+  it('does NOT retry context_length or bad_key (surfaces at once)', async () => {
+    const ctx = vi.fn(async () => httpErr(400, { error: { message: 'maximum context length is 8192 tokens', code: 'context_length_exceeded' } }));
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(ctx))).rejects.toMatchObject({ errorClass: 'context_length' });
+    expect(ctx).toHaveBeenCalledTimes(1);
+
+    const key = vi.fn(async () => httpErr(401, { error: { message: 'bad key' } }));
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(key))).rejects.toMatchObject({ errorClass: 'bad_key' });
+    expect(key).toHaveBeenCalledTimes(1);
+  });
+
+  it('FREE-MODEL FALLBACK fires on model_unavailable but NOT on bad_key', async () => {
+    const freeCfg = cfg({ provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' });
+
+    // model_unavailable → fallback engaged: buildFreeFallbackChain is called and
+    // a second attempt runs with the substitute chain, which succeeds.
+    {
+      let n = 0;
+      const f = vi.fn(async () => {
+        n++;
+        return n === 1 ? httpErr(404, { error: { message: 'No endpoints found', code: 404 } }) : okChat('backup:free');
+      });
+      const buildChain = vi.fn(async () => ['nvidia/nemotron-3-ultra-550b-a55b:free', 'a:free', 'b:free']);
+      const out = await complete(freeCfg, [{ role: 'user', content: 'hi' }], [], deps(f, { buildFreeFallbackChain: buildChain }));
+      expect(buildChain).toHaveBeenCalledTimes(1); // fallback fired
+      expect(f).toHaveBeenCalledTimes(2);
+      expect(out.servedModel).toBe('backup:free');
+      // The substitute chain was sent in the second request body.
+      const secondBody = JSON.parse((f.mock.calls[1][1] as any).body);
+      expect(secondBody.models).toEqual(['nvidia/nemotron-3-ultra-550b-a55b:free', 'a:free', 'b:free']);
+    }
+
+    // bad_key → fallback MUST NOT fire: masking a bad key hides the real problem.
+    {
+      const f = vi.fn(async () => httpErr(401, { error: { message: 'No auth credentials found', code: 401 } }));
+      const buildChain = vi.fn(async () => ['x:free', 'y:free']);
+      await expect(
+        complete(freeCfg, [{ role: 'user', content: 'hi' }], [], deps(f, { buildFreeFallbackChain: buildChain }))
+      ).rejects.toMatchObject({ errorClass: 'bad_key' });
+      expect(buildChain).not.toHaveBeenCalled(); // no fallback masking the key
+      expect(f).toHaveBeenCalledTimes(1); // and no retry either
+    }
+  });
+
+  it('throws a ClassifiedError carrying the class and a specific message (inheritance root)', async () => {
+    const f = vi.fn(async () => httpErr(401, { error: { message: 'No auth credentials found', code: 401 } }));
+    const err = await complete(cfg({ provider: 'openrouter' }), [{ role: 'user', content: 'hi' }], [], deps(f)).catch((e) => e);
+    expect(err).toBeInstanceOf(ClassifiedError);
+    expect(err.errorClass).toBe('bad_key');
+    expect(err.message).toMatch(/OpenRouter rejected this API key/);
   });
 });

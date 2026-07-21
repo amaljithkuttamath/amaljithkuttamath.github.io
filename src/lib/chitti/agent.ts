@@ -731,7 +731,17 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         sourceIds = activeSources.map((s) => s.id),
         allowDelegate = true,
       } = opts;
-      const a = tc.arguments;
+      // Harden against a tool call whose arguments are not a plain object. The
+      // provider's safeParse only guarantees an object on a THROWN JSON error —
+      // a model that emits `arguments: "null"` / "[...]" / a bare number yields
+      // null / an array / a primitive that still satisfies `Record<...>`. The
+      // summarizeArgs call below runs OUTSIDE the try, so a null used to
+      // dereference (e.g. `a.query`) and reject the entire ask(). Normalize to
+      // {} so a malformed call becomes a clean tool error, never a turn crash.
+      const a: Record<string, unknown> =
+        tc.arguments && typeof tc.arguments === 'object' && !Array.isArray(tc.arguments)
+          ? tc.arguments
+          : {};
       const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens, nested });
       try {
         let result = '';
@@ -832,10 +842,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // One llm closure is reused across BOTH executeJs attempts so the
             // retry shares the per-run 4-call allowance, not a fresh one.
             const llm = rlmEnabled ? makeLlm() : undefined;
-            let out = await executeJs(code, state.rows, llm);
+            // Isolate the canonical row set: the sandboxed code runs on a
+            // per-row COPY, so an in-place mutation — rows.push / rows.sort /
+            // rows.splice / rows[i].value = … (sort and reverse are common and
+            // mutate in place) — can never corrupt state.rows, the traceable
+            // source of truth behind every chart, citation and CSV export. The
+            // model still sees identical data and computes the same result; only
+            // its own working copy is mutable. The same view feeds the retry.
+            const rowsView = state.rows.map((r) => ({ ...r }));
+            let out = await executeJs(code, rowsView, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = await executeJs('return (' + code + ')', state.rows, llm);
+              out = await executeJs('return (' + code + ')', rowsView, llm);
             }
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =
@@ -1438,7 +1456,8 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
 }
 
 // Guard the chart spec into a valid shape (models occasionally return strings).
-function normalizeSpec(raw: any): ChartSpec {
+// Exported for direct edge-case tests (same convention as parseVerifierVerdict).
+export function normalizeSpec(raw: any): ChartSpec {
   const type = ['line', 'bar', 'scatter', 'grouped-bar'].includes(raw?.type) ? raw.type : 'line';
   const series = Array.isArray(raw?.series) ? raw.series : [];
   const cleanSeries = series.map((s: any) => ({

@@ -544,8 +544,8 @@ vi.mock('./providers', async (importOriginal) => {
   };
 });
 
-import { complete } from './providers';
-import { createSession, buildSystemPrompt, buildSubAgentPrompt, parseVerifierVerdict } from './agent';
+import { complete, ClassifiedError } from './providers';
+import { createSession, buildSystemPrompt, buildSubAgentPrompt, parseVerifierVerdict, normalizeSpec } from './agent';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -2258,5 +2258,692 @@ describe('rlm flag: the llm() primitive in the execute_js sandbox', () => {
     const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
     const out = await createSession(cfg).ask('explain something', cb);
     expect(out.cost).toBe(0);
+  });
+});
+
+// ── Classified-error inheritance (backlog #17) ─────────────────────────────
+// complete() now throws a ClassifiedError whose .message is the user-actionable
+// line. Every caller surfaces err.message, so verify()'s 'unavailable' report
+// and the nested llm()'s catchable error must both carry the SPECIFIC reason —
+// no special-cased raw errors left. complete() is mocked here (the classifier
+// itself is unit-tested in providers.test.ts); these prove the propagation.
+describe('classified error inheritance through agent paths', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    // Minimal World Bank response so fetch_worldbank seeds state.rows (execute_js
+    // refuses to run without rows).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 1 },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("verify() provider error → 'unavailable' verdict carrying the classified reason", async () => {
+    // A chart turn, then the verify complete() rejects with a ClassifiedError.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'A finding.' }, 'fin'),
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    const classified = new ClassifiedError({
+      errorClass: 'rate_limit',
+      provider: 'openrouter',
+      message: 'OpenRouter is rate limiting requests — try again shortly.',
+      retryable: true,
+      fallbackEligible: true,
+    });
+    mockComplete.mockRejectedValueOnce(classified);
+
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg).ask('q', cb);
+
+    expect(out.verification!.status).toBe('unavailable');
+    expect(out.verification!.pass).toBe(false); // never defaulted to verified
+    // The 'unavailable' report names the SPECIFIC provider reason, not a generic one.
+    expect(out.verification!.report).toContain('rate limiting');
+  });
+
+  it('a nested llm() provider error is catchable in user code with the classified message', async () => {
+    // Model turn: fetch (seeds rows) + execute_js whose code catches llm().
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: 'try { await llm("classify", rows); return "no-throw"; } catch (e) { return "caught:" + e.message; }' }, 'ej'),
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    // The nested llm() completion rejects with a classified provider error.
+    mockComplete.mockRejectedValueOnce(
+      new ClassifiedError({
+        errorClass: 'insufficient_credits',
+        provider: 'openrouter',
+        message: 'OpenRouter reports insufficient credits — add credits or switch to a free model.',
+        retryable: false,
+        fallbackEligible: true,
+      })
+    );
+    // Finish with an explanation so no verifier turn is needed.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'done' }, 'fe')],
+      usage: { input: 5, output: 2 },
+    });
+
+    let lastTrace: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (lastTrace = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    await createSession(cfg, { rlm: true }).ask('q', cb);
+
+    // The execute_js result the model saw is the caught message — carrying the
+    // specific classified reason, wrapped by makeLlm's "llm() failed:" prefix.
+    const ejResult = mockComplete.mock.calls
+      .flatMap((c) => (Array.isArray(c[1]) ? c[1] : []))
+      .find((m: any) => m.role === 'tool' && m.name === 'execute_js');
+    expect(ejResult).toBeDefined();
+    expect(String(ejResult.content)).toContain('caught:');
+    expect(String(ejResult.content)).toContain('insufficient credits');
+    // And the nested llm receipt recorded the failure with the same reason.
+    const llmEv = lastTrace.find((e) => e.tool === 'llm');
+    expect(llmEv?.status).toBe('error');
+    expect(String(llmEv?.detail)).toContain('insufficient credits');
+  });
+});
+
+// ── normalizeSpec: defensive chart-spec guarding (backlog #16) ─────────────
+// The model occasionally returns a malformed chart spec (a string type, a
+// non-array series, string-numeric or non-numeric points). normalizeSpec must
+// coerce every shape into a valid ChartSpec and NEVER throw — a bad spec should
+// degrade to a safe default, not crash the render_chart dispatch. Pure and
+// exported, so these are direct unit tests.
+describe('normalizeSpec — defensive chart-spec guarding', () => {
+  it('defaults an unknown/missing type to "line", keeps the four valid types', () => {
+    expect(normalizeSpec({ series: [] }).type).toBe('line'); // missing
+    expect(normalizeSpec({ type: 'pie', series: [] }).type).toBe('line'); // unsupported
+    expect(normalizeSpec({ type: 123, series: [] }).type).toBe('line'); // non-string
+    for (const t of ['line', 'bar', 'scatter', 'grouped-bar']) {
+      expect(normalizeSpec({ type: t, series: [] }).type).toBe(t);
+    }
+  });
+
+  it('never throws on a non-object raw — null / string / number all yield a safe default', () => {
+    for (const raw of [null, undefined, 'hello', 42, true, []]) {
+      const spec = normalizeSpec(raw);
+      expect(spec.type).toBe('line');
+      expect(spec.title).toBe('Chart');
+      expect(spec.series).toEqual([]);
+    }
+  });
+
+  it('defaults a missing title to "Chart" and a nameless series to "series"', () => {
+    expect(normalizeSpec({ series: [] }).title).toBe('Chart');
+    expect(normalizeSpec({ title: 'GDP', series: [] }).title).toBe('GDP');
+    const s = normalizeSpec({ series: [{ data: [[2000, 1]] }] });
+    expect(s.series[0].name).toBe('series');
+  });
+
+  it('coerces a non-array series to an empty array (no throw)', () => {
+    expect(normalizeSpec({ type: 'bar', series: 'nope' }).series).toEqual([]);
+    expect(normalizeSpec({ type: 'bar', series: 42 }).series).toEqual([]);
+    expect(normalizeSpec({ type: 'bar' }).series).toEqual([]);
+  });
+
+  it('coerces string-numeric x to a number but keeps a category (non-numeric) x as-is', () => {
+    // A time value the model sent as a string is coerced to a real number.
+    expect(normalizeSpec({ series: [{ name: 'A', data: [['2020', '5']] }] }).series[0].data).toEqual([[2020, 5]]);
+    // A bar-chart category label stays a string x.
+    expect(normalizeSpec({ series: [{ name: 'A', data: [['France', 5]] }] }).series[0].data).toEqual([['France', 5]]);
+  });
+
+  it('drops a point whose y is non-numeric, and one shorter than [x, y]', () => {
+    // NaN y dropped; the good point survives.
+    expect(normalizeSpec({ series: [{ name: 'A', data: [[2000, 'abc'], [2001, 5]] }] }).series[0].data).toEqual([[2001, 5]]);
+    // A length-1 point (missing y) dropped.
+    expect(normalizeSpec({ series: [{ name: 'A', data: [[2000], [2001, 5]] }] }).series[0].data).toEqual([[2001, 5]]);
+    // A non-array point is dropped entirely.
+    expect(normalizeSpec({ series: [{ name: 'A', data: ['x', [2000, 1]] }] }).series[0].data).toEqual([[2000, 1]]);
+    // data itself not an array → empty.
+    expect(normalizeSpec({ series: [{ name: 'A', data: 'nope' }] }).series[0].data).toEqual([]);
+  });
+
+  it('passes x_axis/y_axis through when present and omits them when blank/absent', () => {
+    const withAxes = normalizeSpec({ title: 'T', x_axis: 'Year', y_axis: 'GDP', series: [] });
+    expect(withAxes.x_axis).toBe('Year');
+    expect(withAxes.y_axis).toBe('GDP');
+    const noAxes = normalizeSpec({ series: [] });
+    expect(noAxes.x_axis).toBeUndefined();
+    expect(noAxes.y_axis).toBeUndefined();
+    // An empty-string axis label is treated as absent (falsy → undefined).
+    expect(normalizeSpec({ x_axis: '', series: [] }).x_axis).toBeUndefined();
+  });
+
+  it('keeps absurd but numeric year values verbatim (no range validation — documents the contract)', () => {
+    const spec = normalizeSpec({ series: [{ name: 'A', data: [[999999, 1], [-5000, 2]] }] });
+    expect(spec.series[0].data).toEqual([[999999, 1], [-5000, 2]]);
+  });
+
+  it('does NOT dedupe duplicate series names (documents current behavior)', () => {
+    const spec = normalizeSpec({ series: [{ name: 'X', data: [[2000, 1]] }, { name: 'X', data: [[2001, 2]] }] });
+    expect(spec.series.map((s) => s.name)).toEqual(['X', 'X']);
+  });
+
+  it('turns junk series elements into empty named series rather than crashing', () => {
+    const spec = normalizeSpec({ series: [null, 'foo', 42, { name: 'ok', data: [[2000, 1]] }] });
+    expect(spec.series).toHaveLength(4);
+    expect(spec.series[3]).toEqual({ name: 'ok', data: [[2000, 1]] });
+    expect(spec.series.slice(0, 3).every((s) => s.name === 'series' && s.data.length === 0)).toBe(true);
+  });
+});
+
+// ── executeJs: error, serialization and mutation edges (backlog #16) ───────
+// executeJs runs model-written JS over the fetched rows. It must (1) catch every
+// failure — syntax errors, non-serializable returns — into a clean {ok:false}
+// rather than throwing, and (2) round-trip the result through JSON so only plain
+// data reaches the model. These are pure, offline unit tests.
+describe('executeJs — error and serialization edges', () => {
+  const rows: DataRow[] = [
+    { country: 'India', iso3: 'IND', year: 2020, value: 100 },
+    { country: 'India', iso3: 'IND', year: 2021, value: 110 },
+  ];
+
+  it('a syntax error becomes ok:false with a readable message (never throws)', async () => {
+    const out = await executeJs('return (((;', rows);
+    expect(out.ok).toBe(false);
+    expect(typeof out.error).toBe('string');
+    expect(out.error!.length).toBeGreaterThan(0);
+  });
+
+  it('a runtime throw in the code is caught into ok:false', async () => {
+    const out = await executeJs('throw new Error("kaboom"); return 1;', rows);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('kaboom');
+  });
+
+  it('a non-serializable return (function) is rejected as ok:false, not surfaced as a value', async () => {
+    const out = await executeJs('return () => 1;', rows);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('valid JSON');
+  });
+
+  it('a BigInt return is rejected as ok:false (JSON cannot serialize it)', async () => {
+    const out = await executeJs('return 5n;', rows);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('BigInt');
+  });
+
+  it('a circular structure is rejected as ok:false rather than hanging or throwing uncaught', async () => {
+    const out = await executeJs('const o = {}; o.self = o; return o;', rows);
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain('circular');
+  });
+
+  it('NaN and Infinity results serialize to null (JSON semantics — documents the contract)', async () => {
+    expect(await executeJs('return NaN;', rows)).toEqual({ ok: true, result: null });
+    expect(await executeJs('return Infinity;', rows)).toEqual({ ok: true, result: null });
+  });
+
+  it('code with no return yields ok:true with a null result (the "add a return" nudge case)', async () => {
+    const out = await executeJs('const x = 1 + 1;', rows);
+    expect(out).toEqual({ ok: true, result: null });
+  });
+
+  it('a Date result is serialized to its ISO string, not left as a live object', async () => {
+    const out = await executeJs('return new Date(0);', rows);
+    expect(out).toEqual({ ok: true, result: '1970-01-01T00:00:00.000Z' });
+  });
+});
+
+// ── dispatch edges, driven through createSession (backlog #16) ─────────────
+// A tool call the model can plausibly emit that exercises a rarely-hit dispatch
+// branch: an unknown tool name, a read of a missing VFS file, a whitespace
+// search, code that errors. Every one must return a tool result to the model
+// and let the loop continue — never crash the turn.
+describe('dispatch edges (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+  const wbStub = () =>
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { page: 1, pages: 1, total: 1 },
+        [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+      ],
+    }));
+
+  it('an unknown tool name returns "unknown tool" to the model and the loop continues', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('teleport', { x: 1 }, 'u1'), tc('finish_explanation', { explanation: 'recovered' }, 'fe')])
+    );
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+    expect(toolMsgById('u1')).toBe('unknown tool');
+    expect(out.finding).toBe('recovered');
+  });
+
+  it('read_file of a missing path returns "(empty)", not a throw', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('read_file', { path: 'does-not-exist.json' }, 'r1'), tc('finish_explanation', { explanation: 'done' }, 'fe')])
+    );
+    const { cb } = capture();
+    await newSession().ask('q', cb);
+    expect(toolMsgById('r1')).toBe('(empty)');
+  });
+
+  it('write_file then read_file round-trips the content through the VFS', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('write_file', { path: 'note.md', content: 'hello world' }, 'w1'),
+        tc('read_file', { path: 'note.md' }, 'r1'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    await newSession().ask('q', cb);
+    expect(toolMsgById('w1')).toBe('written');
+    expect(toolMsgById('r1')).toBe('hello world');
+  });
+
+  it('find_series with a whitespace-only query returns the no-match message (score 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('find_series', { query: '   ' }, 's1'), tc('finish_explanation', { explanation: 'done' }, 'fe')])
+    );
+    const { cb, trace } = capture();
+    await newSession(['owid']).ask('q', cb);
+    expect(toolMsgById('s1')).toMatch(/No matching series/);
+    const ev = trace().find((e) => e.tool === 'find_series');
+    expect(ev?.detail).toBe('0 hits');
+  });
+
+  it('an execute_js syntax error surfaces as an ERROR tool result + error receipt; the loop continues', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: 'return (((;' }, 'ej'),
+        tc('finish_explanation', { explanation: 'recovered' }, 'fe'),
+      ])
+    );
+    const { cb, trace } = capture();
+    const out = await newSession().ask('q', cb);
+    expect(toolMsgById('ej')).toMatch(/^ERROR: /);
+    const ev = trace().find((e) => e.tool === 'execute_js');
+    expect(ev?.status).toBe('ok'); // dispatch caught it into a normal tool result
+    expect(ev?.detail).toMatch(/^error:/);
+    expect(out.finding).toBe('recovered');
+  });
+
+  it('execute_js returning a non-serializable value surfaces as an ERROR result, not a crash', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: 'return () => rows;' }, 'ej'),
+        tc('finish_explanation', { explanation: 'recovered' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession().ask('q', cb);
+    expect(toolMsgById('ej')).toMatch(/^ERROR: /);
+    expect(out.finding).toBe('recovered');
+  });
+
+  it('execute_js before any fetch short-circuits with the empty-dataset guard (no throw)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('execute_js', { code: 'return rows.length;' }, 'ej'), tc('finish_explanation', { explanation: 'done' }, 'fe')])
+    );
+    const { cb, trace } = capture();
+    await newSession().ask('q', cb);
+    expect(toolMsgById('ej')).toMatch(/no rows fetched yet/);
+    expect(trace().find((e) => e.tool === 'execute_js')?.detail).toBe('no data');
+  });
+
+  it('render_chart called twice in one turn keeps the LAST spec', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('render_chart', { type: 'line', title: 'First', series: [{ name: 'A', data: [[2020, 1]] }] }, 'rc1'),
+        tc('render_chart', { type: 'bar', title: 'Second', series: [{ name: 'B', data: [[2020, 2]] }] }, 'rc2'),
+        tc('finish', { one_line_finding: 'done' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    let charts: any[] = [];
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: (s: any) => charts.push(s), onStatus: () => {} };
+    const out = await newSession().ask('q', cb);
+    // Both render calls fired onChart, but the returned/persisted spec is the last.
+    expect(charts.length).toBe(2);
+    expect(out.chartSpec?.title).toBe('Second');
+    expect(out.chartSpec?.type).toBe('bar');
+  });
+});
+
+// ── ask() loop & multi-turn state (backlog #16) ────────────────────────────
+// The loop's control-flow edges: the tool-call budget cap, a model that never
+// calls a tool, and what carries over vs resets between ask() calls on one
+// session. Driven through createSession with complete() mocked.
+describe('ask() loop & multi-turn state (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const noTools = (text = '') => ({ text, toolCalls: [], usage: { input: 3, output: 2 } });
+  const verifyJsonPass = () => ({ text: '{"pass": true, "confidence": "high", "issues": []}', toolCalls: [], usage: { input: 2, output: 1 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const userMsgs = (callIndex: number): string[] => {
+    const msgs = mockComplete.mock.calls[callIndex]?.[1] as any[];
+    return (Array.isArray(msgs) ? msgs : []).filter((m) => m.role === 'user').map((m) => m.content as string);
+  };
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+  const wbStub = () =>
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { page: 1, pages: 1, total: 1 },
+        [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+      ],
+    }));
+
+  it('exhausting the tool-call budget without finish falls back to a one-sentence summary', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    // 12 non-finishing tool calls in one assistant turn → the loop hits
+    // MAX_TOOL_CALLS (12) with no state.finding, and runs the summariser.
+    const calls = Array.from({ length: 12 }, (_, i) => tc('read_file', { path: `f${i}.txt` }, `rf${i}`));
+    mockComplete.mockResolvedValueOnce(modelTurn(calls));
+    // The budget summariser complete() call.
+    mockComplete.mockResolvedValueOnce(noTools('India led with a 42% change.'));
+    // turnKind stayed 'chart' (no finish/finish_explanation) so the verifier runs.
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    const out = await newSession().ask('q', cb());
+    expect(out.finding).toBe('India led with a 42% change.');
+    // Exactly three completions: the model turn, the summariser, the verifier.
+    expect(mockComplete.mock.calls.length).toBe(3);
+  });
+
+  it('a model that never calls a tool stops after two no-op turns (no infinite loop)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #1 → nudge
+    mockComplete.mockResolvedValueOnce(noTools('')); // no-op #2 → give up
+    mockComplete.mockResolvedValueOnce(verifyJsonPass()); // turnKind default 'chart' → verify
+    const out = await newSession().ask('q', cb());
+    expect(out.finding).toBe('');
+    // 2 loop turns + 1 verify = 3; it did NOT keep nudging forever.
+    expect(mockComplete.mock.calls.length).toBe(3);
+  });
+
+  it('state.finding resets each turn — a no-answer turn 2 does NOT inherit turn 1\'s finding', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const session = newSession();
+    // Turn 1: a real explanation finding.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'First turn finding.' }, 'fe1')]));
+    const first = await session.ask('q1', cb());
+    expect(first.finding).toBe('First turn finding.');
+    // Turn 2: model never answers (two no-ops). If finding were not reset,
+    // out.finding would leak 'First turn finding.'.
+    mockComplete.mockResolvedValueOnce(noTools(''));
+    mockComplete.mockResolvedValueOnce(noTools(''));
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    const second = await session.ask('q2', cb());
+    expect(second.finding).toBe('');
+  });
+
+  it('a follow-up turn after a fetch-less turn 1 gets the "fresh question" steer, not the rows=0 trap', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const session = newSession();
+    // Turn 1: pure explanation, no data fetched.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'Concept explained.' }, 'fe1')]));
+    await session.ask('what is gdp', cb());
+    // Turn 2.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe2')]));
+    await session.ask('now chart it', cb());
+    const turn2Users = userMsgs(1).join('\n');
+    expect(turn2Users).toMatch(/No data has been fetched yet/);
+    expect(turn2Users).toMatch(/fresh question/);
+    // The misleading "data already fetched (rows=0)" reuse addendum must NOT appear.
+    expect(turn2Users).not.toMatch(/Data already fetched this conversation/);
+  });
+
+  it('a follow-up turn after a DATA turn gets the reuse addendum with the (a)/(b)/(c) options', async () => {
+    vi.stubGlobal('fetch', wbStub());
+    const session = newSession();
+    // Turn 1: fetch + chart + finish.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2020, 100]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'First.' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyJsonPass());
+    await session.ask('chart it', cb());
+    // Turn 2: model answers with prose.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]));
+    await session.ask('what does it mean', cb());
+    // Turn 2 is completion index 2 (0=turn1, 1=verify, 2=turn2).
+    const turn2Users = userMsgs(2).join('\n');
+    expect(turn2Users).toMatch(/Data already fetched this conversation/);
+    expect(turn2Users).toMatch(/\(a\)/);
+    expect(turn2Users).toMatch(/\(c\)/);
+  });
+
+  it('state.rows persists across ask() calls — turn 2 computes on turn 1\'s rows without re-fetching', async () => {
+    const fetchFn = wbStub();
+    vi.stubGlobal('fetch', fetchFn);
+    const session = newSession();
+    // Turn 1: fetch one row, then finish (explanation, no verifier).
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('finish_explanation', { explanation: 'fetched' }, 'fe1'),
+      ])
+    );
+    const first = await session.ask('fetch it', cb());
+    expect(first.rows.length).toBe(1);
+    const callsAfterTurn1 = fetchFn.mock.calls.length;
+    // Turn 2: execute_js runs on the carried-over rows (would hit the
+    // empty-dataset guard if state.rows had not persisted).
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('execute_js', { code: 'return rows.length;' }, 'ej'), tc('finish_explanation', { explanation: 'reused' }, 'fe2')])
+    );
+    await session.ask('how many rows', cb());
+    expect(toolMsgById('ej')).toBe('1'); // saw the persisted row, not the empty guard
+    // No new network fetch happened in turn 2.
+    expect(fetchFn.mock.calls.length).toBe(callsAfterTurn1);
+  });
+});
+
+// ── dispatch robustness to malformed tool arguments (backlog #16 fix) ──────
+// The provider's safeParse returns {} only on a THROWN JSON error; a model
+// emitting arguments that parse to a bare `null`, an array, or a primitive
+// yields a non-object that still satisfies the Record<> type. summarizeArgs
+// runs before dispatch's try/catch, so a null argument used to dereference and
+// reject the whole ask(). dispatch must coerce any non-object args to {} and
+// return a clean tool error instead of crashing the turn.
+describe('dispatch — malformed (non-object) tool arguments do not crash the turn', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+
+  it('a find_series call with null arguments dispatches (empty query) instead of throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    // arguments===null is exactly what safeParse('null') produces.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        { id: 'n1', name: 'find_series', arguments: null },
+        { id: 'fe', name: 'finish_explanation', arguments: { explanation: 'recovered' } },
+      ])
+    );
+    const out = await newSession(['owid']).ask('q', cb());
+    // Coerced to {} → empty query → the no-match message, and the loop continued.
+    expect(toolMsgById('n1')).toMatch(/No matching series/);
+    expect(out.finding).toBe('recovered');
+  });
+
+  it('array / primitive arguments are coerced to {} across several tools (no crash)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        { id: 'a1', name: 'read_file', arguments: [] }, // array
+        { id: 'a2', name: 'write_file', arguments: 42 }, // primitive
+        { id: 'a3', name: 'render_chart', arguments: null }, // null → default spec
+        { id: 'fin', name: 'finish', arguments: { one_line_finding: 'survived' } },
+      ])
+    );
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+    let chart: any = null;
+    const out = await newSession().ask('q', {
+      onTrace: () => {},
+      onFiles: () => {},
+      onChart: (s: any) => (chart = s),
+      onStatus: () => {},
+    });
+    // read_file {} → path "undefined" missing → "(empty)"; nothing threw.
+    expect(toolMsgById('a1')).toBe('(empty)');
+    expect(toolMsgById('a2')).toBe('written');
+    // render_chart with coerced-{} args → the safe default spec.
+    expect(chart).not.toBeNull();
+    expect(chart.type).toBe('line');
+    expect(chart.series).toEqual([]);
+    expect(out.finding).toBe('survived');
+  });
+});
+
+// ── execute_js must not corrupt the canonical row set (backlog #16 fix) ────
+// executeJs used to receive state.rows by reference, so model code doing an
+// in-place mutation (rows.push to inject a fabricated row, rows.sort/reverse to
+// reorder, rows[i].value = … to alter a fetched number) silently corrupted the
+// session's source-of-truth dataset behind every chart, citation and CSV. The
+// sandbox now runs on a per-row copy: the model's computation is unaffected but
+// state.rows is protected.
+describe('execute_js row-set isolation', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+  const wbTwoRows = () =>
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { page: 1, pages: 1, total: 2 },
+        [
+          { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 },
+          { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 110 },
+        ],
+      ],
+    }));
+
+  it('rows.push / value tamper inside execute_js do NOT reach state.rows (out.rows)', async () => {
+    vi.stubGlobal('fetch', wbTwoRows());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf'),
+        // Mutate every way that matters: inject a fabricated row and tamper a value.
+        tc('execute_js', { code: 'rows.push({ country: "FAKE", iso3: "XXX", year: 2099, value: 0 }); rows[0].value = 999; return rows.map(r => r.value);' }, 'ej'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+    const out = await session.ask('q', cb());
+
+    // The model's own copy WAS mutable — its computation reflects the mutation
+    // (two real rows → [100,110], value[0]→999, plus the appended FAKE's 0).
+    expect(toolMsgById('ej')).toBe(JSON.stringify([999, 110, 0]));
+    // But the canonical dataset is untouched: no fabricated row, no altered value.
+    expect(out.rows.length).toBe(2);
+    expect(out.rows.some((r) => r.iso3 === 'XXX')).toBe(false);
+    expect(out.rows[0].value).toBe(100);
+    expect(out.rows.map((r) => r.value)).toEqual([100, 110]);
+  });
+
+  it('an in-place rows.sort inside execute_js does NOT reorder state.rows', async () => {
+    vi.stubGlobal('fetch', wbTwoRows());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf'),
+        // Array.prototype.sort mutates in place; a naive "sort by value desc"
+        // would have permanently reordered the exported dataset.
+        tc('execute_js', { code: 'return rows.sort((a, b) => b.value - a.value).map(r => r.year);' }, 'ej'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+    const out = await session.ask('q', cb());
+    // The model saw its sorted view (2021 first).
+    expect(toolMsgById('ej')).toBe(JSON.stringify([2021, 2020]));
+    // Canonical order preserved (fetch order: 2020 then 2021).
+    expect(out.rows.map((r) => r.year)).toEqual([2020, 2021]);
   });
 });
