@@ -731,7 +731,17 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         sourceIds = activeSources.map((s) => s.id),
         allowDelegate = true,
       } = opts;
-      const a = tc.arguments;
+      // Harden against a tool call whose arguments are not a plain object. The
+      // provider's safeParse only guarantees an object on a THROWN JSON error —
+      // a model that emits `arguments: "null"` / "[...]" / a bare number yields
+      // null / an array / a primitive that still satisfies `Record<...>`. The
+      // summarizeArgs call below runs OUTSIDE the try, so a null used to
+      // dereference (e.g. `a.query`) and reject the entire ask(). Normalize to
+      // {} so a malformed call becomes a clean tool error, never a turn crash.
+      const a: Record<string, unknown> =
+        tc.arguments && typeof tc.arguments === 'object' && !Array.isArray(tc.arguments)
+          ? tc.arguments
+          : {};
       const ev = pushTrace({ tool: tc.name, argSummary: summarizeArgs(tc.name, a), status: 'running', tokens, nested });
       try {
         let result = '';

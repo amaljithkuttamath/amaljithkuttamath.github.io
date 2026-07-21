@@ -2800,3 +2800,72 @@ describe('ask() loop & multi-turn state (driven)', () => {
     expect(fetchFn.mock.calls.length).toBe(callsAfterTurn1);
   });
 });
+
+// ── dispatch robustness to malformed tool arguments (backlog #16 fix) ──────
+// The provider's safeParse returns {} only on a THROWN JSON error; a model
+// emitting arguments that parse to a bare `null`, an array, or a primitive
+// yields a non-object that still satisfies the Record<> type. summarizeArgs
+// runs before dispatch's try/catch, so a null argument used to dereference and
+// reject the whole ask(). dispatch must coerce any non-object args to {} and
+// return a clean tool error instead of crashing the turn.
+describe('dispatch — malformed (non-object) tool arguments do not crash the turn', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+
+  it('a find_series call with null arguments dispatches (empty query) instead of throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    // arguments===null is exactly what safeParse('null') produces.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        { id: 'n1', name: 'find_series', arguments: null },
+        { id: 'fe', name: 'finish_explanation', arguments: { explanation: 'recovered' } },
+      ])
+    );
+    const out = await newSession(['owid']).ask('q', cb());
+    // Coerced to {} → empty query → the no-match message, and the loop continued.
+    expect(toolMsgById('n1')).toMatch(/No matching series/);
+    expect(out.finding).toBe('recovered');
+  });
+
+  it('array / primitive arguments are coerced to {} across several tools (no crash)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        { id: 'a1', name: 'read_file', arguments: [] }, // array
+        { id: 'a2', name: 'write_file', arguments: 42 }, // primitive
+        { id: 'a3', name: 'render_chart', arguments: null }, // null → default spec
+        { id: 'fin', name: 'finish', arguments: { one_line_finding: 'survived' } },
+      ])
+    );
+    mockComplete.mockResolvedValueOnce({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+    let chart: any = null;
+    const out = await newSession().ask('q', {
+      onTrace: () => {},
+      onFiles: () => {},
+      onChart: (s: any) => (chart = s),
+      onStatus: () => {},
+    });
+    // read_file {} → path "undefined" missing → "(empty)"; nothing threw.
+    expect(toolMsgById('a1')).toBe('(empty)');
+    expect(toolMsgById('a2')).toBe('written');
+    // render_chart with coerced-{} args → the safe default spec.
+    expect(chart).not.toBeNull();
+    expect(chart.type).toBe('line');
+    expect(chart.series).toEqual([]);
+    expect(out.finding).toBe('survived');
+  });
+});
