@@ -842,10 +842,18 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // One llm closure is reused across BOTH executeJs attempts so the
             // retry shares the per-run 4-call allowance, not a fresh one.
             const llm = rlmEnabled ? makeLlm() : undefined;
-            let out = await executeJs(code, state.rows, llm);
+            // Isolate the canonical row set: the sandboxed code runs on a
+            // per-row COPY, so an in-place mutation — rows.push / rows.sort /
+            // rows.splice / rows[i].value = … (sort and reverse are common and
+            // mutate in place) — can never corrupt state.rows, the traceable
+            // source of truth behind every chart, citation and CSV export. The
+            // model still sees identical data and computes the same result; only
+            // its own working copy is mutable. The same view feeds the retry.
+            const rowsView = state.rows.map((r) => ({ ...r }));
+            let out = await executeJs(code, rowsView, llm);
             if (out.ok && (out.result === null || out.result === undefined) && !/\breturn\b/.test(code)) {
               // Expression-style code with no return — retry wrapped.
-              out = await executeJs('return (' + code + ')', state.rows, llm);
+              out = await executeJs('return (' + code + ')', rowsView, llm);
             }
             if (out.ok && (out.result === null || out.result === undefined)) {
               result =

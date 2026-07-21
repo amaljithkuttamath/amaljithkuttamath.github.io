@@ -2869,3 +2869,81 @@ describe('dispatch — malformed (non-object) tool arguments do not crash the tu
     expect(out.finding).toBe('survived');
   });
 });
+
+// ── execute_js must not corrupt the canonical row set (backlog #16 fix) ────
+// executeJs used to receive state.rows by reference, so model code doing an
+// in-place mutation (rows.push to inject a fabricated row, rows.sort/reverse to
+// reorder, rows[i].value = … to alter a fetched number) silently corrupted the
+// session's source-of-truth dataset behind every chart, citation and CSV. The
+// sandbox now runs on a per-row copy: the model's computation is unaffected but
+// state.rows is protected.
+describe('execute_js row-set isolation', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+  const wbTwoRows = () =>
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        { page: 1, pages: 1, total: 2 },
+        [
+          { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 },
+          { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 110 },
+        ],
+      ],
+    }));
+
+  it('rows.push / value tamper inside execute_js do NOT reach state.rows (out.rows)', async () => {
+    vi.stubGlobal('fetch', wbTwoRows());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf'),
+        // Mutate every way that matters: inject a fabricated row and tamper a value.
+        tc('execute_js', { code: 'rows.push({ country: "FAKE", iso3: "XXX", year: 2099, value: 0 }); rows[0].value = 999; return rows.map(r => r.value);' }, 'ej'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+    const out = await session.ask('q', cb());
+
+    // The model's own copy WAS mutable — its computation reflects the mutation
+    // (two real rows → [100,110], value[0]→999, plus the appended FAKE's 0).
+    expect(toolMsgById('ej')).toBe(JSON.stringify([999, 110, 0]));
+    // But the canonical dataset is untouched: no fabricated row, no altered value.
+    expect(out.rows.length).toBe(2);
+    expect(out.rows.some((r) => r.iso3 === 'XXX')).toBe(false);
+    expect(out.rows[0].value).toBe(100);
+    expect(out.rows.map((r) => r.value)).toEqual([100, 110]);
+  });
+
+  it('an in-place rows.sort inside execute_js does NOT reorder state.rows', async () => {
+    vi.stubGlobal('fetch', wbTwoRows());
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf'),
+        // Array.prototype.sort mutates in place; a naive "sort by value desc"
+        // would have permanently reordered the exported dataset.
+        tc('execute_js', { code: 'return rows.sort((a, b) => b.value - a.value).map(r => r.year);' }, 'ej'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+    const out = await session.ask('q', cb());
+    // The model saw its sorted view (2021 first).
+    expect(toolMsgById('ej')).toBe(JSON.stringify([2021, 2020]));
+    // Canonical order preserved (fetch order: 2020 then 2021).
+    expect(out.rows.map((r) => r.year)).toEqual([2020, 2021]);
+  });
+});
