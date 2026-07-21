@@ -478,7 +478,12 @@ export type ProviderErrorClass =
   | 'timeout' // aborted fetch / 408 — the request took too long
   | 'network' // fetch TypeError / CORS / DNS — the host was unreachable
   | 'server' // 5xx or an explicit transient-upstream body
-  | 'malformed' // the completion itself was unparseable/empty
+  | 'empty_completion' // a 200 that carried no usable output (empty choices,
+  //                      missing message, or content:'' with no tool calls) —
+  //                      a transient free-model glitch, so retryable AND
+  //                      fallback-eligible, unlike truly unreadable `malformed`.
+  | 'malformed' // the completion body was genuine garbage (non-empty but
+  //               unparseable JSON, or a valid-JSON shape with no choices array)
   | 'context_length' // provider says the prompt exceeds the context window
   | 'model_unavailable' // 404 / model-not-found shapes
   | 'insufficient_credits' // 402 / quota / billing shapes (fallback-eligible)
@@ -495,11 +500,20 @@ export interface ClassifiedInfo {
   detail?: string; // a short excerpt of the provider's own message
 }
 
-// Transient transport failures a single retry can plausibly rescue.
-const RETRYABLE_CLASSES = new Set<ProviderErrorClass>(['rate_limit', 'server', 'timeout', 'network']);
+// Transient transport failures a single retry can plausibly rescue. An
+// empty_completion is included: OpenRouter free models transiently return a
+// 200 with no usable output, and the same model often answers on a second try.
+const RETRYABLE_CLASSES = new Set<ProviderErrorClass>(['rate_limit', 'server', 'timeout', 'network', 'empty_completion']);
 // Classes the free-model fallback can actually help with. NEVER bad_key (that
-// would mask the real problem), context_length, or malformed.
-const FALLBACK_CLASSES = new Set<ProviderErrorClass>(['model_unavailable', 'rate_limit', 'insufficient_credits']);
+// would mask the real problem), context_length, or malformed. empty_completion
+// IS eligible — an empty answer from a free model is that model glitching, so
+// substituting a different free model is a genuine fix (with a visible receipt).
+const FALLBACK_CLASSES = new Set<ProviderErrorClass>([
+  'model_unavailable',
+  'rate_limit',
+  'insufficient_credits',
+  'empty_completion',
+]);
 
 // A thrown error that already carries its classification. Its `.message` is the
 // user-actionable line, so anything that surfaces err.message gets it for free.
@@ -544,8 +558,10 @@ function messageFor(cls: ProviderErrorClass, provider: ProviderId, detail?: stri
       return `Could not reach ${P} — network or CORS error. Check your connection.`;
     case 'server':
       return `${P} had a server error${tail} — try again in a moment.`;
+    case 'empty_completion':
+      return `${P} returned an empty response.`;
     case 'malformed':
-      return `${P} returned an empty or unreadable response.`;
+      return `${P} returned an unreadable response.`;
     case 'context_length':
       return `This request is too long for the model's context window${tail} — shorten the conversation or pick a larger-context model.`;
     case 'model_unavailable':
@@ -739,14 +755,22 @@ function asClassified(err: unknown, provider: ProviderId): ClassifiedError {
   return new ClassifiedError(classifyProviderError(err, provider));
 }
 
-// Clone a ClassifiedError, noting it survived the one bounded retry.
-function retriedError(ce: ClassifiedError): ClassifiedError {
+// Clone a ClassifiedError, appending an honest receipt of what was already
+// tried before it surfaced — so the run-failed line reads e.g. "…empty response
+// (retried, then tried a fallback model)." instead of pretending it was a
+// first-and-only attempt. Nothing is appended when neither recovery ran.
+function exhaustedError(ce: ClassifiedError, tried: { retried: boolean; fellBack: boolean }): ClassifiedError {
+  let suffix = '';
+  if (tried.retried && tried.fellBack) suffix = ' (retried, then tried a fallback model).';
+  else if (tried.retried) suffix = ' (after retry).';
+  else if (tried.fellBack) suffix = ' (after trying a fallback model).';
+  if (!suffix) return ce;
   return new ClassifiedError({
     errorClass: ce.errorClass,
     provider: ce.provider,
     retryable: ce.retryable,
     fallbackEligible: ce.fallbackEligible,
-    message: ce.message.replace(/\.\s*$/, '') + ' (after retry).',
+    message: ce.message.replace(/\.\s*$/, '') + suffix,
     ...(ce.status !== undefined ? { status: ce.status } : {}),
     ...(ce.retryAfterMs !== undefined ? { retryAfterMs: ce.retryAfterMs } : {}),
     ...(ce.detail ? { detail: ce.detail } : {}),
@@ -878,15 +902,23 @@ async function attemptOpenAICompatible(
     );
   }
 
+  // Read the body as text first so an empty body (a 200 with nothing in it —
+  // a common transient free-model glitch) is told apart from genuine garbage:
+  //   • blank/whitespace body           → empty_completion (retry + fallback)
+  //   • non-empty but unparseable JSON  → malformed (surface at once)
+  const rawText = await safeText(resp);
+  if (!rawText.trim()) {
+    throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
+  }
   let data: any;
   try {
-    data = await resp.json();
+    data = JSON.parse(rawText);
   } catch {
     throw new ClassifiedError(infoFor('malformed', cfg.provider));
   }
   // A well-formed OpenAI-compatible success always carries a choices array.
-  // Its absence means the response body was not the completion we expected.
-  if (!data || !Array.isArray(data.choices)) {
+  // Its absence means the body parsed but wasn't a completion shape at all.
+  if (!data || typeof data !== 'object' || !Array.isArray(data.choices)) {
     throw new ClassifiedError(infoFor('malformed', cfg.provider));
   }
   const choice = data.choices?.[0]?.message ?? {};
@@ -904,8 +936,26 @@ async function attemptOpenAICompatible(
   // OpenRouter is the documented example).
   const reasoning: string | undefined = choice.reasoning || choice.reasoning_content || undefined;
 
+  // Extract the assistant text from `content`. Reasoning models (Nemotron 3
+  // Ultra among them) sometimes return content:null/'' with the actual answer
+  // sitting only in `reasoning`; fall back to it ONLY when there is no content
+  // AND no tool calls, so we never fabricate over a real content or tool-call
+  // turn (a tool-call turn with empty content is valid and stays valid).
+  const rawContent = typeof choice.content === 'string' ? choice.content : '';
+  let text = rawContent;
+  if (!rawContent.trim() && toolCalls.length === 0 && reasoning && reasoning.trim()) {
+    text = reasoning;
+  }
+  // Nothing usable came back — no text, no reasoning, no tool calls (empty
+  // choices array, a missing message, or content:'' ). That's the free model
+  // glitching, so classify it retryable + fallback-eligible rather than as a
+  // dead-end `malformed`.
+  if (!text.trim() && toolCalls.length === 0) {
+    throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
+  }
+
   return {
-    text: choice.content ?? '',
+    text,
     toolCalls,
     usage: {
       input: data.usage?.prompt_tokens ?? 0,
@@ -1004,14 +1054,19 @@ async function attemptAnthropic(
     );
   }
 
+  // Empty body (a 200 with nothing in it) vs genuine garbage, as above.
+  const rawText = await safeText(resp);
+  if (!rawText.trim()) {
+    throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
+  }
   let data: any;
   try {
-    data = await resp.json();
+    data = JSON.parse(rawText);
   } catch {
     throw new ClassifiedError(infoFor('malformed', cfg.provider));
   }
   // A well-formed Anthropic success always carries a content block array.
-  if (!data || !Array.isArray(data.content)) {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.content)) {
     throw new ClassifiedError(infoFor('malformed', cfg.provider));
   }
   let text = '';
@@ -1022,6 +1077,11 @@ async function attemptAnthropic(
       // Normalise Anthropic tool_use back into the OpenAI-shaped ToolCall.
       toolCalls.push({ id: block.id, name: block.name, arguments: block.input ?? {} });
     }
+  }
+  // An empty content array (no text, no tool_use) is the model glitching, not
+  // a dead-end — retryable + fallback-eligible like the OpenAI-compatible path.
+  if (!text.trim() && toolCalls.length === 0) {
+    throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
   }
   return {
     text,
@@ -1073,11 +1133,29 @@ export async function complete(
     return await attempt();
   } catch (err) {
     const ce = asClassified(err, cfg.provider);
+    const canFallback = ce.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free');
 
-    // Free-model fallback FIRST, but only on classes it can help and only where
-    // a real substitute exists (OpenRouter :free primaries). Never on bad_key,
+    // One bounded transport retry against the SAME model, for transient classes
+    // only (rate_limit / server / timeout / network / empty_completion). The
+    // same-model retry runs first: a free model that just glitched empty most
+    // often answers on a second try, and that's cheaper than a substitution.
+    let retried = false;
+    let current = ce;
+    if (ce.retryable) {
+      await sleep(retryDelayMs(ce, random));
+      retried = true;
+      try {
+        return await attempt();
+      } catch (err2) {
+        current = asClassified(err2, cfg.provider);
+      }
+    }
+
+    // Free-model fallback SECOND, only on classes it can help and only where a
+    // real substitute exists (OpenRouter :free primaries). Never on bad_key,
     // context_length, or malformed — those surface so the user sees the truth.
-    if (ce.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free')) {
+    // The substitution receipt stays visible via the served model.
+    if (canFallback) {
       let chain: string[] = [];
       try {
         chain = await buildChain(cfg.model);
@@ -1086,22 +1164,18 @@ export async function complete(
       }
       // Only worth an attempt if the chain offers a genuine alternative.
       if (chain.length > 1) {
-        // The fallback attempt's outcome is final — no further retry stacking.
-        return await attempt(chain);
+        try {
+          // The fallback attempt's outcome is final — no further retry stacking.
+          return await attempt(chain);
+        } catch (err3) {
+          throw exhaustedError(asClassified(err3, cfg.provider), { retried, fellBack: true });
+        }
       }
     }
 
-    // One bounded transport retry for transient classes only.
-    if (ce.retryable) {
-      await sleep(retryDelayMs(ce, random));
-      try {
-        return await attempt();
-      } catch (err2) {
-        throw retriedError(asClassified(err2, cfg.provider));
-      }
-    }
-
-    throw ce;
+    // Nothing recovered it — surface the (possibly post-retry) classified error
+    // with an honest note of what was tried.
+    throw exhaustedError(current, { retried, fellBack: false });
   }
 }
 

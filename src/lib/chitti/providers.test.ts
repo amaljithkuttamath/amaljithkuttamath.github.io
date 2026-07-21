@@ -339,15 +339,31 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
     headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
   });
-  const okChat = (model = 'served-model') => ({
+  // A successful chat completion. complete() reads the body via text() (so it
+  // can tell a blank body apart from garbage before parsing), so the fake must
+  // serialize the JSON there — not only expose json().
+  const okBody = (model = 'served-model', over: Record<string, unknown> = {}) => ({
+    choices: [{ message: { content: 'hello', tool_calls: [] } }],
+    usage: { prompt_tokens: 3, completion_tokens: 4 },
+    model,
+    ...over,
+  });
+  const okChat = (model = 'served-model') => {
+    const body = okBody(model);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(body),
+      json: async () => body,
+      headers: { get: () => null },
+    };
+  };
+  // A 200 whose body is exactly `raw` (string) — for empty-body / garbage cases.
+  const okRaw = (raw: string) => ({
     ok: true,
     status: 200,
-    text: async () => '',
-    json: async () => ({
-      choices: [{ message: { content: 'hello', tool_calls: [] } }],
-      usage: { prompt_tokens: 3, completion_tokens: 4 },
-      model,
-    }),
+    text: async () => raw,
+    json: async () => JSON.parse(raw),
     headers: { get: () => null },
   });
 
@@ -417,18 +433,174 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     expect(sleeps[0]).toBeGreaterThan(0);
   });
 
-  it('does NOT retry a malformed completion (no choices array) — surfaces at once', async () => {
-    const f = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => '',
-      json: async () => ({ not: 'a completion' }),
-      headers: { get: () => null },
-    }));
+  it('does NOT retry a malformed completion (valid JSON, no choices array) — surfaces at once', async () => {
+    // A non-empty, parseable body that simply isn't a completion shape. This is
+    // genuine garbage → malformed, distinct from an empty body (empty_completion).
+    const f = vi.fn(async () => okRaw(JSON.stringify({ not: 'a completion' })));
     await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
       errorClass: 'malformed',
     });
     expect(f).toHaveBeenCalledTimes(1); // malformed is not retryable
+  });
+
+  it('does NOT retry unparseable JSON garbage — surfaces at once as malformed', async () => {
+    // Non-empty but not JSON at all (e.g. an HTML error page) → malformed.
+    const f = vi.fn(async () => okRaw('<html>gateway error</html>'));
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toMatchObject({
+      errorClass: 'malformed',
+    });
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  // ── empty_completion: transient free-model glitch (backlog #17 regression) ──
+  // OpenRouter free models (Nemotron 3 Ultra among them) transiently return a
+  // 200 that carries no usable output. 755d6e2 classified these as `malformed`
+  // (non-retryable, non-fallback), so ONE transient empty killed the whole run.
+  // They are now `empty_completion`: retryable AND fallback-eligible.
+  describe('empty_completion — empty 200s are retried then fall back, not dead-ended', () => {
+    // Every shape of "a 200 with nothing usable in it".
+    const emptyShapes: Record<string, unknown> = {
+      'empty choices array': { choices: [], usage: {}, model: 'm' },
+      'choices[0].message missing': { choices: [{}], usage: {}, model: 'm' },
+      'content:"" with no tool_calls': {
+        choices: [{ message: { content: '', tool_calls: [] } }],
+        usage: {},
+        model: 'm',
+      },
+      'content null with no tool_calls': {
+        choices: [{ message: { content: null } }],
+        usage: {},
+        model: 'm',
+      },
+    };
+
+    for (const [name, body] of Object.entries(emptyShapes)) {
+      it(`${name} → empty_completion (retryable), retried once on a non-free primary`, async () => {
+        const f = vi.fn(async () => okRaw(JSON.stringify(body)));
+        const sleep = vi.fn(async () => {});
+        // Non-free OpenAI primary: no fallback substitute, so it retries once
+        // (same model) and then surfaces — exactly two attempts.
+        await expect(
+          complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { sleep }))
+        ).rejects.toMatchObject({ errorClass: 'empty_completion' });
+        expect(f).toHaveBeenCalledTimes(2); // original + one retry
+        expect(sleep).toHaveBeenCalledTimes(1);
+      });
+    }
+
+    it('a 200 with a blank body is empty_completion, not malformed', async () => {
+      const f = vi.fn(async () => okRaw(''));
+      await expect(
+        complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))
+      ).rejects.toMatchObject({ errorClass: 'empty_completion' });
+      expect(f).toHaveBeenCalledTimes(2); // retryable
+    });
+
+    it('an empty completion that answers on the retry succeeds (no fallback needed)', async () => {
+      let n = 0;
+      const f = vi.fn(async () => {
+        n++;
+        return n === 1 ? okRaw(JSON.stringify({ choices: [], model: 'm' })) : okChat();
+      });
+      const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+      expect(out.text).toBe('hello');
+      expect(f).toHaveBeenCalledTimes(2);
+    });
+
+    it('a free OpenRouter primary: empty → retry (same model) → fallback → surface, with attempt counts', async () => {
+      const freeCfg = cfg({ provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' });
+
+      // Every attempt (original, retry, and the fallback-chain attempt) comes
+      // back empty, so the run exhausts all three and surfaces.
+      const f = vi.fn(async () => okRaw(JSON.stringify({ choices: [], model: 'm' })));
+      const buildChain = vi.fn(async () => [
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+        'a:free',
+        'b:free',
+      ]);
+      const sleep = vi.fn(async () => {});
+      const err = await complete(freeCfg, [{ role: 'user', content: 'hi' }], [], deps(f, { sleep, buildFreeFallbackChain: buildChain })).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ClassifiedError);
+      expect(err.errorClass).toBe('empty_completion');
+      // Order: 1 original + 1 same-model retry + 1 fallback-chain attempt.
+      expect(f).toHaveBeenCalledTimes(3);
+      expect(sleep).toHaveBeenCalledTimes(1); // exactly one retry delay
+      expect(buildChain).toHaveBeenCalledTimes(1); // fallback engaged once
+      // The fallback attempt (3rd call) carried the substitute chain.
+      const thirdBody = JSON.parse((f.mock.calls[2] as any[])[1].body);
+      expect(thirdBody.models).toEqual([
+        'nvidia/nemotron-3-ultra-550b-a55b:free',
+        'a:free',
+        'b:free',
+      ]);
+      // Honest receipt: the surfaced message says what was tried.
+      expect(err.message).toMatch(/empty response/i);
+      expect(err.message).toMatch(/retried, then tried a fallback model/i);
+    });
+
+    it('a free OpenRouter primary: empty primary but the fallback model answers → substitution receipt', async () => {
+      const freeCfg = cfg({ provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' });
+      let n = 0;
+      const f = vi.fn(async () => {
+        n++;
+        // 1: empty, 2: empty retry, 3: the fallback chain answers.
+        return n < 3 ? okRaw(JSON.stringify({ choices: [], model: 'm' })) : okChat('backup:free');
+      });
+      const buildChain = vi.fn(async () => ['nvidia/nemotron-3-ultra-550b-a55b:free', 'a:free', 'b:free']);
+      const out = await complete(freeCfg, [{ role: 'user', content: 'hi' }], [], deps(f, { buildFreeFallbackChain: buildChain }));
+      expect(out.text).toBe('hello');
+      expect(out.servedModel).toBe('backup:free'); // visible substitution
+      expect(f).toHaveBeenCalledTimes(3);
+    });
+
+    it('content:"" WITH tool_calls is VALID — no retry, no fallback', async () => {
+      const body = {
+        choices: [
+          {
+            message: {
+              content: '',
+              tool_calls: [{ id: 'c1', type: 'function', function: { name: 'foo', arguments: '{"x":1}' } }],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+        model: 'm',
+      };
+      const f = vi.fn(async () => okRaw(JSON.stringify(body)));
+      const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+      expect(out.toolCalls).toHaveLength(1);
+      expect(out.toolCalls[0].name).toBe('foo');
+      expect(out.toolCalls[0].arguments).toEqual({ x: 1 });
+      expect(out.text).toBe('');
+      expect(f).toHaveBeenCalledTimes(1); // valid → single attempt
+    });
+
+    it('content null + reasoning populated (no tool_calls) → reasoning becomes the text', async () => {
+      const body = {
+        choices: [{ message: { content: null, reasoning: 'The answer is 42.' } }],
+        usage: { prompt_tokens: 2, completion_tokens: 3 },
+        model: 'm',
+      };
+      const f = vi.fn(async () => okRaw(JSON.stringify(body)));
+      const out = await complete(cfg({ provider: 'openrouter', model: 'x:free', requestReasoning: true }), [{ role: 'user', content: 'hi' }], [], deps(f));
+      expect(out.text).toBe('The answer is 42.'); // extracted from reasoning
+      expect(out.reasoning).toBe('The answer is 42.'); // still exposed as the trace
+      expect(out.toolCalls).toHaveLength(0);
+      expect(f).toHaveBeenCalledTimes(1); // valid → not treated as empty
+    });
+
+    it('reasoning is NOT used as text when a real content string is present', async () => {
+      const body = {
+        choices: [{ message: { content: 'actual answer', reasoning: 'chain of thought' } }],
+        usage: {},
+        model: 'm',
+      };
+      const f = vi.fn(async () => okRaw(JSON.stringify(body)));
+      const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+      expect(out.text).toBe('actual answer');
+      expect(out.reasoning).toBe('chain of thought');
+    });
   });
 
   it('does NOT retry context_length or bad_key (surfaces at once)', async () => {
