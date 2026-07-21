@@ -1438,7 +1438,8 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
 }
 
 // Guard the chart spec into a valid shape (models occasionally return strings).
-function normalizeSpec(raw: any): ChartSpec {
+// Exported for direct edge-case tests (same convention as parseVerifierVerdict).
+export function normalizeSpec(raw: any): ChartSpec {
   const type = ['line', 'bar', 'scatter', 'grouped-bar'].includes(raw?.type) ? raw.type : 'line';
   const series = Array.isArray(raw?.series) ? raw.series : [];
   const cleanSeries = series.map((s: any) => ({
