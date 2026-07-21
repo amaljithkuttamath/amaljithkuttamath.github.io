@@ -90,6 +90,12 @@ const PRESETS = [
 
     <template id="ch-turn-template">
       <div class="ch-turn">
+        <!-- Shared-answer banner (backlog #15): shown only when this turn was
+             restored from a #share= permalink, never on a live run. Muted, not
+             amber — this is a frozen snapshot, not a fresh verified answer. Its
+             text is set by renderShareBanner(); the link clears the fragment. -->
+        <div class="ch-share-banner" style="display:none" role="note"></div>
+
         <!-- The user's question, shown chat-style at the top of the turn. -->
         <p class="ch-turn-q" style="display:none"></p>
 
@@ -157,8 +163,12 @@ const PRESETS = [
                  itself a button) is invalid and unreachable for some AT. -->
             <summary>Raw data (<span class="ch-data-count">0</span> rows)</summary>
             <div class="ch-data-actions">
+              <button type="button" class="ch-share" style="display:none" aria-label="Copy a shareable link to this answer">Share link</button>
               <button type="button" class="ch-csv">Download CSV</button>
             </div>
+            <!-- aria-live region for the "copied" confirmation, announced to
+                 screen readers without moving focus. -->
+            <span class="ch-share-status" role="status" aria-live="polite"></span>
             <div class="ch-table-scroll">
               <table class="ch-table"></table>
             </div>
@@ -390,6 +400,12 @@ const PRESETS = [
   import type { TraceEvent, AgentOutput } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
+  import { rowsToCSV } from '../../lib/chitti/tools';
+  import {
+    encodeShareState,
+    decodeShareState,
+    type ShareStateV1,
+  } from '../../lib/chitti/share';
   import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
   import {
     chartAriaLabel,
@@ -553,12 +569,23 @@ const PRESETS = [
     dataDetails: HTMLDetailsElement;
     dataCount: HTMLElement;
     csvBtn: HTMLButtonElement;
+    shareBtn: HTMLButtonElement;
+    shareStatus: HTMLElement;
+    shareBanner: HTMLElement;
     tableEl: HTMLTableElement;
     citeEl: HTMLElement;
     chartInstance: any | null;
     lastSpec: ChartSpec | null;
     lastRows: DataRow[];
     lastCSV: string;
+    // Answer-level state captured for the share permalink (backlog #15): the
+    // finding text, citations, and verdict this turn ended with. Snapshotted on
+    // completion so the share button encodes exactly what is on screen.
+    lastFinding: string;
+    lastCitations: Citation[];
+    lastVerification: AgentOutput['verification'];
+    // True when this turn was restored from a #share= link (no agent ran).
+    isShared: boolean;
     // Index (into lastRows) of the evidence row currently highlighted by a
     // chart click, or -1 when nothing is highlighted. Chart↔table linking.
     activeRowIndex: number;
@@ -603,12 +630,19 @@ const PRESETS = [
       dataDetails: q<HTMLDetailsElement>(root, '.ch-data'),
       dataCount: q(root, '.ch-data-count'),
       csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
+      shareBtn: q<HTMLButtonElement>(root, '.ch-share'),
+      shareStatus: q(root, '.ch-share-status'),
+      shareBanner: q(root, '.ch-share-banner'),
       tableEl: q<HTMLTableElement>(root, '.ch-table'),
       citeEl: q(root, '.ch-cite'),
       chartInstance: null,
       lastSpec: null,
       lastRows: [],
       lastCSV: '',
+      lastFinding: '',
+      lastCitations: [],
+      lastVerification: null,
+      isShared: false,
       activeRowIndex: -1,
       trace: [],
       files: {},
@@ -628,7 +662,87 @@ const PRESETS = [
       URL.revokeObjectURL(url);
     });
 
+    tb.shareBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void shareTurn(tb);
+    });
+
     return tb;
+  }
+
+  // ── Share permalink (backlog #15) ────────────────────────────────────────
+  // Encode this turn's answer state into a #share= fragment, build an absolute
+  // URL, and copy it to the clipboard (with a select-all fallback). All strings
+  // in the payload come from the turn's own captured state; keys/trace/VFS are
+  // never included (the whitelist encoder in share.ts guarantees it).
+  function announceShare(tb: TurnBlock, msg: string, isError = false) {
+    tb.shareStatus.textContent = msg;
+    tb.shareStatus.classList.toggle('ch-share-status-error', isError);
+    if (msg && !isError) {
+      window.setTimeout(() => {
+        if (tb.shareStatus.textContent === msg) tb.shareStatus.textContent = '';
+      }, 2600);
+    }
+  }
+
+  // Build the shareable URL for a turn's captured state, or null if the answer
+  // is too large even after dropping rows. Returned to the click handler (which
+  // copies it) and to the offline harness (which reads it without a clipboard).
+  async function buildShareUrl(tb: TurnBlock): Promise<{ url: string; lossy: boolean } | null> {
+    const enc = await encodeShareState({
+      question: tb.question,
+      answer: tb.lastFinding,
+      spec: tb.lastSpec,
+      rows: tb.lastRows,
+      citations: tb.lastCitations,
+      verification: tb.lastVerification,
+      ts: new Date().toISOString(),
+    });
+    if (!enc.ok) return null;
+    return { url: location.origin + location.pathname + '#share=' + enc.payload, lossy: enc.lossy };
+  }
+
+  async function shareTurn(tb: TurnBlock) {
+    const built = await buildShareUrl(tb);
+    if (!built) {
+      announceShare(tb, 'answer too large to share as a link — use CSV export', true);
+      return;
+    }
+    const note = built.lossy ? ' (chart only; rows omitted for size)' : '';
+    await copyToClipboard(tb, built.url, 'Link copied' + note);
+  }
+
+  async function copyToClipboard(tb: TurnBlock, text: string, okMsg: string) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        announceShare(tb, okMsg);
+        return;
+      }
+      throw new Error('clipboard unavailable');
+    } catch {
+      // Fallback: drop a selectable input the user can copy manually. Some
+      // headless/insecure contexts refuse navigator.clipboard.
+      const wrap = tb.shareStatus;
+      wrap.textContent = '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.readOnly = true;
+      input.value = text;
+      input.className = 'ch-share-fallback';
+      input.setAttribute('aria-label', 'Shareable link — copy this');
+      wrap.appendChild(input);
+      input.focus();
+      input.select();
+      try {
+        document.execCommand('copy');
+        announceShare(tb, okMsg);
+      } catch {
+        // Leave the input in place for manual copy; announce it.
+        announceShare(tb, 'copy the link above');
+      }
+    }
   }
 
   const SESSION_KEY = 'chitti:key';
@@ -2055,6 +2169,135 @@ const PRESETS = [
     el.appendChild(tag);
   }
 
+  // ── Shared-answer verification (backlog #15) ─────────────────────────────
+  // A restored permalink has no live trace, so the amber VERIFIED stamp (which
+  // lives in the trace receipt on a live run) is never shown. Instead ALL three
+  // verdicts render here as a muted, "at time of generation" tag — a frozen
+  // snapshot must never masquerade as freshly verified.
+  function renderSharedVerification(tb: TurnBlock, v: AgentOutput['verification']) {
+    const el = tb.verifyEl;
+    el.textContent = '';
+    el.className = 'ch-verify ch-verify-shared';
+    if (!v) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    let text: string;
+    if (v.status === 'verified') {
+      text = 'verified at time of generation — passed a second-model check';
+    } else if (v.status === 'unavailable') {
+      text = 'verification unavailable at time of generation — provider error';
+      el.classList.add('ch-verify-unavailable');
+    } else {
+      const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
+      text = 'could not verify at time of generation — ' + reason;
+      el.classList.add('ch-verify-unverified');
+    }
+    const tag = document.createElement('span');
+    tag.className = 'ch-verify-tag';
+    tag.textContent = text;
+    el.appendChild(tag);
+  }
+
+  // ── Shared-answer banner + restore (backlog #15) ─────────────────────────
+  function fmtShareDate(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return 'an earlier session';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+  }
+
+  function renderShareBanner(tb: TurnBlock, state: ShareStateV1) {
+    const el = tb.shareBanner;
+    el.textContent = '';
+    el.style.display = 'block';
+    const lead = document.createElement('span');
+    lead.className = 'ch-share-banner-lead';
+    lead.textContent =
+      `Shared answer — generated ${fmtShareDate(state.ts)} · data as fetched then` +
+      (state.lossy ? ' · showing charted data only' : '');
+    const link = document.createElement('a');
+    link.className = 'ch-share-banner-link';
+    // Clears the fragment and returns to the live app (a full reload to a clean
+    // URL — no share state, fresh session).
+    link.href = location.pathname;
+    link.textContent = 'ask your own live question →';
+    el.appendChild(lead);
+    el.appendChild(document.createTextNode(' '));
+    el.appendChild(link);
+  }
+
+  // Restore a full answer view from a decoded permalink — no agent run, no key.
+  // Reuses the live render paths (renderChart / renderTable / renderCitations),
+  // all of which write text via textContent or escape through esc() before any
+  // innerHTML, so nothing from the payload is ever injected as markup.
+  async function restoreSharedAnswer(state: ShareStateV1) {
+    const tb = createTurnBlock();
+    tb.isShared = true;
+    tb.question = state.q;
+    allTurns.push(tb);
+    renderShareBanner(tb, state);
+    renderQuestion(tb, state.q);
+    // No trace panel on a shared view (there is no run to show).
+    if (state.spec) {
+      liveChartTurns.push(tb); // keep it re-theming/resizing like a live chart
+      tb.canvasEl.classList.remove('ch-canvas-pending');
+      await renderChart(tb, state.spec);
+      tb.renderFlag.style.display = 'none';
+    }
+    tb.answerSection.style.display = 'block';
+    tb.metaSection.style.display = 'block';
+    renderFinding(tb, state.answer);
+    renderSharedVerification(tb, state.verification);
+    renderTable(tb, state.rows, rowsToCSV(state.rows));
+    renderCitations(tb, state.citations);
+    // Hide the setup console and switch the composer to "new conversation".
+    consoleEl.style.display = 'none';
+    newConvoBtn.style.display = '';
+    composerQ.placeholder = 'Ask your own live question…';
+  }
+
+  function renderShareError() {
+    consoleEl.style.display = 'none';
+    const tb = createTurnBlock();
+    allTurns.push(tb);
+    const el = tb.shareBanner;
+    el.style.display = 'block';
+    el.classList.add('ch-share-banner-error');
+    el.textContent = '';
+    const lead = document.createElement('span');
+    lead.className = 'ch-share-banner-lead';
+    lead.textContent = 'This share link is invalid — it may be corrupted, truncated, or from a newer version.';
+    const link = document.createElement('a');
+    link.className = 'ch-share-banner-link';
+    link.href = location.pathname;
+    link.textContent = 'ask your own live question →';
+    el.appendChild(lead);
+    el.appendChild(document.createTextNode(' '));
+    el.appendChild(link);
+  }
+
+  // On load, if the URL carries a #share= fragment, restore that answer view
+  // instead of the empty app. Defensive: any decode failure shows a clear
+  // invalid-link state and never crashes the page or executes payload content.
+  async function maybeRestoreFromFragment() {
+    const hash = location.hash || '';
+    const m = hash.match(/^#share=(.+)$/);
+    if (!m) return;
+    let state: ShareStateV1 | null = null;
+    try {
+      state = await decodeShareState(decodeURIComponent(m[1]));
+    } catch {
+      state = null;
+    }
+    if (!state) { renderShareError(); return; }
+    try {
+      await restoreSharedAnswer(state);
+    } catch (err) {
+      console.error('share restore failed', err);
+      renderShareError();
+    }
+  }
+  void maybeRestoreFromFragment();
+
   // ── Running token + cost total ──────────────────────────────────────────
   // Per spec: a dashed-rule totals line near the bottom of the rail,
   // combining the run's total token count (summed from each trace event's
@@ -2237,6 +2480,13 @@ const PRESETS = [
       renderCitations(tb, out.citations);
       renderRunningTotal(tb, tb.trace, out.cost);
 
+      // Snapshot the answer state for the share permalink, then reveal the
+      // share action (it lives beside CSV in the raw-data disclosure).
+      tb.lastFinding = out.finding || '';
+      tb.lastCitations = out.citations;
+      tb.lastVerification = out.verification;
+      tb.shareBtn.style.display = '';
+
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
       // No scroll here (or in the branches above): the submit-time scroll is
@@ -2309,22 +2559,44 @@ const PRESETS = [
   // out render helpers only, never agent/provider/session internals.
   if (new URLSearchParams(location.search).has('chittidebug')) {
     const dbg: any = {
-      async stage(question: string, spec: ChartSpec, rows: DataRow[]) {
+      async stage(
+        question: string,
+        spec: ChartSpec,
+        rows: DataRow[],
+        opts?: { finding?: string; citations?: Citation[]; verification?: AgentOutput['verification'] }
+      ) {
         const tb = createTurnBlock();
         allTurns.push(tb);
         liveChartTurns.push(tb);
         consoleEl.style.display = 'none';
         tb.panel.style.display = 'block';
+        tb.question = question;
         renderQuestion(tb, question);
         await renderChart(tb, spec);
         tb.metaSection.style.display = 'block';
         tb.answerSection.style.display = 'block';
-        renderFinding(tb, 'Staged turn (offline harness).');
-        renderTable(tb, rows, '');
+        const finding = opts?.finding ?? 'Staged turn (offline harness).';
+        renderFinding(tb, finding);
+        if (opts?.verification !== undefined) renderVerification(tb, opts.verification);
+        renderTable(tb, rows, rowsToCSV(rows));
+        if (opts?.citations && opts.citations.length) renderCitations(tb, opts.citations);
         tb.dataDetails.open = true;
+        // Capture the answer state and reveal the share action, exactly as the
+        // live completion path does, so the harness can exercise real sharing.
+        tb.lastFinding = finding;
+        tb.lastCitations = opts?.citations ?? [];
+        tb.lastVerification = opts?.verification ?? null;
+        tb.shareBtn.style.display = '';
         dbg.chart = tb.chartInstance;
         dbg.tb = tb;
         return tb.root;
+      },
+      // Build the share URL for the staged turn without touching the clipboard,
+      // so a headless harness can capture it deterministically.
+      async shareUrl() {
+        if (!dbg.tb) return null;
+        const built = await buildShareUrl(dbg.tb);
+        return built ? built.url : null;
       },
       // Stage a trace through the REAL renderTrace path — same DOM, same
       // receipt/nesting/provenance rendering — from a supplied TraceEvent[]
@@ -3770,6 +4042,40 @@ const PRESETS = [
     border-style: dotted;
     color: var(--fg-muted);
   }
+
+  /* ── Shared-answer banner (backlog #15) ──
+     Muted, understated — a frozen snapshot, never amber. A thin left rule and
+     a soft elevated background mark it as meta, distinct from the answer. */
+  .ch-share-banner {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    line-height: 1.6;
+    color: var(--fg-muted);
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+    border-left: 2px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    padding: 8px 12px;
+    margin-bottom: var(--space-sm);
+  }
+  .ch-share-banner-error {
+    border-left-color: color-mix(in srgb, var(--danger) 50%, var(--fg-faint));
+    color: color-mix(in srgb, var(--danger) 55%, var(--fg-muted));
+  }
+  :global(.ch-share-banner-lead) { color: var(--fg-muted); }
+  :global(.ch-share-banner-link) {
+    color: var(--signal);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: nowrap;
+  }
+  :global(.ch-share-banner-link:focus-visible) {
+    outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  /* Shared verification tag: same muted treatment as the live cue — the amber
+     VERIFIED stamp is never shown on a restored snapshot. */
+  :global(.ch-verify-shared) { margin-top: var(--space-sm); }
   .ch-chart-card {
     margin: var(--space-sm) 0 0;
     background: var(--bg-elevated);
@@ -3837,8 +4143,52 @@ const PRESETS = [
     letter-spacing: 0;
     padding: 0;
   }
+  /* Share action, styled to match .ch-csv (same mono underline, same amber
+     --signal the CSV button already spends — no new accent introduced). */
+  .ch-share {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--signal);
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 0;
+  }
+  .ch-share:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  /* The "copied" confirmation / oversized refusal, announced via aria-live. */
+  .ch-share-status {
+    display: block;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    min-height: 1.2em;
+    padding-top: 2px;
+  }
+  .ch-share-status-error { color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted)); }
+  /* Fallback selectable input when navigator.clipboard is unavailable. */
+  .ch-share-fallback {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    padding: 4px 6px;
+    margin-top: 4px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-elevated);
+    color: var(--fg);
+  }
+
   /* CSV action, top of the expanded raw-data panel (moved out of <summary>). */
-  .ch-data-actions { display: flex; justify-content: flex-end; padding: 4px 0 0; }
+  .ch-data-actions { display: flex; justify-content: flex-end; gap: 14px; padding: 4px 0 0; }
   .ch-table-scroll { max-height: 340px; overflow: auto; margin-top: 8px; }
   .ch-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: var(--text-tag); }
   :global(.ch-table th) {
