@@ -1,4 +1,4 @@
-# Chitti — library architecture (Phase A)
+# Chitti — library architecture (Phases A + B)
 
 Chitti is a browser-only data-analyst agent: it fetches real numbers live from
 free institutional APIs (World Bank, Our World in Data, IMF DataMapper, WHO GHO),
@@ -11,6 +11,14 @@ Phase A was a **behavior-identical** refactor: the former monoliths `tools.ts`
 focused modules. `tools.ts` and `agent.ts` are now thin **re-export facades** —
 every prior `import { … } from './tools'` / `'./agent'` still resolves, and the
 full test suite passes unmodified.
+
+Phase B was the same kind of refactor for the **UI monolith**: the single
+~3740-line client `<script>` in `src/pages/apps/chitti.astro` was split into
+`src/lib/chitti/ui/` modules behind a thin bootstrap. The `.astro` file now keeps
+only its markup, CSS, the PWA-registration inline script, and one
+`<script>import '../../lib/chitti/ui/boot';</script>`. Everything moved verbatim —
+only import/export plumbing changed — so the page renders pixel-equivalently and
+the 472 tests pass unmodified. See the **UI layer** section below.
 
 ## Module map
 
@@ -50,6 +58,65 @@ full test suite passes unmodified.
 Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.ts`,
 `chart-format.ts`, `share.ts`, `codec.ts`, `dashboard.ts`, `dashboard-share.ts`,
 `sw-cache.ts`, `a11y.ts`.
+
+### UI layer (`ui/`)
+
+The browser client. Every module is loaded (transitively) by the single
+`<script>` in `chitti.astro`, which does nothing but `import './boot'`. These
+run in the browser only; the lib layers above are shared with the test suite.
+
+| Module | Responsibility |
+| --- | --- |
+| `ui/dom.ts` | Pure DOM/string helpers: `$`/`q`, `esc`/`escapeHtml`/`inlineMd`/`mdToHtml`, `cssVar`, `prefersReducedMotion`, the `format*`/`fmt*` formatters, `fileExt`. No state. |
+| `ui/chart-option.ts` | `buildOption` — the pure `ChartSpec → ECharts option` builder (theme via `cssVar`, formatting via `chart-format`). |
+| `ui/state.ts` | **The one shared-state module**: all DOM element handles, the per-turn `TurnBlock` interface, the live-chart registries (`allTurns`/`liveChartTurns`/`liveDashCharts`), the `dashStore` localStorage handle, `INDICATOR_MAP`, and the run-lifecycle scalars as a shared `run` object (`session`/`running`/`runController`). |
+| `ui/trace.ts` | `renderTrace` + the plan card, verify stamp, nested-receipt cards, panel summary, and inline `write_file` rows (`renderFiles`). |
+| `ui/charts.ts` | ECharts lifecycle: `loadECharts` (CDN import cache), `renderChart`, the chart↔table linking glue, and the theme/resize observers (registered on import). |
+| `ui/evidence.ts` | The data table (+ chart↔row hover), citations ledger, confidence-tinted finding, verification cue, running token/cost total. |
+| `ui/actions.ts` | Answer-share permalink build + clipboard (`shareTurn`/`buildShareUrl`/`writeClipboard`/`copyToClipboard`), shared by the turn UI and the dashboards copy paths. |
+| `ui/turns.ts` | `createTurnBlock` (clones the turn template, wires CSV/share/pin), `setStatus`, `renderQuestion`. |
+| `ui/config.ts` | Config-sheet logic: provider/model pickers, key field, source picker, RLM toggle, sheet open/close + focus trap. Owns `sourcesLocked`/`modelPickAll`/`RLM_HINT_DEFAULT`/`vv`. Its event listeners stay in `boot.ts`. |
+| `ui/dashboards-view.ts` | Pin picker, dashboards grid + detail view, tile cards, refresh log, share/export/import, read-only shared-dashboard render. Owns its private state (`currentDashId`/`sharedDashState`/`pinContext`/…); exposes `syncDashboardsAfterTurn`/`resetSharedDashState` so `boot` never reaches into it. |
+| `ui/restore.ts` | Restore-on-load: `#share=` answer and `#dash=` dashboard fragments + their invalid-link error states, driving the app's own render path. |
+| `ui/composer.ts` | The run flow: `handleAskSubmit` (turn creation → `session.ask` streaming → stop control → terminal-state rendering) and the "+ new question" two-step reset. Owns the `newQuestion*` state. |
+| `ui/debug-seam.ts` | `installDebugSeam()` — the `?chittidebug` `__chittiDebug` test seam (render/dashboard/stop hooks). Render helpers only; screenshot harnesses depend on it. |
+| `ui/boot.ts` | **The bootstrap**: imports the modules, registers every top-level DOM event listener (config sheet, provider/model, sources, dash nav, composer, new-question), runs the init sequence (`maybeRestoreFromFragment`, `updateDashNavCount`, `installDebugSeam`), in the same order the monolith did. No render/agent logic of its own. |
+
+## UI layering (bottom → top), and no cycles
+
+```
+state.ts (els + TurnBlock + run + registries)   dom.ts   chart-option.ts
+  trace · actions · charts · config · evidence
+    turns · dashboards-view
+      restore · composer
+        debug-seam
+          boot.ts   (wiring + init only)
+```
+
+Rules that keep the UI layer honest:
+
+- **State lives in exactly one module.** `state.ts` owns every piece of
+  cross-module mutable/shared state. Reassigned scalars are properties of the
+  exported `run` object (an ESM `let` binding can't be reassigned by an importer,
+  so the object gives every module a live read/write handle without a `window`
+  global). The registries (`allTurns`, …) are exported `const` arrays mutated in
+  place. The only browser global is `window.__chittiDebug`, exactly as before.
+- **Module-private state stays private.** `config` owns `sourcesLocked` (boot
+  reads it live via the ESM binding, never writes it); `dashboards-view` owns
+  `currentDashId`/`sharedDashState` and exposes `syncDashboardsAfterTurn`/
+  `resetSharedDashState` accessors rather than letting `boot` touch them;
+  `composer` owns `newQuestion*`.
+- **Cross-module function calls form cycles** (e.g. `turns → actions`,
+  `charts ⇄ evidence` via the hover glue, `restore → {turns, charts, evidence,
+  trace, dashboards-view}`). ESM tolerates them because every reference is inside
+  a function body, evaluated only when the user acts — never at module-init time.
+- **`boot.ts` is the composition root**: it imports downward and is imported by
+  nothing. It holds the event-listener *registrations* (so their order is
+  byte-for-byte unchanged) while the handler *bodies* live in the topical modules.
+- **Astro style scoping**: JS-built DOM is outside Astro's component-style scope,
+  so the CSS in `chitti.astro` already targets it via `:global(...)` — an
+  established pattern that the split preserves (moving JS out of the `.astro`
+  script changes nothing here, since bundled scripts were never style-scoped).
 
 ## The `SourceAdapter` interface (`sources/types.ts`)
 
