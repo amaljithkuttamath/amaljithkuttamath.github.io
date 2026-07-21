@@ -40,6 +40,17 @@ export interface Tile {
   // Data · source updated 2024-12-16"). Derived from citations at pin time when
   // not supplied; kept on the tile so the view never has to recompute it.
   sourceNote?: string;
+  // ── Refresh provenance (increment 2) ────────────────────────────────────
+  // Set by touchTileData when a "refresh data" run successfully re-fetched this
+  // tile's series from source: the moment Chitti last re-pulled it. Distinct
+  // from pinnedAt (when the tile was first saved — refresh never changes it) and
+  // from a citation's own fetchedAt.
+  refreshedAt?: string;
+  // Set by markTileStale when a refresh FAILED for this tile. The tile keeps its
+  // last-good rows/citations (never blanked, never fabricated); this marker lets
+  // the view show "refresh failed <date> — showing data from <original date>" in
+  // muted styling. Cleared on the next successful refresh (touchTileData).
+  stale?: { failedAt: string; reason: string };
 }
 
 export interface Dashboard {
@@ -160,6 +171,18 @@ function cleanCitations(citations: unknown): Citation[] {
   });
 }
 
+// Rebuild a tile's stale marker from named fields only (increment 2). A marker
+// with neither a failedAt nor a reason is dropped entirely — a tile is stale
+// only when it genuinely records why.
+function cleanStale(s: unknown): { failedAt: string; reason: string } | undefined {
+  if (!s || typeof s !== 'object') return undefined;
+  const o = s as Record<string, unknown>;
+  const failedAt = str(o.failedAt);
+  const reason = str(o.reason);
+  if (!failedAt && !reason) return undefined;
+  return { failedAt, reason };
+}
+
 function cleanTile(tile: unknown): Tile {
   const o = (tile && typeof tile === 'object' ? tile : {}) as Record<string, unknown>;
   const t: Tile = {
@@ -171,6 +194,9 @@ function cleanTile(tile: unknown): Tile {
     pinnedAt: str(o.pinnedAt) || nowIso(),
   };
   if (o.sourceNote != null) t.sourceNote = str(o.sourceNote);
+  if (o.refreshedAt != null) t.refreshedAt = str(o.refreshedAt);
+  const stale = cleanStale(o.stale);
+  if (stale) t.stale = stale;
   return t;
 }
 
@@ -327,6 +353,81 @@ export function moveTile(dash: Dashboard, tileId: string, dir: 'up' | 'down'): D
   const tiles = [...dash.tiles];
   [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
   return { ...dash, tiles, updated: nowIso() };
+}
+
+// Replace the tile at `tileId`'s POSITION with a new tile, keeping its slot in
+// the grid (increment 2 — the pin picker's "replace existing tile…"). Same
+// addTile/removeTile semantics conceptually, but the new tile inherits the old
+// one's index rather than landing at the end. Unknown tileId → same object
+// unchanged. Runs the SAME soft-cap guard addTile does (a swap can grow the
+// document) and bumps `updated`.
+export function replaceTile(dash: Dashboard, tileId: string, newTile: Tile): Dashboard {
+  const i = dash.tiles.findIndex((t) => t.id === tileId);
+  if (i === -1) return dash;
+  const tiles = [...dash.tiles];
+  tiles[i] = newTile;
+  const next: Dashboard = { ...dash, tiles, updated: nowIso() };
+  const bytes = dashboardBytes(next);
+  if (bytes > DASHBOARD_SOFT_CAP_BYTES) throw new DashboardCapError(bytes, DASHBOARD_SOFT_CAP_BYTES);
+  return next;
+}
+
+// ── Refresh ops (increment 2) ────────────────────────────────────────────────
+// Replace a tile's fetched evidence (rows) and citation ledger after a
+// SUCCESSFUL "refresh data" run, keeping the tile's id/title/spec/pinnedAt and
+// its grid position. Re-derives sourceNote from the new citations so the
+// provenance line shows the refreshed vintage, stamps refreshedAt, and CLEARS
+// any prior stale marker. Rows/citations are whitelist-cleaned on the way in
+// (same discipline as makeTile), so a refresh can never smuggle an unlisted
+// field onto a stored tile. Note: the chart spec is preserved as-is — the tile
+// re-renders the chart it was pinned with; the refreshed rows + citations + new
+// vintage are the evidence this op replaces. Unknown tileId → unchanged.
+export function touchTileData(
+  dash: Dashboard,
+  tileId: string,
+  rows: DataRow[],
+  citations: Citation[],
+  refreshedAt: string
+): Dashboard {
+  if (!dash.tiles.some((t) => t.id === tileId)) return dash;
+  const cleanCites = cleanCitations(citations);
+  const cleanedRows = cleanRows(rows);
+  return {
+    ...dash,
+    tiles: dash.tiles.map((t) => {
+      if (t.id !== tileId) return t;
+      const next: Tile = {
+        ...t,
+        rows: cleanedRows,
+        citations: cleanCites,
+        sourceNote: deriveSourceNote(cleanCites) || t.sourceNote,
+        refreshedAt: str(refreshedAt) || nowIso(),
+      };
+      delete next.stale; // a successful refresh clears any prior failure marker
+      return next;
+    }),
+    updated: nowIso(),
+  };
+}
+
+// Mark a tile stale after its refresh FAILED. The tile's rows/citations/spec are
+// left UNTOUCHED (never blanked, never fabricated) — only a stale marker is
+// added, recording when and why, so the view can show the honest "showing data
+// from <original date>" line. Unknown tileId → unchanged. Bumps `updated` (the
+// document's stale-state genuinely changed).
+export function markTileStale(
+  dash: Dashboard,
+  tileId: string,
+  reason: string,
+  failedAt?: string
+): Dashboard {
+  if (!dash.tiles.some((t) => t.id === tileId)) return dash;
+  const stale = { failedAt: str(failedAt) || nowIso(), reason: str(reason).trim() || 'refresh failed' };
+  return {
+    ...dash,
+    tiles: dash.tiles.map((t) => (t.id === tileId ? { ...t, stale } : t)),
+    updated: nowIso(),
+  };
 }
 
 // ── Storage wrapper ──────────────────────────────────────────────────────────

@@ -6,6 +6,9 @@ import {
   renameTile,
   renameDashboard,
   moveTile,
+  replaceTile,
+  touchTileData,
+  markTileStale,
   makeTile,
   deriveSourceNote,
   serializeDashboard,
@@ -191,6 +194,165 @@ describe('moveTile bounds', () => {
     expect(moveTile(d, ids[0], 'up')).toBe(d);
     expect(moveTile(d, ids[2], 'down')).toBe(d);
     expect(moveTile(d, 'unknown', 'up')).toBe(d);
+  });
+});
+
+describe('replaceTile', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-07-21T00:00:00.000Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('swaps a tile in place, keeping position, returning a new object, bumping updated', () => {
+    let d = createDashboard('board');
+    const a = sampleTile({ title: 'A' });
+    const b = sampleTile({ title: 'B' });
+    const c = sampleTile({ title: 'C' });
+    d = addTile(d, a); d = addTile(d, b); d = addTile(d, c);
+    const before = d.updated;
+    vi.setSystemTime(new Date('2026-07-21T02:00:00.000Z'));
+
+    const fresh = sampleTile({ title: 'B-replaced' });
+    const out = replaceTile(d, b.id, fresh);
+    expect(out).not.toBe(d);
+    expect(out.tiles.map((t) => t.title)).toEqual(['A', 'B-replaced', 'C']); // position kept
+    expect(out.tiles[1].id).toBe(fresh.id);
+    expect(out.updated > before).toBe(true);
+    expect(d.tiles.map((t) => t.title)).toEqual(['A', 'B', 'C']); // input untouched
+  });
+
+  it('is a no-op (same ref) for an unknown tile id', () => {
+    const d = addTile(createDashboard('b'), sampleTile());
+    expect(replaceTile(d, 'nope', sampleTile())).toBe(d);
+  });
+
+  it('enforces the soft cap on the swapped-in tile', () => {
+    const d = addTile(createDashboard('b'), sampleTile());
+    const heavyRows: DataRow[] = [];
+    for (let i = 0; i < 6000; i++) {
+      heavyRows.push({ country: 'Countryland', iso3: 'CLD', year: 1900 + i, value: i * 1.5, indicator: 'SP.DYN.IMRT.IN' });
+    }
+    const heavy = makeTile({ title: 'Heavy', spec, rows: heavyRows, citations });
+    expect(() => replaceTile(d, d.tiles[0].id, heavy)).toThrow(DashboardCapError);
+  });
+});
+
+describe('touchTileData (refresh success)', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-07-21T00:00:00.000Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const newRows: DataRow[] = [
+    { country: 'India', iso3: 'IND', year: 2000, value: 60.1, indicator: 'SP.DYN.IMRT.IN' },
+    { country: 'India', iso3: 'IND', year: 2022, value: 25.0, indicator: 'SP.DYN.IMRT.IN' },
+  ];
+  const newCites: Citation[] = [
+    { ...citations[0], fetchedAt: '2026-08-01T00:00:00.000Z', sourceUpdated: '2025-06-30', rowCount: 2 },
+  ];
+
+  it('replaces rows + citations, re-derives sourceNote/vintage, stamps refreshedAt, keeps id/title/spec/pinnedAt/position', () => {
+    let d = createDashboard('board');
+    const a = sampleTile({ title: 'A' });
+    const b = sampleTile({ title: 'B' });
+    d = addTile(d, a); d = addTile(d, b);
+    const before = d.updated;
+    vi.setSystemTime(new Date('2026-08-01T00:00:00.000Z'));
+
+    const out = touchTileData(d, b.id, newRows, newCites, '2026-08-01T00:00:00.000Z');
+    expect(out).not.toBe(d);
+    const t = out.tiles[1];
+    expect(out.tiles.map((x) => x.title)).toEqual(['A', 'B']); // position + titles kept
+    expect(t.id).toBe(b.id);
+    expect(t.title).toBe('B');
+    expect(t.pinnedAt).toBe(b.pinnedAt); // pinnedAt preserved
+    expect(t.spec).toEqual(b.spec); // chart spec preserved as-is
+    expect(t.rows).toEqual(newRows); // rows replaced
+    expect(t.citations[0].sourceUpdated).toBe('2025-06-30'); // vintage replaced
+    expect(t.refreshedAt).toBe('2026-08-01T00:00:00.000Z');
+    expect(t.sourceNote).toContain('2025-06-30'); // sourceNote re-derived to new vintage
+    expect(out.updated > before).toBe(true);
+    // Input untouched.
+    expect(d.tiles[1].rows).toEqual(b.rows);
+    expect(d.tiles[1].refreshedAt).toBeUndefined();
+  });
+
+  it('clears a prior stale marker on success', () => {
+    let d = addTile(createDashboard('board'), sampleTile());
+    const id = d.tiles[0].id;
+    d = markTileStale(d, id, 'network error');
+    expect(d.tiles[0].stale).toBeTruthy();
+    const out = touchTileData(d, id, newRows, newCites, '2026-08-01T00:00:00.000Z');
+    expect(out.tiles[0].stale).toBeUndefined();
+  });
+
+  it('whitelist-cleans incoming rows/citations (a planted field never lands on the tile)', () => {
+    let d = addTile(createDashboard('board'), sampleTile());
+    const id = d.tiles[0].id;
+    const dirtyRows = [{ country: 'X', iso3: 'X', year: 1, value: 2, apiKey: 'sk-refresh' } as any];
+    const dirtyCites = [{ ...citations[0], apiKey: 'sk-cite' } as any];
+    const out = touchTileData(d, id, dirtyRows, dirtyCites, '2026-08-01T00:00:00.000Z');
+    expect('apiKey' in out.tiles[0].rows[0]).toBe(false);
+    expect('apiKey' in out.tiles[0].citations[0]).toBe(false);
+  });
+
+  it('is a no-op (same ref) for an unknown tile id', () => {
+    const d = addTile(createDashboard('b'), sampleTile());
+    expect(touchTileData(d, 'nope', newRows, newCites, '2026-08-01T00:00:00.000Z')).toBe(d);
+  });
+});
+
+describe('markTileStale (refresh failure)', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-08-01T00:00:00.000Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('adds a stale marker WITHOUT touching rows/citations/spec, bumps updated', () => {
+    let d = addTile(createDashboard('board'), sampleTile());
+    const id = d.tiles[0].id;
+    const before = d.tiles[0];
+    const out = markTileStale(d, id, 'network error', '2026-08-01T00:00:00.000Z');
+    expect(out).not.toBe(d);
+    expect(out.tiles[0].stale).toEqual({ failedAt: '2026-08-01T00:00:00.000Z', reason: 'network error' });
+    expect(out.tiles[0].rows).toEqual(before.rows); // rows untouched
+    expect(out.tiles[0].citations).toEqual(before.citations); // citations untouched
+    expect(out.tiles[0].spec).toEqual(before.spec); // spec untouched
+    expect(d.tiles[0].stale).toBeUndefined(); // input untouched
+  });
+
+  it('defaults failedAt to now and reason to a sane fallback', () => {
+    const d = addTile(createDashboard('b'), sampleTile());
+    const out = markTileStale(d, d.tiles[0].id, '   ');
+    expect(out.tiles[0].stale?.reason).toBe('refresh failed');
+    expect(out.tiles[0].stale?.failedAt).toBe('2026-08-01T00:00:00.000Z');
+  });
+
+  it('is a no-op (same ref) for an unknown tile id', () => {
+    const d = addTile(createDashboard('b'), sampleTile());
+    expect(markTileStale(d, 'nope', 'x')).toBe(d);
+  });
+});
+
+describe('serialize/parse of refresh fields', () => {
+  it('roundtrips refreshedAt + stale through the whitelist exactly', () => {
+    let d = createDashboard('Refreshed');
+    d = addTile(d, sampleTile());
+    d = touchTileData(
+      d,
+      d.tiles[0].id,
+      [{ country: 'X', iso3: 'X', year: 2, value: 3, indicator: 'I' }],
+      citations,
+      '2026-08-01T00:00:00.000Z'
+    );
+    d = markTileStale(d, d.tiles[0].id, 'network error', '2026-08-02T00:00:00.000Z');
+    const back = parseDashboard(serializeDashboard(d));
+    expect(back).not.toBeNull();
+    expect(back!.tiles[0].refreshedAt).toBe('2026-08-01T00:00:00.000Z');
+    expect(back!.tiles[0].stale).toEqual({ failedAt: '2026-08-02T00:00:00.000Z', reason: 'network error' });
+    expect(back).toEqual(d);
+  });
+
+  it('drops a stale marker that carries neither failedAt nor reason', () => {
+    let d = addTile(createDashboard('b'), sampleTile());
+    const raw = JSON.parse(serializeDashboard(d));
+    raw.tiles[0].stale = {}; // empty marker planted
+    const back = parseDashboard(JSON.stringify(raw));
+    expect(back!.tiles[0].stale).toBeUndefined();
   });
 });
 
