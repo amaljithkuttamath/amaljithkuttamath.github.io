@@ -545,7 +545,18 @@ vi.mock('./providers', async (importOriginal) => {
 });
 
 import { complete, ClassifiedError } from './providers';
-import { createSession, buildSystemPrompt, buildSubAgentPrompt, parseVerifierVerdict, normalizeSpec } from './agent';
+import {
+  createSession,
+  buildSystemPrompt,
+  buildSubAgentPrompt,
+  parseVerifierVerdict,
+  normalizeSpec,
+  needsPlan,
+  countCountryMentions,
+  parsePlanBrief,
+  matchStepToEvent,
+  type PlanStep,
+} from './agent';
 
 describe('createSession', () => {
   it('persists conversation history across two ask() calls', async () => {
@@ -3083,5 +3094,306 @@ describe('turn abort (stop control)', () => {
     const deps = mockComplete.mock.calls[0][3];
     expect(deps).toBeDefined();
     expect(deps.signal).toBe(ctrl.signal);
+  });
+});
+
+// ── Gated plan mode (backlog #10) ──────────────────────────────────────────
+
+// The gating heuristic is pure and cheap: a table of ~20 questions across both
+// classes. Conservative by design — a simple lookup must NEVER be gated (it
+// would cost the user an extra LLM call for nothing), while genuinely multi-step
+// shapes (comparisons, causality over several series, cross-source, long
+// conjunctive prompts, explicit "plan first") must be.
+describe('needsPlan — gating heuristic', () => {
+  // Each row: [question, activeSourceCount, expectedGated].
+  const cases: [string, number, boolean][] = [
+    // ── Should PLAN ──────────────────────────────────────────────────────
+    ['Compare GDP per capita of India and China since 2000', 1, true],
+    ['How does life expectancy in Japan compare to the United States?', 1, true],
+    ['Nigeria vs Kenya vs Ghana: which grew fastest?', 1, true],
+    ['Why has inflation risen in Argentina and Turkey?', 2, true],
+    ['What is the relationship between CO2 emissions and GDP?', 1, true],
+    ['How has poverty changed in Brazil since 1990 alongside inequality?', 2, true],
+    ['Rank the top 10 countries by unemployment', 1, true],
+    ['Show me the difference between Germany and France in trade', 1, true],
+    ['Plan first, then chart CO2 emissions for the G7', 1, true],
+    ['Compare inflation and unemployment across the United States, Japan, and Germany over the last two decades and note any divergence', 2, true],
+    ['What drove the divergence in electricity access between India and Nigeria?', 2, true],
+    ['Correlate GDP growth with life expectancy for African countries', 1, true],
+    // ── Should NOT plan (simple / conservative) ──────────────────────────
+    ['What is the population of France?', 5, false],
+    ['GDP of Japan in 2020', 5, false],
+    ['Show me literacy rate in Kenya', 5, false],
+    ['What was inflation in Brazil last year?', 5, false],
+    ['List countries in South America', 5, false],
+    ['How many people live in Nigeria?', 5, false],
+    ['What does GDP mean?', 5, false],
+    ['Life expectancy in Canada', 5, false],
+    ['Fetch unemployment for Spain', 5, false],
+    ['', 5, false],
+  ];
+
+  for (const [q, n, expected] of cases) {
+    it(`${expected ? 'plans' : 'skips'}: "${q.slice(0, 60)}"`, () => {
+      expect(needsPlan(q, n)).toBe(expected);
+    });
+  }
+
+  it('explicit "show your plan" forces a plan even on a simple lookup', () => {
+    expect(needsPlan('Population of France', 1)).toBe(false);
+    expect(needsPlan('Show your plan for the population of France', 1)).toBe(true);
+  });
+
+  it('counts distinct country mentions without short-code false positives', () => {
+    // "in", "is", "us" (as words) must NOT be miscounted as countries.
+    expect(countCountryMentions('what is the trend in inflation')).toBe(0);
+    expect(countCountryMentions('India and China')).toBe(2);
+    expect(countCountryMentions('the United States versus the United Kingdom')).toBe(2);
+    // Explicit ISO3 codes count; a 3-letter non-country all-caps token does not.
+    expect(countCountryMentions('compare USA and CHN GDP')).toBe(2);
+  });
+});
+
+// parsePlanBrief mirrors parseVerifierVerdict's defensive discipline: a valid
+// brief needs a non-empty insight AND ≥1 usable step; anything else → null
+// (which the runtime treats as "no plan", proceeding exactly as today).
+describe('parsePlanBrief — defensive brief parsing', () => {
+  it('parses a well-formed brief with steps, tool hints, chart intent and sources', () => {
+    const raw = JSON.stringify({
+      insight: 'China overtook India on GDP per capita around 2010 and pulled away.',
+      steps: [
+        { what: 'find the GDP per capita series', tool_hint: 'find_series' },
+        { what: 'fetch it for IND and CHN', tool_hint: 'fetch_series' },
+        { what: 'compute the crossover year', tool_hint: 'execute_js' },
+      ],
+      chart_intent: 'a line chart of both series',
+      sources_expected: ['World Bank'],
+    });
+    const b = parsePlanBrief(raw);
+    expect(b).not.toBeNull();
+    expect(b!.insight).toMatch(/China overtook/);
+    expect(b!.steps).toHaveLength(3);
+    expect(b!.steps[0].tool_hint).toBe('find_series');
+    expect(b!.chart_intent).toBe('a line chart of both series');
+    expect(b!.sources_expected).toEqual(['World Bank']);
+  });
+
+  it('tolerates code fences + surrounding prose (same as the verdict parser)', () => {
+    const raw = 'Here is the plan:\n```json\n{"insight":"X diverges from Y","steps":[{"what":"fetch both"}]}\n```\nThanks.';
+    const b = parsePlanBrief(raw);
+    expect(b).not.toBeNull();
+    expect(b!.steps).toHaveLength(1);
+    expect(b!.steps[0].tool_hint).toBeUndefined();
+  });
+
+  it('drops steps without a `what`, and invalid tool hints, without fabricating', () => {
+    const raw = JSON.stringify({
+      insight: 'ok',
+      steps: [{ what: 'real step', tool_hint: 'not_a_tool' }, { what: '' }, { note: 'no what' }, 'nope'],
+    });
+    const b = parsePlanBrief(raw);
+    expect(b).not.toBeNull();
+    expect(b!.steps).toHaveLength(1);
+    expect(b!.steps[0].what).toBe('real step');
+    expect(b!.steps[0].tool_hint).toBeUndefined(); // bad hint dropped, not kept
+  });
+
+  it('malformed → null (never a faked plan)', () => {
+    expect(parsePlanBrief('')).toBeNull();
+    expect(parsePlanBrief('   ')).toBeNull();
+    expect(parsePlanBrief('the model rambled with no JSON')).toBeNull();
+    expect(parsePlanBrief('{"insight":"","steps":[{"what":"x"}]}')).toBeNull(); // empty insight
+    expect(parsePlanBrief('{"insight":"ok","steps":[]}')).toBeNull(); // no steps
+    expect(parsePlanBrief('{"insight":"ok"}')).toBeNull(); // steps missing
+    expect(parsePlanBrief('{"steps":[{"what":"x"}]}')).toBeNull(); // insight missing
+    expect(parsePlanBrief('{"insight":"ok","steps":[{"what":""}]}')).toBeNull(); // all steps empty
+  });
+});
+
+// The check-off matcher decides whether a trace event is plausibly the execution
+// of a plan step. Cheap + imperfect on purpose (a progress cue, not a contract):
+// a matching tool_hint family checks a step off outright, else a single shared
+// distinctive keyword suffices. Non-executor events never match.
+describe('matchStepToEvent — step check-off matcher', () => {
+  const step = (what: string, tool_hint?: PlanStep['tool_hint']): PlanStep =>
+    tool_hint ? { what, tool_hint } : { what };
+
+  it('checks off on a matching tool_hint family (incl. legacy fetch + compute families)', () => {
+    expect(matchStepToEvent(step('get the series', 'fetch_series'), { tool: 'fetch_series', argSummary: 'X' })).toBe(true);
+    // Legacy per-source fetch name maps to the fetch family.
+    expect(matchStepToEvent(step('get the series', 'fetch_series'), { tool: 'fetch_worldbank', argSummary: 'X' })).toBe(true);
+    // growth_stats / correlate belong to the execute_js (compute) family.
+    expect(matchStepToEvent(step('rank them', 'execute_js'), { tool: 'growth_stats', argSummary: '' })).toBe(true);
+    expect(matchStepToEvent(step('correlate', 'execute_js'), { tool: 'correlate', argSummary: '' })).toBe(true);
+  });
+
+  it('checks off on a shared distinctive keyword when there is no hint', () => {
+    expect(
+      matchStepToEvent(step('fetch GDP for India and China'), { tool: 'fetch_series', argSummary: 'NY.GDP.MKTP.CD · IND,CHN' })
+    ).toBe(true); // "gdp" overlaps
+    expect(
+      matchStepToEvent(step('search for the inflation series'), { tool: 'find_series', argSummary: 'inflation rate' })
+    ).toBe(true); // "inflation" overlaps
+  });
+
+  it('does NOT match on tool family alone when the hint disagrees and no keyword overlaps', () => {
+    expect(matchStepToEvent(step('compute the crossover', 'execute_js'), { tool: 'find_series', argSummary: 'population' })).toBe(false);
+  });
+
+  it('an off-plan tool event matches none of the plan steps', () => {
+    const steps = [step('fetch GDP', 'fetch_series'), step('rank countries', 'execute_js')];
+    const offPlanEvent = { tool: 'correlate', argSummary: 'emissions vs temperature', detail: '' };
+    // correlate is the compute family → the execute_js step DOES claim it; make
+    // an event with no family/keyword tie to prove non-matching is real.
+    const trulyOff = { tool: 'find_series', argSummary: 'coastline length' };
+    expect(steps.some((s) => matchStepToEvent(s, trulyOff))).toBe(false);
+    // And the compute-family event is legitimately claimed by the compute step.
+    expect(steps.some((s) => matchStepToEvent(s, offPlanEvent))).toBe(true);
+  });
+
+  it('never matches non-executor events (plan / reasoning / verify / fallback / llm)', () => {
+    const s = step('fetch GDP', 'fetch_series');
+    for (const tool of ['plan', 'reasoning', 'verify', 'fallback', 'llm']) {
+      expect(matchStepToEvent(s, { tool, argSummary: 'gdp fetch' })).toBe(false);
+    }
+    expect(matchStepToEvent(s, { tool: '' })).toBe(false);
+  });
+
+  it('an unmatched step stays unchecked (drives the "not needed" strike at run-end)', () => {
+    const s = step('delegate to IMF for forecasts', 'delegate_source');
+    const events = [
+      { tool: 'find_series', argSummary: 'gdp' },
+      { tool: 'fetch_series', argSummary: 'NY.GDP.MKTP.CD' },
+      { tool: 'execute_js', argSummary: 'rank' },
+    ];
+    expect(events.some((ev) => matchStepToEvent(s, ev))).toBe(false);
+  });
+});
+
+// End-to-end through createSession (complete() mocked). The planning turn is at
+// most ONE extra complete() call, only when gated in; a malformed brief leaves
+// the run identical to today; a simple question makes NO planning call.
+describe('plan mode, driven through createSession', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const chartTurn = () => ({
+    text: '',
+    toolCalls: [
+      tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] }, 'rc'),
+      tc('finish', { one_line_finding: 'A finding.' }, 'fin'),
+    ],
+    usage: { input: 10, output: 5 },
+  });
+  const verifyPass = () => ({ text: '{"pass":true,"confidence":"high","issues":[]}', toolCalls: [], usage: { input: 5, output: 2 } });
+  const planTurn = (brief: unknown) => ({ text: JSON.stringify(brief), toolCalls: [], usage: { input: 6, output: 3 } });
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const newSession = () => createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+  const GATED = 'Compare GDP per capita of India and China since 2000';
+  const SIMPLE = 'What is the population of France?';
+
+  it('a gated question makes exactly ONE planning call, pushes a plan receipt, and injects the insight note', async () => {
+    const brief = {
+      insight: 'China pulled ahead of India on GDP per capita after 2010.',
+      steps: [{ what: 'fetch GDP per capita for IND and CHN', tool_hint: 'fetch_series' }],
+      chart_intent: 'line chart',
+    };
+    mockComplete.mockResolvedValueOnce(planTurn(brief));
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask(GATED, cb);
+    expect(out.aborted).toBe(false);
+
+    // call 0 = plan, call 1 = agentPass, call 2 = verify.
+    expect(mockComplete).toHaveBeenCalledTimes(3);
+
+    // A plan receipt event, first in the trace, carrying the brief + its tokens.
+    const planEvents = trace().filter((e) => e.tool === 'plan');
+    expect(planEvents).toHaveLength(1);
+    expect(trace()[0].tool).toBe('plan');
+    expect(planEvents[0].plan.insight).toMatch(/China pulled ahead/);
+    expect(planEvents[0].tokens).toBe(9);
+
+    // The executor turn received the plan as a system-side note.
+    const execMessages = mockComplete.mock.calls[1][1] as { role: string; content: string }[];
+    const note = execMessages.find((m) => m.role === 'system' && m.content.includes('Insight to surface:'));
+    expect(note).toBeDefined();
+    expect(note!.content).toMatch(/China pulled ahead/);
+    expect(note!.content).toMatch(/Deviate if the data demands it/);
+  });
+
+  it('passes the intended insight to the verifier', async () => {
+    const brief = { insight: 'Divergence after 2010.', steps: [{ what: 'fetch both' }] };
+    mockComplete.mockResolvedValueOnce(planTurn(brief));
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb } = capture();
+    await newSession().ask(GATED, cb);
+
+    const verifyMessages = mockComplete.mock.calls[2][1] as { role: string; content: string }[];
+    const userMsg = verifyMessages.find((m) => m.role === 'user');
+    expect(userMsg!.content).toMatch(/Intended insight: Divergence after 2010\./);
+  });
+
+  it('a malformed brief → no plan receipt, no injected note, run proceeds identically', async () => {
+    // The planning call still fires (the gate opened), but its output is junk.
+    mockComplete.mockResolvedValueOnce({ text: 'the model forgot to answer in JSON', toolCalls: [], usage: { input: 6, output: 3 } });
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask(GATED, cb);
+    expect(out.aborted).toBe(false);
+    expect(out.verification!.status).toBe('verified'); // run completed normally
+
+    // No plan receipt was faked.
+    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+    // No plan note leaked into the executor context.
+    const execMessages = mockComplete.mock.calls[1][1] as { role: string; content: string }[];
+    expect(execMessages.some((m) => m.role === 'system' && m.content.includes('Insight to surface:'))).toBe(false);
+    // The verifier saw no intended insight either.
+    const verifyMessages = mockComplete.mock.calls[2][1] as { role: string; content: string }[];
+    expect(verifyMessages.find((m) => m.role === 'user')!.content).not.toMatch(/Intended insight:/);
+  });
+
+  it('a simple question makes NO planning call (zero extra cost)', async () => {
+    mockComplete.mockResolvedValueOnce(chartTurn());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    await newSession().ask(SIMPLE, cb);
+
+    // Only agentPass + verify — no planning call prepended.
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
+    // The first call is the executor, not a planner (no insight note present).
+    const firstMessages = mockComplete.mock.calls[0][1] as { role: string; content: string }[];
+    expect(firstMessages.some((m) => m.role === 'system' && m.content.includes('Insight to surface:'))).toBe(false);
+  });
+
+  it('abort DURING planning → aborted output, no plan card, no executor/verify calls', async () => {
+    const ctrl = new AbortController();
+    // The stop fires while the planning call is in flight.
+    mockComplete.mockImplementationOnce(async () => {
+      ctrl.abort();
+      throw new Error('the provider request timed out');
+    });
+
+    const { cb, trace } = capture();
+    const out = await newSession().ask(GATED, cb, ctrl.signal);
+    expect(out.aborted).toBe(true);
+    expect(out.verification).toBeNull(); // no stamp on a stopped turn
+    // Only the planning call was attempted; no executor pass, no verifier.
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    // The plan card is absent — a brief was never parsed/pushed.
+    expect(trace().some((e) => e.tool === 'plan')).toBe(false);
   });
 });

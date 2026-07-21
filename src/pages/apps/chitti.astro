@@ -403,7 +403,8 @@ const PRESETS = [
     type ProviderConfig,
     type ModelOption,
   } from '../../lib/chitti/providers';
-  import type { TraceEvent, AgentOutput } from '../../lib/chitti/agent';
+  import type { TraceEvent, AgentOutput, InsightBrief, PlanStep } from '../../lib/chitti/agent';
+  import { matchStepToEvent } from '../../lib/chitti/agent';
   import type { ChartSpec, DataRow, Citation } from '../../lib/chitti/tools';
   import { matchPointToRow, matchRowToPoint } from '../../lib/chitti/chart-link';
   import { rowsToCSV } from '../../lib/chitti/tools';
@@ -1251,6 +1252,104 @@ const PRESETS = [
     return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
   }
 
+  // The plan card (backlog #10): the turn's committed insight brief, rendered
+  // at the top of the trace. The insight sits in Newsreader italic; the steps
+  // are a mono checklist checked off against the turn's later tool events via
+  // the shared matchStepToEvent matcher. State is honest, never faked:
+  //   • matched by ≥1 event         → checked (done).
+  //   • unmatched, run still going   → pending (open box).
+  //   • unmatched, run ended         → "not needed" (neutral strike, NOT a check).
+  // If the model ran data tools that fit no step, a single muted "off-plan" line
+  // appears once — deviation shown honestly, not hidden. Plan token cost shows
+  // on the card like every other receipt.
+  const PLAN_OFF_PLAN_TOOLS = new Set([
+    'find_series', 'fetch_series', 'fetch_worldbank', 'fetch_worldbank_all',
+    'fetch_owid', 'fetch_imf', 'execute_js', 'growth_stats', 'correlate', 'delegate_source',
+  ]);
+  function buildPlanCard(plan: InsightBrief, events: TraceEvent[], tokens?: number): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'ch-plan';
+
+    // Header: a small "plan" label + the plan's token cost, receipt-style.
+    const header = document.createElement('div');
+    header.className = 'ch-plan-header';
+    const label = document.createElement('span');
+    label.className = 'ch-plan-label';
+    label.textContent = 'plan';
+    header.appendChild(label);
+    if (typeof tokens === 'number' && tokens > 0) {
+      const tok = document.createElement('span');
+      tok.className = 'ch-plan-tokens';
+      tok.textContent = formatTokens(tokens);
+      header.appendChild(tok);
+    }
+    card.appendChild(header);
+
+    // The insight line — the story this turn set out to surface.
+    const insight = document.createElement('p');
+    insight.className = 'ch-plan-insight';
+    insight.textContent = plan.insight;
+    card.appendChild(insight);
+
+    // Only tool events (not the plan itself, reasoning, verify, etc.) can match.
+    const toolEvents = events.filter(
+      (ev) => ev.tool && ev.tool !== 'plan' && ev.tool !== 'reasoning'
+    );
+    // The run has ended once a terminal step is present — after that, an
+    // unmatched step reads as "not needed", not still-pending.
+    const runEnded = toolEvents.some(
+      (ev) => ev.tool === 'verify' || ev.tool === 'finish' || ev.tool === 'finish_explanation'
+    );
+
+    const list = document.createElement('ul');
+    list.className = 'ch-plan-steps';
+    const matchedEventIdx = new Set<number>();
+    (plan.steps || []).forEach((step: PlanStep) => {
+      let matched = false;
+      toolEvents.forEach((ev, idx) => {
+        if (matchStepToEvent(step, ev)) {
+          matched = true;
+          matchedEventIdx.add(idx);
+        }
+      });
+      const li = document.createElement('li');
+      const state = matched ? 'done' : runEnded ? 'skipped' : 'pending';
+      li.className = 'ch-plan-step ch-plan-step-' + state;
+      const box = document.createElement('span');
+      box.className = 'ch-plan-box';
+      // ✓ done · ○ pending · – not-needed. role/aria speaks the state in words.
+      box.textContent = matched ? '✓' : runEnded ? '–' : '○';
+      box.setAttribute('role', 'img');
+      box.setAttribute('aria-label', matched ? 'done' : runEnded ? 'not needed' : 'pending');
+      li.appendChild(box);
+      const what = document.createElement('span');
+      what.className = 'ch-plan-what';
+      what.textContent = step.what;
+      li.appendChild(what);
+      if (step.tool_hint) {
+        const hint = document.createElement('span');
+        hint.className = 'ch-plan-hint';
+        hint.textContent = step.tool_hint;
+        li.appendChild(hint);
+      }
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+
+    // Off-plan: a data tool ran that matched no step. Surface it ONCE, muted —
+    // an honest "the model deviated" note, never a fake check on the checklist.
+    const offPlan = toolEvents.some(
+      (ev, idx) => !matchedEventIdx.has(idx) && ev.tool && PLAN_OFF_PLAN_TOOLS.has(ev.tool)
+    );
+    if (offPlan) {
+      const off = document.createElement('div');
+      off.className = 'ch-plan-off';
+      off.textContent = 'off-plan: ran a step the plan did not call for';
+      card.appendChild(off);
+    }
+    return card;
+  }
+
   // The could-not-verify receipt: a compact, honest verdict block for a verify
   // step that ran but did NOT confirm the answer. Shows the verdict, the
   // verifier's self-confidence, and the issue count, then the concrete doubts
@@ -1435,6 +1534,15 @@ const PRESETS = [
         rrow.className = 'ch-trace-thinking';
         rrow.textContent = e.detail || '';
         tb.traceEl.appendChild(rrow);
+        return;
+      }
+
+      // The insight brief (backlog #10) renders as a plan card at the TOP of the
+      // trace — the insight line in Newsreader italic, the steps as a mono
+      // checklist that checks off against later tool events. Not a tool row: no
+      // dot/glow/duration column implying one.
+      if (e.tool === 'plan' && e.plan) {
+        tb.traceEl.appendChild(buildPlanCard(e.plan, events, e.tokens));
         return;
       }
 
@@ -4070,6 +4178,99 @@ const PRESETS = [
     line-height: 1.6;
   }
   :global(.ch-verify-issue-list li) { margin: 0 0 2px; }
+
+  /* ── Plan card (backlog #10) ─────────────────────────────────────────────
+     The turn's committed insight brief, at the top of the trace. Same dark
+     elevated ground + amber left-rule as the search receipt (amber is the
+     receipt system's established emphasis colour, so the plan borrows it here
+     for the same "this is the machinery showing its work" cue). The insight is
+     Newsreader italic — human, a claim; the checklist is mono — the machinery. */
+  :global(.ch-plan) {
+    margin: 2px 0 8px;
+    padding: 9px 11px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-left: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  :global(.ch-plan-header) {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  :global(.ch-plan-label) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--signal);
+  }
+  :global(.ch-plan-tokens) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--ch-meta);
+  }
+  :global(.ch-plan-insight) {
+    margin: 0;
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: var(--text-label);
+    line-height: 1.35;
+    color: var(--fg);
+  }
+  :global(.ch-plan-steps) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  :global(.ch-plan-step) {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--ch-meta);
+    line-height: 1.4;
+  }
+  :global(.ch-plan-box) {
+    flex-shrink: 0;
+    width: 1em;
+    text-align: center;
+    color: var(--fg-muted);
+  }
+  :global(.ch-plan-step-done .ch-plan-box) { color: var(--signal); }
+  :global(.ch-plan-step-done .ch-plan-what) { color: var(--fg); }
+  /* Not-needed: a neutral strike — never a check, never implying it was done. */
+  :global(.ch-plan-step-skipped .ch-plan-what) {
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+    color: var(--fg-faint);
+    opacity: 0.85;
+  }
+  :global(.ch-plan-hint) {
+    font-size: var(--text-tag);
+    color: var(--ch-meta);
+    opacity: 0.7;
+    padding: 0 5px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm);
+  }
+  :global(.ch-plan-off) {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    font-style: italic;
+    color: var(--ch-meta);
+    padding-top: 2px;
+    border-top: 1px dashed var(--fg-faint);
+  }
 
   /* A write_file/read_file trace row inline-expands its own file content —
      no separate "workspace" list duplicating the same file elsewhere on the
