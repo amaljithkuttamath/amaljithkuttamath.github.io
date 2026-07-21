@@ -29,6 +29,7 @@ import {
   citationHumanUrl,
   citationsToCsvComments,
   INDICATORS,
+  ApiRejection,
   resolveSources,
   schemasForSources,
   subAgentSchemasFor,
@@ -39,7 +40,7 @@ import {
   type SearchReceipt,
   type Citation,
 } from './tools';
-import { resolveCountryList, formatResolutions } from './countries';
+import { resolveCountryList, formatResolutions, resolveCountry } from './countries';
 
 const MAX_TOOL_CALLS = 12;
 
@@ -144,6 +145,34 @@ export interface TraceEvent {
   // Set true on a write_file step whose content is model-derived (produced via
   // llm(), not fetched). Drives the subtle "model-derived" provenance label.
   derived?: boolean;
+  // Set only on the synthetic 'plan' event (backlog #10): the parsed insight
+  // brief for a gated planning turn. Renders as a plan card at the TOP of the
+  // turn's trace — the insight line + a mono step checklist that the UI checks
+  // off against later tool events (matchStepToEvent). Present only when a plan
+  // was gated in AND the model returned a well-formed brief; a malformed brief
+  // yields no 'plan' event at all (never a faked one). UI-only.
+  plan?: InsightBrief;
+}
+
+// ── Insight-brief planning (backlog #10) ──────────────────────────────────
+// One step of a plan: what to do, and an optional hint of which tool family it
+// maps to (used by matchStepToEvent to check the step off as execution runs).
+export interface PlanStep {
+  what: string;
+  tool_hint?: 'find_series' | 'fetch_series' | 'execute_js' | 'delegate_source';
+}
+
+// The structured insight brief a gated planning turn commits to BEFORE the tool
+// loop runs. `insight` is the specific story/claim to investigate (not a
+// restatement of the question); the executor is handed it as a system-side note
+// and the verifier judges the answer against it. Parsed defensively from the
+// planner's raw text (parsePlanBrief); a malformed brief becomes `null` and the
+// run proceeds exactly as it would with no plan.
+export interface InsightBrief {
+  insight: string;
+  steps: PlanStep[];
+  chart_intent?: string;
+  sources_expected?: string[];
 }
 
 export interface AgentCallbacks {
@@ -281,6 +310,218 @@ Your tools: find_series (searches ${src.label} only), fetch_series (fetch a ${sr
 Do the minimum needed to answer the sub-question: find the series, fetch it, optionally compute, then call return_findings with a SHORT distilled summary — a few sentences naming the key numbers and what they show. Your fetched rows are automatically merged back to the main agent WITH their citations, so never paste raw rows into the summary. Budget: ${MAX_SUBAGENT_CALLS} tool calls. Call tools; do not narrate a plan in prose.`;
 }
 
+// ── Plan gating (pure, exported for tests) ────────────────────────────────
+// A cheap heuristic deciding whether a question earns ONE extra planning turn
+// (backlog #10). Deliberately CONSERVATIVE: when unsure it returns false, so a
+// simple lookup never pays for a plan it doesn't need (the model does fine
+// without one). It fires only on questions whose SHAPE is genuinely multi-step:
+// multi-entity comparisons, trend/causality questions over several series, work
+// that plainly spans more than one active source, or long/conjunctive prompts.
+// An explicit "plan first" / "show your plan" always forces it.
+
+// Short words that collide with ISO2 country codes ("US", "IN", "NO", "IS") or
+// are otherwise noise — excluded from single-token country detection so a
+// stopword can never be miscounted as a country mention.
+const COUNTRY_NOISE = new Set([
+  'us', 'in', 'is', 'it', 'at', 'be', 'so', 'or', 'no', 'of', 'do', 'am', 'by',
+  'as', 'an', 'on', 'to', 'we', 'the', 'and', 'a', 'i', 'me', 'my', 'id', 'im',
+]);
+
+// Count DISTINCT country/region mentions in a question, reusing the countries.ts
+// resolver but guarding against its short-code noise: single tokens must be an
+// explicit 3-letter ISO3 (all-caps in the original) or be at least 4 letters and
+// not a stopword; 2–3 word spans are resolved greedily so "United States" counts
+// once (never also as "states"). Exported for the heuristic's unit table.
+export function countCountryMentions(question: string): number {
+  const words = String(question ?? '')
+    .split(/\s+/)
+    .map((w) => w.replace(/[^A-Za-z]/g, ''))
+    .filter(Boolean);
+  const codes = new Set<string>();
+  let i = 0;
+  while (i < words.length) {
+    let advanced = false;
+    for (let n = Math.min(3, words.length - i); n >= 1; n--) {
+      const span = words.slice(i, i + n);
+      if (n === 1) {
+        const w = span[0];
+        const isExplicitIso3 = /^[A-Z]{3}$/.test(w); // e.g. "USA", "CHN", "GBR"
+        if (!isExplicitIso3 && w.length < 4) continue;
+        if (COUNTRY_NOISE.has(w.toLowerCase())) continue;
+      }
+      const r = resolveCountry(span.join(' '));
+      // Single-token FUZZY matches are the heuristic's noise source (a common
+      // word fuzzily hitting a country name/prefix), so reject them here — a
+      // real country mention resolves via exact code, ISO2, exact name, or a
+      // curated alias, all of which are kept. Multi-word spans may still fuzzy.
+      if (r && !(n === 1 && r.matched === 'fuzzy')) {
+        codes.add(r.code);
+        i += n;
+        advanced = true;
+        break;
+      }
+    }
+    if (!advanced) i += 1;
+  }
+  return codes.size;
+}
+
+// Distinct indicator-ish nouns in a question — a rough proxy for "how many data
+// series this touches". A curated, lowercase-substring list (order-independent),
+// intentionally small: it only needs to tell "one series" from "several".
+const SERIES_NOUNS = [
+  'gdp', 'inflation', 'population', 'mortality', 'life expectancy', 'unemployment',
+  'poverty', 'inequality', 'emission', 'co2', 'carbon', 'literacy', 'fertility',
+  'income', 'temperature', 'debt', 'trade', 'export', 'import', 'energy',
+  'electricity', 'hiv', 'tuberculosis', 'malaria', 'vaccination', 'immunization',
+  'immunisation', 'birth rate', 'death rate', 'gni', 'per capita', 'wage',
+  'productivity', 'urbanization', 'urbanisation', 'internet', 'renewable',
+  'gdp per capita',
+];
+function countSeriesNouns(q: string): number {
+  let n = 0;
+  for (const noun of SERIES_NOUNS) if (q.includes(noun)) n++;
+  return n;
+}
+
+export function needsPlan(question: string, activeSourceCount: number = 1): boolean {
+  const q = String(question ?? '').toLowerCase();
+  if (!q.trim()) return false;
+
+  // 0. Explicit user intent always wins (over-rides the conservative default).
+  if (/\b(plan first|show (?:me )?your plan|make a plan|plan it out|lay out (?:a|your) plan)\b/.test(q)) {
+    return true;
+  }
+
+  const countries = countCountryMentions(question);
+  const seriesNouns = countSeriesNouns(q);
+
+  // 1. Multi-entity comparison: an explicit comparative frame over ≥2 entities.
+  const comparative =
+    /\b(compare|comparison|compared to|versus|vs\.?|relative to|difference between|which countr(?:y|ies)|rank(?:ing)?|top \d+|side by side|against each other|better than|worse than)\b/.test(q);
+  if (comparative && (countries >= 2 || seriesNouns >= 2)) return true;
+  // Many named countries almost always means a cross-entity, multi-step answer.
+  if (countries >= 3) return true;
+
+  // 1b. A ranking frame ("rank / top N / which countries / highest") over a
+  //     data series is inherently multi-entity (fetch many, then order them).
+  const ranking =
+    /\b(rank|ranking|top \d+|bottom \d+|which countr(?:y|ies)|highest|lowest|fastest|slowest)\b/.test(q);
+  if (ranking && seriesNouns >= 1) return true;
+
+  // 2. Trend / causality shapes with more than one thing in play.
+  const causal =
+    /\b(why|how has|how have|how did|what caused|what drove|driven by|because of|relationship between|linked to|tied to|impact of|effect of|contribut(?:e|ion) to)\b/.test(q) ||
+    /\bsince \d{4}\b/.test(q) ||
+    /correlat/.test(q);
+  if (causal && (seriesNouns >= 2 || countries >= 2)) return true;
+
+  // 3. Work that plainly spans more than one active source.
+  if (activeSourceCount > 1 && (countries >= 2 || seriesNouns >= 2 || comparative)) return true;
+
+  // 4. Length / conjunction complexity: a long prompt strung together with
+  //    several conjunctions is doing more than one thing.
+  const conjunctions = (q.match(/\b(and|then|also|as well as|along with|plus|followed by)\b/g) || []).length;
+  const wordCount = q.split(/\s+/).filter(Boolean).length;
+  if (wordCount >= 26 && conjunctions >= 2) return true;
+
+  return false;
+}
+
+// ── Plan brief parsing + step check-off (pure, exported for tests) ─────────
+// Map a tool name (or a step's tool_hint) to its coarse family, so a step
+// checks off against any member of that family (a fetch step matches the
+// router or any legacy per-source fetch; a compute step matches growth_stats /
+// correlate / execute_js). Unknown tools pass through unchanged.
+function canonicalToolFamily(tool: string): string {
+  const t = String(tool ?? '').trim();
+  if (t === 'fetch_series' || t === 'fetch_worldbank' || t === 'fetch_worldbank_all' || t === 'fetch_owid' || t === 'fetch_imf') {
+    return 'fetch_series';
+  }
+  if (t === 'execute_js' || t === 'growth_stats' || t === 'correlate') return 'execute_js';
+  return t;
+}
+
+// Significant keyword tokens (lowercase, ≥3 chars, not a stopword) for overlap
+// matching. Splits on non-alphanumerics so "NY.GDP.MKTP.CD" → gdp, mktp, cd.
+const MATCH_STOP = new Set([
+  'the', 'and', 'for', 'with', 'from', 'into', 'per', 'via', 'all', 'get', 'its',
+  'over', 'each', 'then', 'that', 'this', 'data', 'series', 'chart', 'value',
+  'values', 'find', 'fetch', 'call', 'use', 'show', 'year', 'years', 'countries',
+  'country', 'compute', 'using', 'their',
+]);
+function keywordTokens(s: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of String(s ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (raw.length >= 3 && !MATCH_STOP.has(raw)) out.add(raw);
+  }
+  return out;
+}
+
+// Decide whether a trace event is plausibly the execution of a plan step. A
+// cheap, deliberately-imperfect progress cue (NOT a contract): a tool_hint that
+// matches the event's tool family checks the step off outright; otherwise a
+// single shared distinctive keyword between the step text and the event's
+// arg/detail is enough. Non-executor events (reasoning / verify / plan / the
+// fallback note) never match anything. Pure + exported for the matcher table.
+export function matchStepToEvent(
+  step: PlanStep,
+  ev: { tool?: string; argSummary?: string; detail?: string }
+): boolean {
+  if (!ev || !ev.tool) return false;
+  const tool = ev.tool;
+  if (tool === 'reasoning' || tool === 'verify' || tool === 'plan' || tool === 'fallback' || tool === 'llm') {
+    return false;
+  }
+  const evFamily = canonicalToolFamily(tool);
+  if (step.tool_hint && canonicalToolFamily(step.tool_hint) === evFamily) return true;
+  const stepToks = keywordTokens(step.what);
+  if (!stepToks.size) return false;
+  const evToks = keywordTokens((ev.argSummary ?? '') + ' ' + (ev.detail ?? ''));
+  for (const t of evToks) if (stepToks.has(t)) return true;
+  return false;
+}
+
+// Parse the planner's raw text into an InsightBrief, DEFENSIVELY (same
+// discipline as parseVerifierVerdict): a well-formed brief needs a non-empty
+// `insight` string AND at least one step with a non-empty `what`. Anything
+// missing those → null, meaning "no plan"; the run then proceeds exactly as it
+// would today. Never throws, never fabricates a step, never invents an insight.
+export function parsePlanBrief(raw: string): InsightBrief | null {
+  const obj = extractJsonObject(String(raw ?? ''));
+  if (!obj) return null;
+  const insight = typeof obj.insight === 'string' ? obj.insight.trim() : '';
+  if (!insight) return null;
+  const rawSteps = Array.isArray(obj.steps) ? obj.steps : [];
+  const steps: PlanStep[] = [];
+  for (const s of rawSteps) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) continue;
+    const what = typeof (s as Record<string, unknown>).what === 'string'
+      ? String((s as Record<string, unknown>).what).trim()
+      : '';
+    if (!what) continue;
+    const hint = (s as Record<string, unknown>).tool_hint;
+    const step: PlanStep = { what };
+    if (hint === 'find_series' || hint === 'fetch_series' || hint === 'execute_js' || hint === 'delegate_source') {
+      step.tool_hint = hint;
+    }
+    steps.push(step);
+    if (steps.length >= 8) break; // cap the card; a plan longer than this is noise
+  }
+  if (!steps.length) return null;
+  const brief: InsightBrief = { insight, steps };
+  if (typeof obj.chart_intent === 'string' && obj.chart_intent.trim()) {
+    brief.chart_intent = obj.chart_intent.trim();
+  }
+  if (Array.isArray(obj.sources_expected)) {
+    const src = (obj.sources_expected as unknown[])
+      .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+      .map((x) => x.trim());
+    if (src.length) brief.sources_expected = src;
+  }
+  return brief;
+}
+
 // A compact, model-friendly summary of a data fetch.
 function summarizeRows(rows: DataRow[]): string {
   const byCountry: Record<string, DataRow[]> = {};
@@ -317,6 +558,55 @@ class AbortedError extends Error {
     super('aborted by user');
     this.name = 'AbortedError';
   }
+}
+
+// Thrown inside routeFetch when a data API STRUCTURALLY rejected a fetch (a bad
+// indicator/slug/code — see ApiRejection). It carries the model-facing steer
+// (already prefixed "ERROR:") and a short receipt detail. dispatch's catch
+// renders it as an error receipt and returns the steer as the tool result, so
+// the model recovers (find_series → corrected fetch) instead of the failure
+// surfacing raw. NEVER a run-killer, and never used for a network/CORS failure
+// (those keep their existing graceful-fallback wording).
+class FetchSteer extends Error {
+  readonly detail: string;
+  constructor(steer: string, detail: string) {
+    super(steer);
+    this.name = 'FetchSteer';
+    this.detail = detail;
+  }
+}
+
+// Build the model-facing steer for a structured API rejection. `attempt` is how
+// many times this EXACT fetch (id + countries + range) has now been rejected
+// this session; on the 2nd+ rejection the steer tells the model in no uncertain
+// terms to STOP retrying the id (loop safety — a stubborn model must not burn
+// the tool-call budget on one bad id). Pure + exported for the steer unit table.
+export function buildRejectionSteer(
+  source: 'worldbank' | 'owid' | 'imf' | 'who',
+  id: string,
+  attempt: number
+): string {
+  const label =
+    source === 'worldbank' ? 'World Bank indicator'
+      : source === 'owid' ? 'OWID slug'
+      : source === 'imf' ? 'IMF code'
+      : 'WHO IndicatorCode';
+  const sourceName =
+    source === 'worldbank' ? 'World Bank'
+      : source === 'owid' ? 'Our World in Data'
+      : source === 'imf' ? 'IMF'
+      : 'WHO';
+  if (attempt >= 2) {
+    return (
+      `ERROR: ${sourceName} rejected ${label} "${id}" AGAIN — you have now tried this exact id ${attempt} times ` +
+      'and it does not exist. STOP retrying it: call find_series for a DIFFERENT, valid id, or answer with the ' +
+      'data you already have.'
+    );
+  }
+  return (
+    `ERROR: ${sourceName} rejected ${label} "${id}" — it may not exist. Do NOT retry the same id; ` +
+    'call find_series to get a valid id, then fetch_series with it.'
+  );
 }
 
 export interface SessionOptions {
@@ -369,6 +659,20 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
   // populates the cache the main loop can then hit. Only successful fetches are
   // cached.
   const fetchCache = new Map<string, { rows: DataRow[]; result: string; detail: string }>();
+
+  // Ids that came back from a find_series hit this session (namespaced, lower-
+  // cased). The indicator-id guard trusts these alongside the curated catalogs,
+  // so a model that legitimately searched then fetched is never second-guessed.
+  // Session-scoped and shared by the main loop AND sub-agents (both search
+  // through the one dispatch), like fetchCache.
+  const seenSeriesIds = new Set<string>();
+
+  // Loop safety: how many times a given fetch key (id + resolved countries +
+  // range) has been STRUCTURALLY rejected by its API this session. A second
+  // rejection of the identical fetch earns a harder "stop retrying this id"
+  // steer (buildRejectionSteer), so a stubborn model can't spend the whole
+  // tool-call budget re-fetching one bad id.
+  const failedFetches = new Map<string, number>();
 
   let turnCount = 0;
 
@@ -605,15 +909,73 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         );
       }
 
+      // ── Indicator-id guard (heuristic, not a wall) ──────────────────────
+      // Trust an id that is in a curated catalog OR came back from a find_series
+      // hit this session (seenSeriesIds). Otherwise:
+      //  - World Bank: its live id space is far larger than our local
+      //    indicators.json, so an unknown WB id PROCEEDS — but the receipt is
+      //    marked "unverified id", and we stand ready to translate an API
+      //    rejection into a find_series steer (see the ApiRejection catch below).
+      //  - Curated-catalog sources (OWID/IMF/WHO): the id space here is CLOSED
+      //    (a curated slug/code round-trips; anything else 404s), so an id that
+      //    is neither in the catalog nor a session hit is almost certainly a
+      //    hallucinated slug/code — refuse with a find_series steer rather than
+      //    spend a fetch that will fail.
+      const idLc = id.trim().toLowerCase();
+      const idSeen = seenSeriesIds.has(idLc);
+      let unverifiedWbId = false;
+      if (source === 'worldbank') {
+        const known = INDICATORS.some((i) => i.id.toLowerCase() === idLc);
+        unverifiedWbId = !known && !idSeen;
+      } else {
+        const catalogId =
+          source === 'owid' ? 'owid:' + id.replace(/^owid:/i, '')
+            : source === 'imf' ? 'imf:' + id.replace(/^imf:/i, '').toUpperCase()
+            : 'who:' + id.replace(/^who:/i, '');
+        if (datasetName(catalogId) === undefined && !idSeen) {
+          ev.detail = `unknown ${source} id`;
+          const label = source === 'owid' ? 'OWID slug' : source === 'imf' ? 'IMF code' : 'WHO IndicatorCode';
+          return (
+            `ERROR: unknown ${label} "${id}" — it is not in the ${source.toUpperCase()} catalog ` +
+            'or any recent find_series result. Call find_series to get a valid id, then fetch_series with it.'
+          );
+        }
+      }
+
+      // ── Country policy: DROP unresolvable tokens; never send junk to the API ─
       // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
-      // ISO3/aggregate codes ONCE, here at the choke point. Unresolved names
-      // pass through unchanged; the receipt surfaces any rewrites.
+      // ISO3/aggregate codes ONCE, here at the choke point. A token that cannot
+      // be resolved is DROPPED (was: passed through unchanged, which the World
+      // Bank then rejected with "provided parameter value is not valid"). We
+      // fetch only what resolved and disclose the drops in both the tool result
+      // and the receipt. If NOTHING resolves (yet countries WERE requested), we
+      // return a tool error WITHOUT touching the API — junk never leaves here.
       const hasCountries = Array.isArray(rawCountries) && rawCountries.length > 0;
       const resolved = hasCountries ? resolveCountryList(rawCountries!) : undefined;
       const codes = resolved?.codes ?? [];
       const changes = resolved?.changes ?? [];
-      const resNote = changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '';
-      const resDetail = changes.length ? `${formatResolutions(changes)} · ` : '';
+      const dropped = resolved?.dropped ?? [];
+
+      if (hasCountries && codes.length === 0) {
+        ev.detail = 'no countries resolved';
+        const names = dropped.map((d) => `"${d.from}"`).join(', ');
+        const sugg = [...new Set(dropped.flatMap((d) => d.suggestions))].slice(0, 5);
+        return (
+          `ERROR: none of the requested countries could be resolved (${names}) — nothing was fetched. ` +
+          (sugg.length ? `Did you mean: ${sugg.join(', ')}? ` : '') +
+          'Use ISO3 codes (e.g. USA, CHN), common country names, or one aggregate like WLD, then fetch_series again.'
+        );
+      }
+
+      const dropNote = dropped.length
+        ? `Could not resolve ${dropped.map((d) => `"${d.from}"`).join(', ')} — ` +
+          `fetched only the resolved ${codes.length === 1 ? 'country' : 'countries'}: ${codes.join(', ')}.\n`
+        : '';
+      const dropDetail = dropped.length ? `dropped ${dropped.map((d) => d.from).join(', ')} · ` : '';
+      const idDetail = unverifiedWbId ? 'unverified id · ' : '';
+
+      const resNote = (changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '') + dropNote;
+      const resDetail = idDetail + dropDetail + (changes.length ? `${formatResolutions(changes)} · ` : '');
 
       // Cache lookup on the normalized (id + resolved countries + range) key.
       const key = fetchCacheKey(id, codes, ys, ye);
@@ -631,6 +993,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let nid = id; // the normalized indicator id used as the citation key part
       let requestUrl = ''; // the exact API URL that was hit
       let sourceUpdated: string | undefined; // source data vintage, when present
+      try {
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
@@ -690,6 +1053,25 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           detail = resDetail + `${rows.length} rows · WHO GHO`;
           break;
         }
+      }
+      } catch (err: any) {
+        // A user-stop unwinds untouched. A STRUCTURED rejection (ApiRejection:
+        // the API answered "no" to this id/parameter) becomes a model-recoverable
+        // steer, with loop-safety counting identical rejected fetches. Anything
+        // else (a network/CORS failure, or the WB "no data returned" plain Error)
+        // re-throws to dispatch's generic catch, keeping its graceful-fallback
+        // wording — only structured rejections are turned into steers.
+        if (err instanceof AbortedError || signal?.aborted) throw err;
+        if (err instanceof ApiRejection) {
+          const attempt = (failedFetches.get(key) ?? 0) + 1;
+          failedFetches.set(key, attempt);
+          throw new FetchSteer(
+            buildRejectionSteer(source, id, attempt),
+            (attempt >= 2 ? 'rejected again — stop retrying' : 'API rejected id') +
+              (unverifiedWbId ? ' (unverified id)' : '')
+          );
+        }
+        throw err;
       }
       state.rows = state.rows.concat(rows);
       // Cache only this successful result (and the rows it merged — the entry is
@@ -795,6 +1177,9 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // The model still receives only the SeriesHit[] JSON (plus a single
             // orientation line) — no context bloat.
             ev.receipt = receipt;
+            // Remember these ids so the indicator-id guard trusts a subsequent
+            // fetch of any of them (the model searched, then fetched a real hit).
+            for (const h of hits) seenSeriesIds.add(String(h.id).trim().toLowerCase());
             if (hits.length) {
               const top = receipt.topMatch;
               const summary =
@@ -1047,6 +1432,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           updateTrace();
           throw new AbortedError();
         }
+        // A structured API rejection: render an error receipt and hand the model
+        // the specific find_series steer (already "ERROR:"-prefixed). Recoverable
+        // — the model's find_series → corrected fetch streams as normal receipts.
+        if (err instanceof FetchSteer) {
+          ev.status = 'error';
+          ev.detail = err.detail;
+          updateTrace();
+          return err.message;
+        }
         ev.status = 'error';
         ev.detail = err?.message ?? String(err);
         updateTrace();
@@ -1054,7 +1448,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       }
     }
 
-    async function agentPass(critique?: string): Promise<void> {
+    async function agentPass(critique?: string, plan?: InsightBrief | null): Promise<void> {
       // On a verifier-FAIL retry (critique set), the first pass already pushed
       // the turn addendum and the question onto the shared messages array, so
       // append only the critique. Re-pushing them would duplicate the question
@@ -1092,6 +1486,22 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               "(b) Needs data you don't have (new indicator, country, or years) → fetch just that, then continue the pipeline.\n" +
               '(c) Asks to explain or interpret → finish_explanation in prose, no chart.\n' +
               'Never repeat the previous chart or finding — every turn must add something new.',
+          });
+        }
+        // Prepend the insight brief (backlog #10) as a system-side note so the
+        // executor commits to the story it set out to surface — but deviation is
+        // explicitly sanctioned, so the plan never hardens into a false contract.
+        // First pass only: on a retry the note is already in the shared history.
+        if (plan) {
+          const stepLines = plan.steps
+            .map((s, i) => `${i + 1}. ${s.what}${s.tool_hint ? ` [${s.tool_hint}]` : ''}`)
+            .join('\n');
+          messages.push({
+            role: 'system',
+            content:
+              `Your plan for this question:\nInsight to surface: ${plan.insight}\nSteps:\n${stepLines}` +
+              (plan.chart_intent ? `\nChart intent: ${plan.chart_intent}` : '') +
+              '\n\nExecute against this. Deviate if the data demands it, and say so when you do.',
           });
         }
         messages.push({ role: 'user', content: question });
@@ -1185,12 +1595,66 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       }
     }
 
-    async function runVerify(critique?: string): Promise<VerificationVerdict> {
+    // The gated planning turn (backlog #10): ONE extra complete() call, before
+    // the tool loop, asking for a structured insight brief. Abort-aware — a stop
+    // mid-plan unwinds to the aborted output (no plan card, which is fine). Every
+    // other failure (provider error, malformed/unparseable brief) degrades to
+    // `null`: the run proceeds EXACTLY as it would with no plan, and NO plan
+    // receipt is pushed (we never render a faked or empty plan). Only a
+    // well-formed brief pushes the 'plan' event — first in the trace, so the
+    // card renders at the top of the turn.
+    async function runPlan(q: string): Promise<InsightBrief | null> {
+      throwIfAborted();
+      const sourceList = activeSources.map((s) => s.label).join(', ');
+      const planMessages: ChatMessage[] = [
+        {
+          role: 'system',
+          content:
+            'You are Chitti\'s planner. BEFORE any data work, commit to the single most specific, ' +
+            'surfaceable INSIGHT the question is really after — the concrete story or claim to investigate, ' +
+            'NOT a restatement of the question. Then list the few steps to test it.\n\n' +
+            'Respond with ONLY a JSON object, no prose, no code fences:\n' +
+            '{"insight": "...", "steps": [{"what": "...", "tool_hint": "find_series|fetch_series|execute_js|delegate_source"}], "chart_intent": "...", "sources_expected": ["..."]}\n\n' +
+            '- insight: one sharp sentence naming the specific thing worth showing (an outlier, a divergence, a turning point) — a hypothesis, not the question reworded.\n' +
+            '- steps: 2–5 concrete actions; tool_hint is optional and only from that set.\n' +
+            '- chart_intent: the chart that would make the insight legible (optional).\n' +
+            '- sources_expected: which of the active databases you expect to use (optional).',
+        },
+        {
+          role: 'user',
+          content: `Question: ${q}\n\nActive databases: ${sourceList}`,
+        },
+      ];
+      let res;
+      try {
+        res = await complete(cfg, planMessages, [], completeDeps);
+      } catch (err) {
+        // A user-stop unwinds to the aborted output; any other provider error
+        // just means "no plan" — proceed without one.
+        if (err instanceof AbortedError || signal?.aborted) throw new AbortedError();
+        return null;
+      }
+      totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+      const brief = parsePlanBrief(res.text);
+      if (!brief) return null; // malformed → no plan, no receipt, run unchanged
+      pushTrace({
+        tool: 'plan',
+        argSummary: '',
+        status: 'ok',
+        tokens: res.usage.input + res.usage.output,
+        plan: brief,
+      });
+      return brief;
+    }
+
+    async function runVerify(critique?: string, insight?: string): Promise<VerificationVerdict> {
       const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
       // Hand the verifier the structured ledger entries (truthful URLs +
       // vintages) rather than reconstructed citation strings — light touch, the
-      // verdict logic is unchanged (backlog #11 point 5).
-      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c), completeDeps);
+      // verdict logic is unchanged (backlog #11 point 5). When a plan was made,
+      // the intended insight rides along so the verdict judges the answer
+      // against what it SET OUT to show, not only the raw question (backlog #10).
+      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c), completeDeps, insight);
       // A genuine pass is the only 'ok' receipt; unverified AND unavailable both
       // read as error receipts (existing torn-receipt styling). The stamp is
       // driven off `pass` alone, so only a real pass can be stamped.
@@ -1245,7 +1709,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
     try {
       cb.onStatus('Planning…', 'loading');
-      await agentPass();
+      // Gated plan mode (backlog #10): a cheap heuristic (or explicit user
+      // phrasing) decides if this question earns ONE extra planning turn before
+      // the tool loop. A simple lookup skips it entirely — zero extra cost. The
+      // brief, when made, is prepended to the executor's context and its insight
+      // is later handed to the verifier. A malformed brief → null → the run is
+      // identical to today. Only run on the FIRST turn's fresh question shape;
+      // planning is a per-question commitment, not re-litigated on the retry.
+      const plan = needsPlan(question, activeSources.length) ? await runPlan(question) : null;
+      await agentPass(undefined, plan);
 
       // A stop between the pipeline and verification must not earn a verify call
       // (or a stamp): check before running the verifier.
@@ -1253,7 +1725,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
       if (turnKind === 'chart') {
         cb.onStatus('Verifying…', 'loading');
-        verification = await runVerify();
+        verification = await runVerify(undefined, plan?.insight);
         vfs.write('verifier_report.md', verification.report);
 
         // Retry ONLY on a genuine 'unverified' verdict — the verifier ran and
@@ -1266,7 +1738,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           cb.onStatus('Verifier flagged gaps — retrying once…', 'loading');
           await agentPass(verification.report);
           throwIfAborted();
-          const second = await runVerify(verification.report);
+          const second = await runVerify(verification.report, plan?.insight);
           vfs.write('verifier_report.md', verification.report + '\n\n---\nRetry verdict:\n' + second.report);
           verification = second; // the retry's verdict is the turn's final one
         }
@@ -1428,7 +1900,8 @@ async function verify(
   finding: string,
   citations: Citation[],
   addCost: (c: number) => void,
-  deps: CompleteDeps = {}
+  deps: CompleteDeps = {},
+  insight?: string
 ): Promise<VerificationVerdict> {
   const specText = spec ? JSON.stringify({ type: spec.type, title: spec.title, series: spec.series.map((s) => ({ name: s.name, points: s.data.length })) }) : 'NO CHART RENDERED';
   // The ledger's own entries — truthful source, indicator, URL and vintage,
@@ -1445,18 +1918,30 @@ async function verify(
       content:
         'You are a strict verifier. Given a user question, a rendered chart spec, a one-line finding, and the ' +
         'citation ledger, judge whether the chart and finding actually answer the question and are supported by ' +
-        'the cited sources.\n\n' +
+        'the cited sources.' +
+        (insight
+          ? ' The analysis committed up front to a specific intended insight; also judge whether the answer ' +
+            'actually SHOWS what it set out to show — a chart/finding that drifts from the intended insight is a real problem.'
+          : '') +
+        '\n\n' +
         'Respond with ONLY a JSON object, no prose, no code fences:\n' +
         '{"pass": true|false, "confidence": "high"|"medium"|"low", "issues": ["..."]}\n\n' +
         '- pass=false ONLY for real problems: wrong indicator, no data, chart type mismatched to the question, a ' +
-        'number in the finding not supported by the sources, or a claim with no citation.\n' +
+        'number in the finding not supported by the sources, a claim with no citation' +
+        (insight ? ', or an answer that does not deliver the intended insight' : '') +
+        '.\n' +
         '- confidence: how sure you are of THIS verdict.\n' +
         '- issues: one short concrete sentence per real problem, naming WHAT is doubted (claim vs source mismatch, ' +
-        'missing citation, number not found in the data). Use an empty array when pass=true.',
+        'missing citation, number not found in the data' +
+        (insight ? ', insight not delivered' : '') +
+        '). Use an empty array when pass=true.',
     },
     {
       role: 'user',
-      content: `Question: ${question}\n\nChart spec: ${specText}\n\nFinding: ${finding || '(none)'}\n\nSources (citation ledger):\n${citeText}`,
+      content:
+        `Question: ${question}\n\n` +
+        (insight ? `Intended insight: ${insight}\n\n` : '') +
+        `Chart spec: ${specText}\n\nFinding: ${finding || '(none)'}\n\nSources (citation ledger):\n${citeText}`,
     },
   ];
   try {

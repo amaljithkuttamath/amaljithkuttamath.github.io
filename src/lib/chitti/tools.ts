@@ -289,6 +289,58 @@ export function listCountries(filter?: CountryFilter): Country[] {
 // model has no other way to know its country_ids list was cut, and would
 // otherwise report findings over an incomplete country set with no signal
 // anything was missing.
+// A STRUCTURED rejection from a data API: the request reached the API and it
+// refused the given indicator/slug/code (a 200-with-error-body from the World
+// Bank; a 404 from OWID/IMF/WHO). This is DISTINCT from a network/CORS failure
+// (a plain Error), which never got an answer. The router (agent.ts routeFetch)
+// translates an ApiRejection into a specific, model-recoverable steer ("call
+// find_series"); a plain Error keeps its existing graceful-fallback wording, so
+// genuine network failures are left alone and only structured rejections steer.
+export class ApiRejection extends Error {
+  readonly source: 'worldbank' | 'owid' | 'imf' | 'who';
+  readonly indicatorId: string;
+  readonly status?: number;
+  // True when the id/parameter itself is what the API rejected (the World Bank
+  // "provided parameter value is not valid" shape; an OWID/IMF/WHO not-found).
+  readonly invalidParameter: boolean;
+  constructor(
+    source: ApiRejection['source'],
+    indicatorId: string,
+    opts: { message?: string; status?: number; invalidParameter?: boolean } = {}
+  ) {
+    super(opts.message || `${source} rejected "${indicatorId}"`);
+    this.name = 'ApiRejection';
+    this.source = source;
+    this.indicatorId = indicatorId;
+    this.status = opts.status;
+    this.invalidParameter = opts.invalidParameter ?? true;
+  }
+}
+
+// Parse a World Bank JSON error body into a structured result, DEFENSIVELY. The
+// WB API returns HTTP 200 with a body shaped like
+//   [{ message: [{ id: "120", key: "Invalid value",
+//                  value: "The provided parameter value is not valid" }] }]
+// for a bad indicator id or country code. Returns { message, invalidParameter }
+// or null when the body is not a recognizable WB error envelope (e.g. a valid
+// indicator that merely returned no rows). Never throws. Exported for its unit
+// table (the reported "provided parameter value is not valid" shape included).
+export function parseWorldBankError(
+  body: unknown
+): { message: string; invalidParameter: boolean } | null {
+  if (!Array.isArray(body) || body.length === 0) return null;
+  const head = body[0] as { message?: unknown };
+  const msgs = head?.message;
+  if (!Array.isArray(msgs) || msgs.length === 0) return null;
+  const first = (msgs[0] ?? {}) as { key?: unknown; value?: unknown };
+  const value = typeof first.value === 'string' ? first.value : '';
+  const key = typeof first.key === 'string' ? first.key : '';
+  if (!value && !key) return null;
+  const invalidParameter =
+    /provided parameter value is not valid/i.test(value) || /invalid value/i.test(key);
+  return { message: value || key, invalidParameter };
+}
+
 export interface FetchWorldbankResult {
   rows: DataRow[];
   // Original requested country count, only set when it exceeded the 60-per-
@@ -324,8 +376,19 @@ export async function fetchWorldbank(
   if (!resp.ok) throw new Error('World Bank API HTTP ' + resp.status);
   const data = await resp.json();
   if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1])) {
-    const msg = Array.isArray(data) && data[0]?.message?.[0]?.value;
-    throw new Error('World Bank API: ' + (msg || 'no data returned'));
+    // A World Bank error envelope (HTTP 200 + [{message:[…]}]) is a STRUCTURED
+    // rejection of the indicator/country parameter — surface it as an
+    // ApiRejection the router turns into a find_series steer. A shape that is
+    // NOT an error envelope (a valid indicator that simply returned no rows)
+    // stays a plain Error: empty data, not a rejection.
+    const wbErr = parseWorldBankError(data);
+    if (wbErr) {
+      throw new ApiRejection('worldbank', indicatorId, {
+        message: 'World Bank API: ' + wbErr.message,
+        invalidParameter: wbErr.invalidParameter,
+      });
+    }
+    throw new Error('World Bank API: no data returned');
   }
   // data[0] is the WB response header; it carries `lastupdated` — the series'
   // real data vintage. Capture it when present (string, e.g. "2024-12-16");
@@ -578,7 +641,13 @@ export async function fetchOwid(
       `OWID fetch failed (${err?.message ?? err}). If this is a CORS block, fetch a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );
   }
-  if (!resp.ok) throw new Error(`OWID API HTTP ${resp.status} for slug "${clean}" — the slug may be wrong; use search_datasets results verbatim.`);
+  // A 404 (or other non-OK) means the grapher has no such slug — a STRUCTURED
+  // rejection the router steers to find_series (not a network failure).
+  if (!resp.ok)
+    throw new ApiRejection('owid', clean, {
+      status: resp.status,
+      message: `OWID API HTTP ${resp.status} for slug "${clean}" — the slug may be wrong.`,
+    });
   const text = await resp.text();
   const lines = text.split(/\r?\n/).filter((l) => l.length);
   if (lines.length < 2) throw new Error('OWID: empty dataset');
@@ -635,7 +704,12 @@ export async function fetchImf(
       `IMF fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series (no forecasts, but similar historical macro data).`
     );
   }
-  if (!resp.ok) throw new Error(`IMF API HTTP ${resp.status} for code "${clean}"`);
+  // A non-OK from DataMapper means the code is unknown — a STRUCTURED rejection.
+  if (!resp.ok)
+    throw new ApiRejection('imf', clean, {
+      status: resp.status,
+      message: `IMF API HTTP ${resp.status} for code "${clean}".`,
+    });
   const data = await resp.json();
   const byCountry: Record<string, Record<string, number>> = data?.values?.[clean] ?? {};
   const nameOf = (iso3: string) => COUNTRIES.find((c) => c.id === iso3)?.name ?? iso3;
@@ -701,7 +775,12 @@ export async function fetchWho(
       `WHO GHO fetch failed (${err?.message ?? err}). If this is a CORS block, fall back to a World Bank series (a plain-code id) via fetch_series for this question instead.`
     );
   }
-  if (!resp.ok) throw new Error(`WHO GHO API HTTP ${resp.status} for indicator "${clean}" — the IndicatorCode may be wrong; use find_series results verbatim.`);
+  // A non-OK from GHO means the IndicatorCode is unknown — a STRUCTURED rejection.
+  if (!resp.ok)
+    throw new ApiRejection('who', clean, {
+      status: resp.status,
+      message: `WHO GHO API HTTP ${resp.status} for indicator "${clean}" — the IndicatorCode may be wrong.`,
+    });
   const data = await resp.json();
   const value: any[] = Array.isArray(data?.value) ? data.value : [];
   const nameOf = (iso3: string) => COUNTRIES.find((c) => c.id === iso3)?.name ?? iso3;

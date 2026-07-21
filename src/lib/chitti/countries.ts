@@ -250,6 +250,42 @@ export function resolveCountry(input: string): ResolvedCountry | null {
   return null;
 }
 
+// Nearest catalog display names for an input that would NOT resolve — a best-
+// effort "did you mean" for the drop disclosure. Deliberately loose (this is a
+// hint, not a resolution): a whole-word token match, a name-prefix match, or —
+// for inputs of 4+ chars — a substring / shared-prefix token match. Returns up
+// to 4 names, or [] when nothing is close (e.g. "Scandinavia" — no suggestion).
+export function suggestCountries(input: string): string[] {
+  const norm = normalize(input);
+  if (norm.length < 3) return [];
+  const hits: string[] = [];
+  const seen = new Set<string>();
+  const push = (c: RawCountry) => {
+    const n = displayName(c);
+    if (!seen.has(n)) {
+      seen.add(n);
+      hits.push(n);
+    }
+  };
+  // Pass 1: exact token / prefix / whole-name matches (highest confidence).
+  for (const c of RAW) {
+    const nn = normalize(c.name);
+    const toks = nn.split(' ');
+    if (nn === norm || toks.includes(norm) || nn.startsWith(norm + ' ')) push(c);
+  }
+  // Pass 2: looser substring / shared-token-prefix, only for 4+ char inputs.
+  if (hits.length < 4 && norm.length >= 4) {
+    for (const c of RAW) {
+      if (hits.length >= 4) break;
+      const nn = normalize(c.name);
+      const near = nn.includes(norm) ||
+        nn.split(' ').some((t) => t.length >= 4 && (t.startsWith(norm) || norm.startsWith(t)));
+      if (near) push(c);
+    }
+  }
+  return hits.slice(0, 4);
+}
+
 // A single resolution applied to a code that was passed to a fetch tool: what
 // the caller sent, and what it became. Only emitted when resolution actually
 // CHANGED the code (case-insensitively), so the receipt notes real work.
@@ -260,28 +296,44 @@ export interface CountryResolution {
   matched: MatchKind;
 }
 
+// A country token that could NOT be resolved, so the router DROPS it from the
+// request rather than sending junk to the data API. `suggestions` offers nearest
+// catalog names (possibly empty), for the disclosure / tool-error steer.
+export interface DroppedCountry {
+  from: string; // the raw input that could not be resolved, e.g. "Scandinavia"
+  suggestions: string[]; // nearest catalog display names, or [] when none close
+}
+
 // Resolve a list of loose country inputs (as the fetch tools receive them) to
-// the codes to actually query. Anything that cannot be resolved is passed
-// through UNCHANGED — resolution never blocks a query. `changes` lists only the
-// inputs whose code was rewritten, for the trace receipt.
+// the canonical codes to actually query. POLICY (see routeFetch): a token that
+// cannot be resolved is DROPPED (reported in `dropped`), NOT passed through to
+// the API — the World Bank rejects a junk code with "provided parameter value is
+// not valid", so junk must never leave the router. `codes` holds only the
+// resolved (canonical) codes; `changes` lists the inputs whose code was
+// rewritten, for the trace receipt. Blank/whitespace tokens are skipped
+// silently (neither resolved nor reported as a drop).
 export function resolveCountryList(inputs: string[]): {
   codes: string[];
   changes: CountryResolution[];
+  dropped: DroppedCountry[];
 } {
   const codes: string[] = [];
   const changes: CountryResolution[] = [];
+  const dropped: DroppedCountry[] = [];
   for (const input of inputs) {
     const raw = String(input ?? '').trim();
+    if (!raw) continue; // skip empty tokens entirely
     const r = resolveCountry(raw);
-    if (r && r.code.toUpperCase() !== raw.toUpperCase()) {
-      codes.push(r.code);
-      changes.push({ from: raw, code: r.code, name: r.name, matched: r.matched });
-    } else {
-      // Either unresolved (pass through as-is) or already the canonical code.
-      codes.push(raw);
+    if (!r) {
+      dropped.push({ from: raw, suggestions: suggestCountries(raw) });
+      continue;
     }
+    if (r.code.toUpperCase() !== raw.toUpperCase()) {
+      changes.push({ from: raw, code: r.code, name: r.name, matched: r.matched });
+    }
+    codes.push(r.code);
   }
-  return { codes, changes };
+  return { codes, changes, dropped };
 }
 
 // Render the `changes` from resolveCountryList as a compact receipt note, e.g.
