@@ -2947,3 +2947,141 @@ describe('execute_js row-set isolation', () => {
     expect(out.rows.map((r) => r.year)).toEqual([2020, 2021]);
   });
 });
+
+// ── Turn abort (the "stop" control) ────────────────────────────────────────
+// The user can stop a running turn. ask() threads the caller's AbortSignal to
+// every provider/data fetch and checks it at each tool-loop boundary. A stop
+// resolves ask() with an HONEST aborted output (aborted:true) — never a
+// rejection, never a provider error class. Partial rows/citations survive, no
+// verifier runs, and the session stays reusable for the next question.
+describe('turn abort (stop control)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    // A minimal valid World Bank response so a fetch step yields real rows.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 2, lastupdated: '2024-01-01' },
+          [
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 },
+            { country: { value: 'India' }, countryiso3code: 'IND', date: '2021', value: 110 },
+          ],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  const cb = () => ({ onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} });
+  const chartFinish = () =>
+    modelTurn([
+      tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] }, 'rc'),
+      tc('finish', { one_line_finding: 'A finding.' }, 'fin'),
+    ]);
+  const newSession = () =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, { sources: ['worldbank'] });
+
+  it('an already-aborted signal → resolves aborted before any model call, no verifier', async () => {
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const out = await newSession().ask('q', cb(), ctrl.signal);
+    expect(out.aborted).toBe(true);
+    expect(out.verification).toBeNull(); // no VERIFIED stamp on a stopped turn
+    expect(out.confidence).toBe('low');
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it('abort while the first completion is in flight → aborted, not a provider error, no retry/verify', async () => {
+    const ctrl = new AbortController();
+    // The stop fires mid-request: the fetch rejects with a provider-style error,
+    // but the signal is already aborted — ask() must map this to aborted, NOT
+    // surface the provider error, and must NOT retry or verify.
+    mockComplete.mockImplementationOnce(async () => {
+      ctrl.abort();
+      throw new Error('the provider request timed out');
+    });
+    const out = await newSession().ask('q', cb(), ctrl.signal);
+    expect(out.aborted).toBe(true);
+    expect(out.verification).toBeNull();
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('abort between tool-loop iterations → stops at the next boundary check', async () => {
+    const ctrl = new AbortController();
+    // A no-tool "thinking" reply that aborts as a side effect; the loop's next
+    // boundary check must end the turn before another model call is made.
+    mockComplete.mockImplementationOnce(async () => {
+      ctrl.abort();
+      return { text: 'thinking', toolCalls: [], usage: { input: 1, output: 1 } };
+    });
+    const out = await newSession().ask('q', cb(), ctrl.signal);
+    expect(out.aborted).toBe(true);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('partial fetched rows and citations are preserved through an abort', async () => {
+    const ctrl = new AbortController();
+    // Turn 1: fetch real WB rows. Turn 2 (the next completion) aborts mid-flight.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2021 }, 'wf')])
+    );
+    mockComplete.mockImplementationOnce(async () => {
+      ctrl.abort();
+      throw new Error('stopped mid-fetch');
+    });
+    const out = await newSession().ask('q', cb(), ctrl.signal);
+    expect(out.aborted).toBe(true);
+    // The rows fetched before the stop are real data and ride out on the output.
+    expect(out.rows.map((r) => r.year)).toEqual([2020, 2021]);
+    expect(out.citations.length).toBeGreaterThan(0);
+    // And the export still carries the provenance comment lines + data.
+    expect(out.csv).toContain('2020');
+  });
+
+  it('the session is reusable after an abort → the next ask() completes and verifies', async () => {
+    const session = newSession();
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const stopped = await session.ask('first', cb(), ctrl.signal);
+    expect(stopped.aborted).toBe(true);
+
+    // A fresh, un-aborted ask on the SAME session runs to a verified finish.
+    mockComplete.mockResolvedValueOnce(chartFinish());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const out = await session.ask('second', cb());
+    expect(out.aborted).toBe(false);
+    expect(out.finding).toBe('A finding.');
+    expect(out.verification).not.toBeNull();
+    expect(out.verification!.status).toBe('verified');
+  });
+
+  it('passing an untriggered signal does not mark a clean run aborted', async () => {
+    // aborted is driven by an ACTUAL mid-run stop, not merely by the presence of
+    // a signal: a clean run with a never-fired signal returns aborted:false.
+    const ctrl = new AbortController();
+    mockComplete.mockResolvedValueOnce(chartFinish());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    const out = await newSession().ask('q', cb(), ctrl.signal);
+    expect(out.aborted).toBe(false);
+    expect(out.verification!.status).toBe('verified');
+  });
+
+  it('the caller\'s signal is forwarded to complete() via deps', async () => {
+    const ctrl = new AbortController();
+    mockComplete.mockResolvedValueOnce(chartFinish());
+    mockComplete.mockResolvedValueOnce(verifyPass());
+    await newSession().ask('q', cb(), ctrl.signal);
+    // The 4th positional arg to complete() is the deps object; it must carry the
+    // same signal so an in-flight provider fetch can be aborted.
+    const deps = mockComplete.mock.calls[0][3];
+    expect(deps).toBeDefined();
+    expect(deps.signal).toBe(ctrl.signal);
+  });
+});

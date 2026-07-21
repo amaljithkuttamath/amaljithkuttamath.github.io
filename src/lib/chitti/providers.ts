@@ -788,19 +788,32 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 // Every provider fetch runs under an AbortController so a wedged upstream can
 // never hang a turn; a timeout surfaces as an AbortError → classified 'timeout'.
+// An optional external signal (the user's "stop") is composed in manually — a
+// listener that forwards the caller's abort to the same controller — rather
+// than via AbortSignal.any(), so this works on every runtime the app targets
+// without a feature check. A user-abort and a timeout both abort `ctrl`, so the
+// fetch rejects at once; the caller (complete/ask) tells the two apart by
+// inspecting the external signal, never by the error class.
 async function fetchWithTimeout(
   url: string,
   init: RequestInit | undefined,
   ms: number,
-  f?: FetchLike
+  f?: FetchLike,
+  extSignal?: AbortSignal
 ): Promise<Response> {
   const doFetch: FetchLike = f ?? ((u, i) => (globalThis.fetch as FetchLike)(u, i));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
+  const onExtAbort = () => ctrl.abort();
+  if (extSignal) {
+    if (extSignal.aborted) ctrl.abort();
+    else extSignal.addEventListener('abort', onExtAbort, { once: true });
+  }
   try {
     return await doFetch(url, { ...(init ?? {}), signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
+    if (extSignal) extSignal.removeEventListener('abort', onExtAbort);
   }
 }
 
@@ -845,7 +858,8 @@ async function attemptOpenAICompatible(
   messages: ChatMessage[],
   tools: ToolSchema[],
   f: FetchLike,
-  models?: string[]
+  models?: string[],
+  signal?: AbortSignal
 ): Promise<CompletionResult> {
   const isRouter = cfg.provider === 'openrouter';
   const endpoint = isRouter
@@ -890,7 +904,7 @@ async function attemptOpenAICompatible(
 
   let resp: Response;
   try {
-    resp = await fetchWithTimeout(endpoint, { method: 'POST', headers, body: JSON.stringify(body) }, COMPLETION_TIMEOUT_MS, f);
+    resp = await fetchWithTimeout(endpoint, { method: 'POST', headers, body: JSON.stringify(body) }, COMPLETION_TIMEOUT_MS, f, signal);
   } catch (err) {
     // Network failure, CORS, or an abort (timeout) — classify and throw.
     throw asClassified(err, cfg.provider);
@@ -1006,7 +1020,8 @@ async function attemptAnthropic(
   cfg: ProviderConfig,
   messages: ChatMessage[],
   tools: ToolSchema[],
-  f: FetchLike
+  f: FetchLike,
+  signal?: AbortSignal
 ): Promise<CompletionResult> {
   const { system, msgs } = toAnthropic(messages);
   const body: Record<string, unknown> = {
@@ -1041,7 +1056,8 @@ async function attemptAnthropic(
         body: JSON.stringify(body),
       },
       COMPLETION_TIMEOUT_MS,
-      f
+      f,
+      signal
     );
   } catch (err) {
     throw asClassified(err, cfg.provider);
@@ -1100,6 +1116,13 @@ export interface CompleteDeps {
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
   buildFreeFallbackChain?: (primary: string) => Promise<string[]>;
+  // The caller's "stop" signal, forwarded to every provider fetch this call
+  // makes. When it fires mid-request the fetch rejects immediately; complete()
+  // then skips its transport retry and free-model fallback (retrying a request
+  // the user just cancelled would be wasted work) and rethrows. The caller
+  // recognises the abort by inspecting the signal, not the error class — a
+  // user-cancel is never surfaced as a provider error.
+  signal?: AbortSignal;
 }
 
 // ── Unified entry point ────────────────────────────────────────────────
@@ -1126,12 +1149,18 @@ export async function complete(
 
   const attempt = (models?: string[]) =>
     cfg.provider === 'anthropic'
-      ? attemptAnthropic(cfg, messages, tools, f)
-      : attemptOpenAICompatible(cfg, messages, tools, f, models);
+      ? attemptAnthropic(cfg, messages, tools, f, deps.signal)
+      : attemptOpenAICompatible(cfg, messages, tools, f, models, deps.signal);
 
   try {
     return await attempt();
   } catch (err) {
+    // A user-cancel short-circuits ALL recovery: the abort already rejected the
+    // fetch, so a same-model retry or free-model fallback would only re-hit an
+    // already-aborted signal (or, worse, spend a fresh request on work the user
+    // stopped). Rethrow the classified error at once; ask() maps it to its
+    // honest "stopped" outcome by inspecting the signal.
+    if (deps.signal?.aborted) throw asClassified(err, cfg.provider);
     const ce = asClassified(err, cfg.provider);
     const canFallback = ce.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free');
 

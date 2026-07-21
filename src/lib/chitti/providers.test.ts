@@ -395,6 +395,44 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     expect(f).toHaveBeenCalledTimes(2);
   });
 
+  it('a user-abort short-circuits ALL recovery: no retry, no fallback (one attempt)', async () => {
+    // The signal is already aborted when the fetch rejects (as it would be after
+    // a user "stop"). Even though the class is transient (timeout), complete()
+    // must NOT retry or fall back — retrying a cancelled request is wasted work.
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const f = vi.fn(async () => {
+      throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    });
+    await expect(
+      complete(
+        cfg({ provider: 'openrouter', model: 'x:free' }),
+        [{ role: 'user', content: 'hi' }],
+        [],
+        deps(f, { signal: ctrl.signal })
+      )
+    ).rejects.toBeInstanceOf(Error);
+    // Exactly one attempt: the abort guard skipped the same-model retry AND the
+    // free-model fallback chain that a :free primary would normally try.
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards the external (stop) signal into the fetch so an in-flight request aborts', async () => {
+    const ctrl = new AbortController();
+    let observed: AbortSignal | undefined;
+    const f = vi.fn(async (_url: string, init: any) => {
+      observed = init?.signal;
+      // The stop fires while the request is "in flight".
+      ctrl.abort();
+      return okChat();
+    });
+    await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { signal: ctrl.signal }));
+    // The fetch's composed signal reflects the external abort (timeout controller
+    // + external stop share one AbortController inside fetchWithTimeout).
+    expect(observed).toBeInstanceOf(AbortSignal);
+    expect(observed!.aborted).toBe(true);
+  });
+
   it('retries a transient server error ONCE, then surfaces (no 3rd attempt)', async () => {
     const f = vi.fn(async () => httpErr(500, { error: { message: 'internal', code: 500 } }));
     const sleep = vi.fn(async () => {});
