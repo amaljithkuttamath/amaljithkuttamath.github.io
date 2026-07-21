@@ -544,7 +544,7 @@ vi.mock('./providers', async (importOriginal) => {
   };
 });
 
-import { complete } from './providers';
+import { complete, ClassifiedError } from './providers';
 import { createSession, buildSystemPrompt, buildSubAgentPrompt, parseVerifierVerdict } from './agent';
 
 describe('createSession', () => {
@@ -2258,5 +2258,107 @@ describe('rlm flag: the llm() primitive in the execute_js sandbox', () => {
     const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
     const out = await createSession(cfg).ask('explain something', cb);
     expect(out.cost).toBe(0);
+  });
+});
+
+// ── Classified-error inheritance (backlog #17) ─────────────────────────────
+// complete() now throws a ClassifiedError whose .message is the user-actionable
+// line. Every caller surfaces err.message, so verify()'s 'unavailable' report
+// and the nested llm()'s catchable error must both carry the SPECIFIC reason —
+// no special-cased raw errors left. complete() is mocked here (the classifier
+// itself is unit-tested in providers.test.ts); these prove the propagation.
+describe('classified error inheritance through agent paths', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    // Minimal World Bank response so fetch_worldbank seeds state.rows (execute_js
+    // refuses to run without rows).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { page: 1, pages: 1, total: 1 },
+          [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }],
+        ],
+      }))
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("verify() provider error → 'unavailable' verdict carrying the classified reason", async () => {
+    // A chart turn, then the verify complete() rejects with a ClassifiedError.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'A', data: [[2000, 1]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'A finding.' }, 'fin'),
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    const classified = new ClassifiedError({
+      errorClass: 'rate_limit',
+      provider: 'openrouter',
+      message: 'OpenRouter is rate limiting requests — try again shortly.',
+      retryable: true,
+      fallbackEligible: true,
+    });
+    mockComplete.mockRejectedValueOnce(classified);
+
+    const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    const out = await createSession(cfg).ask('q', cb);
+
+    expect(out.verification!.status).toBe('unavailable');
+    expect(out.verification!.pass).toBe(false); // never defaulted to verified
+    // The 'unavailable' report names the SPECIFIC provider reason, not a generic one.
+    expect(out.verification!.report).toContain('rate limiting');
+  });
+
+  it('a nested llm() provider error is catchable in user code with the classified message', async () => {
+    // Model turn: fetch (seeds rows) + execute_js whose code catches llm().
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [
+        tc('fetch_worldbank', { indicator_id: 'X', country_ids: ['IND'], year_start: 2020, year_end: 2020 }, 'wf'),
+        tc('execute_js', { code: 'try { await llm("classify", rows); return "no-throw"; } catch (e) { return "caught:" + e.message; }' }, 'ej'),
+      ],
+      usage: { input: 10, output: 5 },
+    });
+    // The nested llm() completion rejects with a classified provider error.
+    mockComplete.mockRejectedValueOnce(
+      new ClassifiedError({
+        errorClass: 'insufficient_credits',
+        provider: 'openrouter',
+        message: 'OpenRouter reports insufficient credits — add credits or switch to a free model.',
+        retryable: false,
+        fallbackEligible: true,
+      })
+    );
+    // Finish with an explanation so no verifier turn is needed.
+    mockComplete.mockResolvedValueOnce({
+      text: '',
+      toolCalls: [tc('finish_explanation', { explanation: 'done' }, 'fe')],
+      usage: { input: 5, output: 2 },
+    });
+
+    let lastTrace: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (lastTrace = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    await createSession(cfg, { rlm: true }).ask('q', cb);
+
+    // The execute_js result the model saw is the caught message — carrying the
+    // specific classified reason, wrapped by makeLlm's "llm() failed:" prefix.
+    const ejResult = mockComplete.mock.calls
+      .flatMap((c) => (Array.isArray(c[1]) ? c[1] : []))
+      .find((m: any) => m.role === 'tool' && m.name === 'execute_js');
+    expect(ejResult).toBeDefined();
+    expect(String(ejResult.content)).toContain('caught:');
+    expect(String(ejResult.content)).toContain('insufficient credits');
+    // And the nested llm receipt recorded the failure with the same reason.
+    const llmEv = lastTrace.find((e) => e.tool === 'llm');
+    expect(llmEv?.status).toBe('error');
+    expect(String(llmEv?.detail)).toContain('insufficient credits');
   });
 });

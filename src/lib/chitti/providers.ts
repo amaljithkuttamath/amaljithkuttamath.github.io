@@ -373,7 +373,7 @@ export function parseOpenRouterCatalog(json: unknown): ModelOption[] {
 // parseOpenRouterCatalog and, as its one side effect, caches per-model pricing
 // so estimateCost tracks the live catalog.
 async function fetchOpenRouterModels(): Promise<ModelOption[]> {
-  const resp = await fetch('https://openrouter.ai/api/v1/models');
+  const resp = await fetchWithTimeout('https://openrouter.ai/api/v1/models', undefined, CATALOG_TIMEOUT_MS);
   if (!resp.ok) return [];
   const j = await resp.json();
   const opts = parseOpenRouterCatalog(j);
@@ -387,9 +387,11 @@ async function fetchOpenRouterModels(): Promise<ModelOption[]> {
 
 // OpenAI — needs the user's key. Return only the chat-completions family.
 async function fetchOpenAIModels(apiKey: string): Promise<ModelOption[]> {
-  const resp = await fetch('https://api.openai.com/v1/models', {
-    headers: { Authorization: 'Bearer ' + apiKey },
-  });
+  const resp = await fetchWithTimeout(
+    'https://api.openai.com/v1/models',
+    { headers: { Authorization: 'Bearer ' + apiKey } },
+    CATALOG_TIMEOUT_MS
+  );
   if (!resp.ok) return [];
   const j = await resp.json();
   const raw = (j.data || []) as any[];
@@ -408,13 +410,17 @@ async function fetchOpenAIModels(apiKey: string): Promise<ModelOption[]> {
 
 // Anthropic — needs the user's key. Every returned model supports tools.
 async function fetchAnthropicModels(apiKey: string): Promise<ModelOption[]> {
-  const resp = await fetch('https://api.anthropic.com/v1/models', {
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
+  const resp = await fetchWithTimeout(
+    'https://api.anthropic.com/v1/models',
+    {
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
     },
-  });
+    CATALOG_TIMEOUT_MS
+  );
   if (!resp.ok) return [];
   const j = await resp.json();
   const raw = (j.data || []) as any[];
@@ -446,6 +452,342 @@ export function estimateCost(model: string, usage: { input: number; output: numb
   return (usage.input / 1e6) * p.in + (usage.output / 1e6) * p.out;
 }
 
+// ── Error classification + transport hardening ─────────────────────────
+// One place decides what a provider failure MEANS. Every caller (the agent
+// loop, verify(), the nested llm(), sub-agents) surfaces `err.message`, so
+// classifying here — and throwing a ClassifiedError whose message is the
+// user-actionable line — makes every path inherit the specific reason for
+// free. The classifier is pure and NEVER throws: the three providers' error
+// bodies differ, so it parses defensively and falls back to 'unknown'.
+
+// Timeouts: an AbortController caps every provider fetch so a wedged upstream
+// can never hang a turn. Constants, not magic numbers.
+export const COMPLETION_TIMEOUT_MS = 60_000; // one chat/verify/llm() completion
+export const CATALOG_TIMEOUT_MS = 15_000; // a /models catalog fetch
+
+// Retry policy (single bounded retry for transient classes only).
+const RETRY_BASE_DELAY_MS = 600;
+const RETRY_JITTER_MS = 400;
+// Retry-After is honoured but capped — a provider asking us to wait 5 minutes
+// must not freeze a browser turn; we cap the wait and surface the class instead.
+const RETRY_AFTER_CAP_MS = 4_000;
+
+export type ProviderErrorClass =
+  | 'bad_key' // 401/403 or an explicit invalid-key body — surface, never mask
+  | 'rate_limit' // 429; Retry-After captured when present
+  | 'timeout' // aborted fetch / 408 — the request took too long
+  | 'network' // fetch TypeError / CORS / DNS — the host was unreachable
+  | 'server' // 5xx or an explicit transient-upstream body
+  | 'malformed' // the completion itself was unparseable/empty
+  | 'context_length' // provider says the prompt exceeds the context window
+  | 'model_unavailable' // 404 / model-not-found shapes
+  | 'insufficient_credits' // 402 / quota / billing shapes (fallback-eligible)
+  | 'unknown';
+
+export interface ClassifiedInfo {
+  errorClass: ProviderErrorClass;
+  provider: ProviderId;
+  message: string; // short, user-actionable
+  retryable: boolean; // eligible for the one bounded transport retry
+  fallbackEligible: boolean; // eligible for the free-model substitution
+  status?: number; // HTTP status when the failure was an HTTP response
+  retryAfterMs?: number; // parsed Retry-After (uncapped; capped at wait time)
+  detail?: string; // a short excerpt of the provider's own message
+}
+
+// Transient transport failures a single retry can plausibly rescue.
+const RETRYABLE_CLASSES = new Set<ProviderErrorClass>(['rate_limit', 'server', 'timeout', 'network']);
+// Classes the free-model fallback can actually help with. NEVER bad_key (that
+// would mask the real problem), context_length, or malformed.
+const FALLBACK_CLASSES = new Set<ProviderErrorClass>(['model_unavailable', 'rate_limit', 'insufficient_credits']);
+
+// A thrown error that already carries its classification. Its `.message` is the
+// user-actionable line, so anything that surfaces err.message gets it for free.
+export class ClassifiedError extends Error {
+  readonly errorClass: ProviderErrorClass;
+  readonly provider: ProviderId;
+  readonly retryable: boolean;
+  readonly fallbackEligible: boolean;
+  readonly status?: number;
+  readonly retryAfterMs?: number;
+  readonly detail?: string;
+  constructor(info: ClassifiedInfo) {
+    super(info.message);
+    this.name = 'ClassifiedError';
+    this.errorClass = info.errorClass;
+    this.provider = info.provider;
+    this.retryable = info.retryable;
+    this.fallbackEligible = info.fallbackEligible;
+    this.status = info.status;
+    this.retryAfterMs = info.retryAfterMs;
+    this.detail = info.detail;
+  }
+}
+
+function providerLabel(p: ProviderId): string {
+  return p === 'openrouter' ? 'OpenRouter' : p === 'anthropic' ? 'Anthropic' : 'OpenAI';
+}
+
+// Map a class → a short, user-actionable sentence. Kept terse on purpose: this
+// is what renders in the run-failed status line and the verify/llm() receipts.
+function messageFor(cls: ProviderErrorClass, provider: ProviderId, detail?: string): string {
+  const P = providerLabel(provider);
+  const tail = detail ? ` — ${detail}` : '';
+  switch (cls) {
+    case 'bad_key':
+      return `${P} rejected this API key — check it in the BYOK settings.`;
+    case 'rate_limit':
+      return `${P} is rate limiting requests — try again shortly.`;
+    case 'timeout':
+      return `${P} timed out after ${Math.round(COMPLETION_TIMEOUT_MS / 1000)}s — the model took too long to respond.`;
+    case 'network':
+      return `Could not reach ${P} — network or CORS error. Check your connection.`;
+    case 'server':
+      return `${P} had a server error${tail} — try again in a moment.`;
+    case 'malformed':
+      return `${P} returned an empty or unreadable response.`;
+    case 'context_length':
+      return `This request is too long for the model's context window${tail} — shorten the conversation or pick a larger-context model.`;
+    case 'model_unavailable':
+      return `${P} says this model is unavailable or unknown${tail}.`;
+    case 'insufficient_credits':
+      return `${P} reports insufficient credits${tail} — add credits or switch to a free model.`;
+    default:
+      return `${P} error${tail || ' — unexpected failure.'}`;
+  }
+}
+
+function infoFor(
+  errorClass: ProviderErrorClass,
+  provider: ProviderId,
+  extra: { message?: string; status?: number; retryAfterMs?: number; detail?: string } = {}
+): ClassifiedInfo {
+  return {
+    errorClass,
+    provider,
+    retryable: RETRYABLE_CLASSES.has(errorClass),
+    fallbackEligible: FALLBACK_CLASSES.has(errorClass),
+    message: extra.message ?? messageFor(errorClass, provider, extra.detail),
+    ...(extra.status !== undefined ? { status: extra.status } : {}),
+    ...(extra.retryAfterMs !== undefined ? { retryAfterMs: extra.retryAfterMs } : {}),
+    ...(extra.detail ? { detail: extra.detail } : {}),
+  };
+}
+
+function pickStr(v: unknown): string | undefined {
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return undefined;
+}
+
+// Parse the three providers' differing error bodies into a common shape.
+// OpenRouter: {error:{message,code,metadata}}, OpenAI: {error:{message,type,code}},
+// Anthropic: {type:'error', error:{type,message}}. All optional — external input.
+function parseProviderErrorBody(rawBody: unknown): {
+  message?: string;
+  type?: string;
+  code?: string;
+  detail?: string;
+} {
+  if (rawBody === null || rawBody === undefined) return {};
+  let obj: any = rawBody;
+  let str = '';
+  if (typeof rawBody === 'string') {
+    str = rawBody;
+    try {
+      obj = JSON.parse(rawBody);
+    } catch {
+      obj = null;
+    }
+  } else {
+    try {
+      str = JSON.stringify(rawBody);
+    } catch {
+      str = '';
+    }
+  }
+  const errNode = obj && typeof obj === 'object' ? obj.error ?? obj : null;
+  const message = pickStr(errNode?.message) ?? pickStr(obj?.message);
+  // Anthropic's top-level type is the literal 'error'; the meaningful type is
+  // nested under error.type. OpenAI puts a useful type under error.type too.
+  const topType = pickStr(obj?.type);
+  const type = pickStr(errNode?.type) ?? (topType && topType !== 'error' ? topType : undefined);
+  const code = pickStr(errNode?.code) ?? pickStr(obj?.code);
+  const detail = shortErr(str).slice(0, 160) || undefined;
+  return { message, type, code, detail };
+}
+
+// Parse a Retry-After header (integer seconds, fractional seconds, or an HTTP
+// date). Returns milliseconds to wait, or undefined when absent/unparseable.
+// Never negative. The cap is applied later, at wait time.
+export function parseRetryAfter(raw: unknown, nowMs: number = Date.now()): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const s = String(raw).trim();
+  if (!s) return undefined;
+  if (/^\d+$/.test(s)) return parseInt(s, 10) * 1000;
+  const t = Date.parse(s);
+  if (!Number.isNaN(t)) return Math.max(0, t - nowMs);
+  const f = parseFloat(s);
+  if (Number.isFinite(f)) return Math.max(0, Math.round(f * 1000));
+  return undefined;
+}
+
+function extractRetryAfter(input: any): string | null | undefined {
+  if (input && input.retryAfter !== undefined) return input.retryAfter;
+  const h = input?.headers;
+  if (h && typeof h.get === 'function') return h.get('retry-after');
+  if (h && typeof h === 'object') return h['retry-after'] ?? h['Retry-After'];
+  return undefined;
+}
+
+function isHttpLike(x: unknown): x is { status: number } {
+  return !!x && typeof x === 'object' && typeof (x as any).status === 'number';
+}
+
+// The classifier. Accepts either a thrown exception (fetch TypeError / abort)
+// or an HTTP-error descriptor { status, body, retryAfter? } (or a Response-like
+// object with a pre-read `body`). Pure; never throws.
+export function classifyProviderError(input: unknown, provider: ProviderId): ClassifiedInfo {
+  try {
+    // ── HTTP-error path ────────────────────────────────────────────────
+    if (isHttpLike(input)) {
+      const status = (input as any).status as number;
+      const parsed = parseProviderErrorBody((input as any).body);
+      const detail = parsed.detail;
+      const combined = `${parsed.type ?? ''} ${parsed.code ?? ''} ${parsed.message ?? ''}`.toLowerCase();
+
+      // Provider-explicit "out of credits" shapes. OpenAI reports quota
+      // exhaustion as a 429 with code 'insufficient_quota' (NOT a real rate
+      // limit), and Anthropic phrases it "credit balance is too low" — both must
+      // classify as insufficient_credits (fallback-eligible), not rate_limit.
+      const outOfCredits =
+        /insufficient (credits|quota|funds|balance)|insufficient_quota|exceeded your current quota|credit balance (is )?too low|too low to access|add (more )?credits|negative balance/i.test(
+          combined
+        );
+
+      if (status === 401 || status === 403) return infoFor('bad_key', provider, { status, detail });
+      if (status === 402) return infoFor('insufficient_credits', provider, { status, detail });
+      if (status === 408) return infoFor('timeout', provider, { status });
+      if (status === 429) {
+        if (outOfCredits) return infoFor('insufficient_credits', provider, { status, detail });
+        const ms = parseRetryAfter(extractRetryAfter(input));
+        return infoFor('rate_limit', provider, { status, detail, ...(ms !== undefined ? { retryAfterMs: ms } : {}) });
+      }
+      if (status === 404) return infoFor('model_unavailable', provider, { status, detail });
+      if (status >= 500) return infoFor('server', provider, { status, detail });
+
+      // 400 / 422 and other 4xx: the status alone is ambiguous, so read the body.
+      if (
+        /context[_ ]?length|maximum context|context window|too many tokens|prompt is too long|reduce (the )?(length|number of tokens)|max_tokens.*(exceed|too large)|string too long|is longer than the model/i.test(
+          combined
+        )
+      ) {
+        return infoFor('context_length', provider, { status, detail });
+      }
+      if (outOfCredits || /billing|payment required|not enough credits/i.test(combined)) {
+        return infoFor('insufficient_credits', provider, { status, detail });
+      }
+      if (
+        /model[_ ].*(not found|not exist|unavailable|is not a valid|does not exist)|no (allowed )?(endpoints|providers) found|not a valid model|model_not_found|unknown model|no endpoints found/i.test(
+          combined
+        )
+      ) {
+        return infoFor('model_unavailable', provider, { status, detail });
+      }
+      if (
+        /invalid.*api key|incorrect api key|no auth credentials|authentication|unauthorized|invalid_api_key|invalid x-api-key|permission|forbidden/i.test(
+          combined
+        )
+      ) {
+        return infoFor('bad_key', provider, { status, detail });
+      }
+      // OpenRouter wraps a flaky free upstream as a 400 "Provider returned
+      // error"; treat that (and explicit overload) as a transient server class.
+      if (/provider returned error|upstream error|temporarily unavailable|overloaded|try again/i.test(combined)) {
+        return infoFor('server', provider, { status, detail });
+      }
+      return infoFor('unknown', provider, { status, detail });
+    }
+
+    // ── Exception path (thrown by fetch) ───────────────────────────────
+    if (input instanceof Error || (input && typeof input === 'object' && ('name' in input || 'message' in input))) {
+      const name = String((input as any).name ?? '');
+      const msg = String((input as any).message ?? '');
+      if (name === 'AbortError' || /\baborted\b|timed?\s*out|timeout/i.test(msg)) {
+        return infoFor('timeout', provider);
+      }
+      if (
+        name === 'TypeError' ||
+        /failed to fetch|networkerror|load failed|\bcors\b|err_|fetch failed|network request failed|dns/i.test(msg)
+      ) {
+        return infoFor('network', provider);
+      }
+      return infoFor('unknown', provider, { detail: msg.slice(0, 140) || undefined });
+    }
+
+    return infoFor('unknown', provider);
+  } catch {
+    // The classifier's own contract: it must never throw.
+    return infoFor('unknown', provider);
+  }
+}
+
+// Coerce any thrown value into a ClassifiedError (idempotent — a ClassifiedError
+// passes straight through, so a re-thrown one is never re-wrapped).
+function asClassified(err: unknown, provider: ProviderId): ClassifiedError {
+  if (err instanceof ClassifiedError) return err;
+  return new ClassifiedError(classifyProviderError(err, provider));
+}
+
+// Clone a ClassifiedError, noting it survived the one bounded retry.
+function retriedError(ce: ClassifiedError): ClassifiedError {
+  return new ClassifiedError({
+    errorClass: ce.errorClass,
+    provider: ce.provider,
+    retryable: ce.retryable,
+    fallbackEligible: ce.fallbackEligible,
+    message: ce.message.replace(/\.\s*$/, '') + ' (after retry).',
+    ...(ce.status !== undefined ? { status: ce.status } : {}),
+    ...(ce.retryAfterMs !== undefined ? { retryAfterMs: ce.retryAfterMs } : {}),
+    ...(ce.detail ? { detail: ce.detail } : {}),
+  });
+}
+
+// The delay before the single retry: a capped Retry-After when the provider
+// gave one, else a small base, both plus jitter to avoid synchronized retries.
+function retryDelayMs(ce: ClassifiedError, random: () => number): number {
+  const base = ce.retryAfterMs !== undefined ? Math.min(ce.retryAfterMs, RETRY_AFTER_CAP_MS) : RETRY_BASE_DELAY_MS;
+  return base + Math.floor(random() * RETRY_JITTER_MS);
+}
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+// Every provider fetch runs under an AbortController so a wedged upstream can
+// never hang a turn; a timeout surfaces as an AbortError → classified 'timeout'.
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  ms: number,
+  f?: FetchLike
+): Promise<Response> {
+  const doFetch: FetchLike = f ?? ((u, i) => (globalThis.fetch as FetchLike)(u, i));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await doFetch(url, { ...(init ?? {}), signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function safeText(resp: Response): Promise<string> {
+  try {
+    return await resp.text();
+  } catch {
+    return '';
+  }
+}
+
 // ── OpenAI-compatible wire format (OpenAI + OpenRouter) ────────────────
 function toOpenAIMessages(messages: ChatMessage[]): unknown[] {
   return messages.map((m) => {
@@ -469,10 +811,17 @@ function toOpenAIMessages(messages: ChatMessage[]): unknown[] {
   });
 }
 
-async function callOpenAICompatible(
+// One attempt against an OpenAI-compatible endpoint (OpenAI or OpenRouter).
+// It performs exactly ONE fetch (timeout-bounded) and throws a ClassifiedError
+// on any failure — HTTP error, network/abort, or a malformed completion. The
+// retry/fallback orchestration lives in complete(), never here, so retries are
+// never stacked. `models` sets OpenRouter's free-fallback chain (see complete).
+async function attemptOpenAICompatible(
   cfg: ProviderConfig,
   messages: ChatMessage[],
-  tools: ToolSchema[]
+  tools: ToolSchema[],
+  f: FetchLike,
+  models?: string[]
 ): Promise<CompletionResult> {
   const isRouter = cfg.provider === 'openrouter';
   const endpoint = isRouter
@@ -498,11 +847,11 @@ async function callOpenAICompatible(
   if (isRouter && cfg.requestReasoning) {
     body.reasoning = { enabled: true };
   }
-  // Free-model resilience: give OpenRouter a fallback chain so a flaky free
-  // upstream degrades to the next-best free model instead of failing the
-  // run. Only for :free primaries — paid model choices are never swapped.
-  if (isRouter && cfg.model.endsWith(':free')) {
-    body.models = await buildFreeFallbackChain(cfg.model);
+  // Free-model resilience: OpenRouter's server-side fallback chain, engaged
+  // reactively by complete() only when the primary fails with a class the
+  // fallback can help. Paid model choices are never swapped.
+  if (isRouter && models && models.length) {
+    body.models = models;
   }
 
   const headers: Record<string, string> = {
@@ -515,39 +864,31 @@ async function callOpenAICompatible(
     headers['X-Title'] = 'Chitti';
   }
 
-  const doFetch = () =>
-    fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-
-  let resp = await doFetch();
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(endpoint, { method: 'POST', headers, body: JSON.stringify(body) }, COMPLETION_TIMEOUT_MS, f);
+  } catch (err) {
+    // Network failure, CORS, or an abort (timeout) — classify and throw.
+    throw asClassified(err, cfg.provider);
+  }
   if (!resp.ok) {
-    const errText = await resp.text();
-    // Free-tier upstreams behind OpenRouter fail transiently all the time —
-    // surfaced as 400 "Provider returned error", 429, or 5xx. One retry
-    // after a short pause rescues most of these; a genuine request-shape
-    // error will fail identically the second time and surface as before.
-    const transient =
-      resp.status === 429 ||
-      resp.status >= 500 ||
-      (resp.status === 400 && /provider returned error/i.test(errText));
-    if (transient) {
-      await new Promise((r) => setTimeout(r, 1200));
-      resp = await doFetch();
-      if (!resp.ok) {
-        const retryText = await resp.text();
-        const label = isRouter ? 'OpenRouter' : 'OpenAI';
-        throw new Error(label + ' ' + resp.status + ' (after retry): ' + shortErr(retryText));
-      }
-    } else {
-      const label = isRouter ? 'OpenRouter' : 'OpenAI';
-      throw new Error(label + ' ' + resp.status + ': ' + shortErr(errText));
-    }
+    const errText = await safeText(resp);
+    throw new ClassifiedError(
+      classifyProviderError({ status: resp.status, body: errText, headers: resp.headers }, cfg.provider)
+    );
   }
 
-  const data = await resp.json();
+  let data: any;
+  try {
+    data = await resp.json();
+  } catch {
+    throw new ClassifiedError(infoFor('malformed', cfg.provider));
+  }
+  // A well-formed OpenAI-compatible success always carries a choices array.
+  // Its absence means the response body was not the completion we expected.
+  if (!data || !Array.isArray(data.choices)) {
+    throw new ClassifiedError(infoFor('malformed', cfg.provider));
+  }
   const choice = data.choices?.[0]?.message ?? {};
   const toolCalls: ToolCall[] = (choice.tool_calls ?? []).map((tc: any) => ({
     id: tc.id ?? 'call_' + Math.random().toString(36).slice(2),
@@ -608,10 +949,14 @@ function toAnthropic(messages: ChatMessage[]): { system: string; msgs: unknown[]
   return { system, msgs };
 }
 
-async function callAnthropic(
+// One attempt against the Anthropic Messages API. Same contract as
+// attemptOpenAICompatible: a single timeout-bounded fetch, throwing a
+// ClassifiedError on HTTP error, network/abort, or a malformed completion.
+async function attemptAnthropic(
   cfg: ProviderConfig,
   messages: ChatMessage[],
-  tools: ToolSchema[]
+  tools: ToolSchema[],
+  f: FetchLike
 ): Promise<CompletionResult> {
   const { system, msgs } = toAnthropic(messages);
   const body: Record<string, unknown> = {
@@ -630,24 +975,45 @@ async function callAnthropic(
     }));
   }
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': cfg.apiKey,
-      'anthropic-version': '2023-06-01',
-      // Allow calling the API directly from a browser.
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Anthropic ' + resp.status + ': ' + shortErr(errText));
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(
+      'https://api.anthropic.com/v1/messages',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': cfg.apiKey,
+          'anthropic-version': '2023-06-01',
+          // Allow calling the API directly from a browser.
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify(body),
+      },
+      COMPLETION_TIMEOUT_MS,
+      f
+    );
+  } catch (err) {
+    throw asClassified(err, cfg.provider);
   }
 
-  const data = await resp.json();
+  if (!resp.ok) {
+    const errText = await safeText(resp);
+    throw new ClassifiedError(
+      classifyProviderError({ status: resp.status, body: errText, headers: resp.headers }, cfg.provider)
+    );
+  }
+
+  let data: any;
+  try {
+    data = await resp.json();
+  } catch {
+    throw new ClassifiedError(infoFor('malformed', cfg.provider));
+  }
+  // A well-formed Anthropic success always carries a content block array.
+  if (!data || !Array.isArray(data.content)) {
+    throw new ClassifiedError(infoFor('malformed', cfg.provider));
+  }
   let text = '';
   const toolCalls: ToolCall[] = [];
   for (const block of data.content ?? []) {
@@ -667,16 +1033,76 @@ async function callAnthropic(
   };
 }
 
+// Injectable seams so tests can drive retry timing/jitter and the fallback
+// chain without real sleeps or network. All default to the real thing.
+export interface CompleteDeps {
+  fetch?: FetchLike;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  buildFreeFallbackChain?: (primary: string) => Promise<string[]>;
+}
+
 // ── Unified entry point ────────────────────────────────────────────────
+// The SINGLE place transport retry + free-model fallback are orchestrated, so
+// neither is ever stacked across callers. At most one extra network attempt:
+//   • a fallback-eligible class on a :free OpenRouter primary → one attempt
+//     with the free substitution chain (its result is final); OR
+//   • a transient class → one bounded retry after a jittered (Retry-After-
+//     capped) delay.
+// Everything else surfaces immediately as a ClassifiedError whose .message is
+// the user-actionable line every caller already renders.
 export async function complete(
   cfg: ProviderConfig,
   messages: ChatMessage[],
-  tools: ToolSchema[] = []
+  tools: ToolSchema[] = [],
+  deps: CompleteDeps = {}
 ): Promise<CompletionResult> {
   if (!cfg.apiKey) throw new Error('No API key provided. Enter a key in the BYOK strip.');
-  if (cfg.provider === 'anthropic') return callAnthropic(cfg, messages, tools);
-  // openai + openrouter share the OpenAI-compatible client.
-  return callOpenAICompatible(cfg, messages, tools);
+
+  const f: FetchLike = deps.fetch ?? ((u, i) => (globalThis.fetch as FetchLike)(u, i));
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const random = deps.random ?? Math.random;
+  const buildChain = deps.buildFreeFallbackChain ?? buildFreeFallbackChain;
+
+  const attempt = (models?: string[]) =>
+    cfg.provider === 'anthropic'
+      ? attemptAnthropic(cfg, messages, tools, f)
+      : attemptOpenAICompatible(cfg, messages, tools, f, models);
+
+  try {
+    return await attempt();
+  } catch (err) {
+    const ce = asClassified(err, cfg.provider);
+
+    // Free-model fallback FIRST, but only on classes it can help and only where
+    // a real substitute exists (OpenRouter :free primaries). Never on bad_key,
+    // context_length, or malformed — those surface so the user sees the truth.
+    if (ce.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free')) {
+      let chain: string[] = [];
+      try {
+        chain = await buildChain(cfg.model);
+      } catch {
+        chain = [];
+      }
+      // Only worth an attempt if the chain offers a genuine alternative.
+      if (chain.length > 1) {
+        // The fallback attempt's outcome is final — no further retry stacking.
+        return await attempt(chain);
+      }
+    }
+
+    // One bounded transport retry for transient classes only.
+    if (ce.retryable) {
+      await sleep(retryDelayMs(ce, random));
+      try {
+        return await attempt();
+      } catch (err2) {
+        throw retriedError(asClassified(err2, cfg.provider));
+      }
+    }
+
+    throw ce;
+  }
 }
 
 function safeParse(s: string): Record<string, unknown> {
