@@ -51,6 +51,13 @@ const PRESETS = [
           <span class="badge">byok</span>
           <span class="badge">cited</span>
         </div>
+        <!-- Dashboards entry point: opens the saved-dashboards view. The count
+             appears only once at least one dashboard exists. -->
+        <button type="button" class="ch-dash-nav" id="ch-dash-nav" aria-label="Open dashboards">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Dashboards</span>
+          <span class="ch-dash-nav-count" id="ch-dash-nav-count" hidden></span>
+        </button>
       </div>
       <p class="ch-subtitle">Real answers about the world, charted and cited.</p>
     </header>
@@ -169,6 +176,7 @@ const PRESETS = [
                  itself a button) is invalid and unreachable for some AT. -->
             <summary>Raw data (<span class="ch-data-count">0</span> rows)</summary>
             <div class="ch-data-actions">
+              <button type="button" class="ch-pin" style="display:none" aria-haspopup="dialog" aria-label="Pin this chart to a dashboard">Pin to dashboard</button>
               <button type="button" class="ch-share" style="display:none" aria-label="Copy a shareable link to this answer">Share link</button>
               <button type="button" class="ch-csv">Download CSV</button>
             </div>
@@ -368,6 +376,41 @@ const PRESETS = [
       </form>
     </div>
 
+    <!-- ── Pin-to-dashboard picker ──────────────────────────────────────────
+         A small modal dialog opened by a turn's "Pin to dashboard" button.
+         Lists existing dashboards to pin into, plus an inline "new dashboard"
+         name field. Focus is trapped while open; Escape / backdrop / close all
+         dismiss it. Populated at open time by openPinPicker(). -->
+    <div class="ch-pin-backdrop" id="ch-pin-backdrop" hidden></div>
+    <div class="ch-pin-dialog" id="ch-pin-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="ch-pin-title" tabindex="-1">
+      <div class="ch-pin-head">
+        <span class="ch-pin-title" id="ch-pin-title">Pin to dashboard</span>
+        <button type="button" class="ch-pin-close" id="ch-pin-close" aria-label="Close">✕</button>
+      </div>
+      <p class="ch-pin-sub" id="ch-pin-sub">Save this chart, its data and its citations to a dashboard you can revisit.</p>
+      <div class="ch-pin-list" id="ch-pin-list" role="group" aria-label="Existing dashboards"></div>
+      <form class="ch-pin-new" id="ch-pin-new" autocomplete="off">
+        <label class="ch-field-label" for="ch-pin-name">New dashboard</label>
+        <div class="ch-pin-new-row">
+          <input type="text" id="ch-pin-name" class="ch-input" placeholder="Name it…" spellcheck="false" maxlength="80" />
+          <button type="submit" class="ch-pin-create" id="ch-pin-create">Create &amp; pin</button>
+        </div>
+      </form>
+      <span class="ch-pin-status" id="ch-pin-status" role="status" aria-live="polite"></span>
+    </div>
+
+    <!-- ── Dashboards view ──────────────────────────────────────────────────
+         A full-column overlay listing saved dashboards, and (on open) one
+         dashboard's tile grid. Charts init lazily and are disposed on exit.
+         Everything keyboard-operable; the two sub-views swap in #ch-dashview. -->
+    <section class="ch-dashview" id="ch-dashview" hidden aria-label="Dashboards">
+      <div class="ch-dashview-bar">
+        <button type="button" class="ch-dashview-back" id="ch-dashview-back" aria-label="Back">‹ Back</button>
+        <h2 class="ch-dashview-title" id="ch-dashview-title">Dashboards</h2>
+      </div>
+      <div class="ch-dashview-body" id="ch-dashview-body"></div>
+    </section>
+
   </div>
 
   <!-- Island: curated indicator names for client-side citation enrichment -->
@@ -414,6 +457,24 @@ const PRESETS = [
     type ShareStateV1,
   } from '../../lib/chitti/share';
   import { formatAxisValue, needsDataZoom, legendMode, titleSlug } from '../../lib/chitti/chart-format';
+  import {
+    createDashboard,
+    addTile,
+    removeTile,
+    renameTile,
+    renameDashboard,
+    moveTile,
+    makeTile,
+    listDashboards,
+    loadDashboard,
+    saveDashboard,
+    deleteDashboard,
+    findDashboardByTitle,
+    DashboardCapError,
+    type Dashboard,
+    type Tile,
+    type StorageLike,
+  } from '../../lib/chitti/dashboard';
   import {
     chartAriaLabel,
     verificationCueText,
@@ -578,6 +639,7 @@ const PRESETS = [
     dataCount: HTMLElement;
     csvBtn: HTMLButtonElement;
     shareBtn: HTMLButtonElement;
+    pinBtn: HTMLButtonElement;
     shareStatus: HTMLElement;
     shareBanner: HTMLElement;
     tableEl: HTMLTableElement;
@@ -640,6 +702,7 @@ const PRESETS = [
       dataCount: q(root, '.ch-data-count'),
       csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
       shareBtn: q<HTMLButtonElement>(root, '.ch-share'),
+      pinBtn: q<HTMLButtonElement>(root, '.ch-pin'),
       shareStatus: q(root, '.ch-share-status'),
       shareBanner: q(root, '.ch-share-banner'),
       tableEl: q<HTMLTableElement>(root, '.ch-table'),
@@ -675,6 +738,12 @@ const PRESETS = [
       e.preventDefault();
       e.stopPropagation();
       void shareTurn(tb);
+    });
+
+    tb.pinBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openPinPicker(tb, tb.pinBtn);
     });
 
     return tb;
@@ -2116,6 +2185,11 @@ const PRESETS = [
   // array when that turn's chart is frozen.
   const liveChartTurns: TurnBlock[] = [];
 
+  // Live dashboard-view tile charts (one per rendered tile in the open
+  // dashboard). Wired into the same theme/resize handlers as turn charts;
+  // disposed and cleared when the dashboard view is exited.
+  const liveDashCharts: { el: HTMLElement; spec: ChartSpec; inst: any }[] = [];
+
   // Re-theme every live turn's chart if the site theme toggles.
   const themeObserver = new MutationObserver(() => {
     for (const tb of liveChartTurns) {
@@ -2129,10 +2203,20 @@ const PRESETS = [
         bindChartLinking(tb);
       }
     }
+    // Dashboard tiles re-theme the same way (no chart↔table linking there).
+    for (const t of liveDashCharts) {
+      if (t.inst && echartsMod) {
+        t.inst.dispose();
+        t.inst = echartsMod.init(t.el, null, { renderer: 'canvas' });
+        t.inst.setOption(buildOption(t.spec));
+        t.el.setAttribute('aria-label', chartAriaLabel(t.spec));
+      }
+    }
   });
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   window.addEventListener('resize', () => {
     for (const tb of liveChartTurns) tb.chartInstance?.resize();
+    for (const t of liveDashCharts) t.inst?.resize();
   });
 
   // Every turn block created so far, regardless of whether it has a chart.
@@ -2489,6 +2573,492 @@ const PRESETS = [
       '<ol class="ch-cite-list">' + rows.join('') + '</ol>';
   }
 
+  // ── Dashboards (pin picker + saved-dashboard view) ───────────────────────
+  // Client-side, localStorage-backed. Nothing here touches the network or the
+  // agent: pinning captures the turn's already-rendered chart + rows + citation
+  // ledger and writes a Dashboard document; the view re-renders each tile's
+  // chart through the SAME buildOption path the live answers use.
+  const dashStore: StorageLike | null = (() => {
+    try {
+      const s = window.localStorage;
+      s.getItem('__chitti_probe'); // throws in some privacy modes
+      return s as unknown as StorageLike;
+    } catch {
+      return null;
+    }
+  })();
+
+  const dashNavBtn = $('ch-dash-nav') as HTMLButtonElement;
+  const dashNavCount = $('ch-dash-nav-count');
+  const pinDialog = $('ch-pin-dialog');
+  const pinBackdrop = $('ch-pin-backdrop');
+  const pinCloseBtn = $('ch-pin-close') as HTMLButtonElement;
+  const pinListEl = $('ch-pin-list');
+  const pinNewForm = $('ch-pin-new') as HTMLFormElement;
+  const pinNameInput = $('ch-pin-name') as HTMLInputElement;
+  const pinStatusEl = $('ch-pin-status');
+  const dashView = $('ch-dashview');
+  const dashViewBack = $('ch-dashview-back') as HTMLButtonElement;
+  const dashViewTitle = $('ch-dashview-title');
+  const dashViewBody = $('ch-dashview-body');
+
+  // Reflect the number of saved dashboards on the header chip.
+  function updateDashNavCount() {
+    const n = dashStore ? listDashboards(dashStore).length : 0;
+    if (n > 0) {
+      dashNavCount.textContent = String(n);
+      dashNavCount.hidden = false;
+    } else {
+      dashNavCount.hidden = true;
+    }
+  }
+
+  // A tiny date formatter for cards/tiles ("Jul 21, 2026").
+  function fmtDate(iso: string): string {
+    const d = new Date(iso);
+    return isNaN(d.getTime())
+      ? ''
+      : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  // ── Two-step confirm (reused for destructive tile removal, per b5cdcfd) ───
+  // First activation arms the button (relabelled, styled); a second within the
+  // window confirms; anything else disarms. Keeps destructive actions inline,
+  // no window.confirm.
+  const confirmTimers = new WeakMap<HTMLElement, number>();
+  function armConfirm(btn: HTMLButtonElement, armedLabel: string, onConfirm: () => void) {
+    if (btn.dataset.armed === '1') {
+      const t = confirmTimers.get(btn);
+      if (t) clearTimeout(t);
+      confirmTimers.delete(btn);
+      onConfirm();
+      return;
+    }
+    const original = btn.textContent || '';
+    btn.dataset.armed = '1';
+    btn.dataset.original = original;
+    btn.textContent = armedLabel;
+    btn.classList.add('ch-confirm-armed');
+    const disarm = () => {
+      btn.dataset.armed = '';
+      btn.textContent = btn.dataset.original || original;
+      btn.classList.remove('ch-confirm-armed');
+      confirmTimers.delete(btn);
+    };
+    confirmTimers.set(btn, window.setTimeout(disarm, 3500));
+  }
+
+  // ── Pin picker ────────────────────────────────────────────────────────────
+  let pinContext: { tb: TurnBlock; spec: ChartSpec; rows: DataRow[]; citations: Citation[] } | null = null;
+  let pinReturnFocus: HTMLElement | null = null;
+
+  function setPinStatus(msg: string, isError = false) {
+    pinStatusEl.textContent = msg;
+    pinStatusEl.classList.toggle('ch-pin-status-error', isError);
+  }
+
+  function openPinPicker(tb: TurnBlock, trigger: HTMLElement) {
+    if (!tb.lastSpec) return;
+    pinContext = {
+      tb,
+      spec: tb.lastSpec,
+      rows: tb.lastRows || [],
+      citations: tb.lastCitations || [],
+    };
+    pinReturnFocus = trigger;
+    setPinStatus('');
+    pinNameInput.value = '';
+    renderPinList();
+    pinBackdrop.hidden = false;
+    pinDialog.hidden = false;
+    if (!dashStore) {
+      setPinStatus('Browser storage is unavailable — dashboards cannot be saved here.', true);
+    }
+    // Move focus into the dialog and announce its label.
+    requestAnimationFrame(() => {
+      const first = pinDialog.querySelector<HTMLElement>('.ch-pin-existing') || pinNameInput;
+      (first || pinDialog).focus();
+    });
+  }
+
+  function closePinPicker() {
+    pinDialog.hidden = true;
+    pinBackdrop.hidden = true;
+    pinContext = null;
+    if (pinReturnFocus && document.body.contains(pinReturnFocus)) pinReturnFocus.focus();
+    pinReturnFocus = null;
+  }
+
+  // Build the "pin into an existing dashboard" list.
+  function renderPinList() {
+    const boards = dashStore ? listDashboards(dashStore) : [];
+    if (!boards.length) {
+      pinListEl.innerHTML = '<p class="ch-pin-empty">No dashboards yet — name one below to start.</p>';
+      return;
+    }
+    pinListEl.innerHTML = '';
+    for (const d of boards) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ch-pin-existing';
+      btn.innerHTML =
+        `<span class="ch-pin-existing-name"></span>` +
+        `<span class="ch-pin-existing-meta">${d.tiles.length} tile${d.tiles.length === 1 ? '' : 's'}</span>`;
+      (btn.querySelector('.ch-pin-existing-name') as HTMLElement).textContent = d.title;
+      btn.addEventListener('click', () => doPin(d));
+      pinListEl.appendChild(btn);
+    }
+  }
+
+  // Pin the captured chart into a target dashboard (an existing Dashboard, or
+  // 'new' with a name). Reloads the target fresh from storage so concurrent
+  // edits are not clobbered, then addTile → saveDashboard, surfacing any cap or
+  // quota error inline without closing the dialog.
+  function doPin(target: Dashboard | 'new', rawName?: string) {
+    if (!pinContext) return;
+    if (!dashStore) {
+      setPinStatus('Browser storage is unavailable — cannot pin.', true);
+      return;
+    }
+    let dash: Dashboard;
+    if (target === 'new') {
+      const name = (rawName || '').trim() || pinContext.spec.title || 'My dashboard';
+      dash = findDashboardByTitle(dashStore, name) || createDashboard(name);
+    } else {
+      dash = loadDashboard(dashStore, target.id) || target;
+    }
+    const tile = makeTile({
+      title: pinContext.spec.title || 'Chart',
+      spec: pinContext.spec,
+      rows: pinContext.rows,
+      citations: pinContext.citations,
+    });
+    try {
+      dash = addTile(dash, tile);
+    } catch (e: any) {
+      setPinStatus(e instanceof DashboardCapError ? e.message : 'Could not pin: ' + (e?.message ?? e), true);
+      return;
+    }
+    const saved = saveDashboard(dashStore, dash);
+    if (!saved.ok) {
+      setPinStatus(saved.error, true);
+      return;
+    }
+    updateDashNavCount();
+    const tb = pinContext.tb;
+    const title = dash.title;
+    closePinPicker();
+    // Confirm through the turn's existing aria-live region (reused from share).
+    announceShare(tb, `pinned to "${title}"`);
+  }
+
+  pinNewForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    doPin('new', pinNameInput.value);
+  });
+  pinCloseBtn.addEventListener('click', () => closePinPicker());
+  pinBackdrop.addEventListener('click', () => closePinPicker());
+  pinDialog.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closePinPicker();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const items = Array.from(pinDialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+      (el) => el.getClientRects().length > 0 || el === document.activeElement
+    );
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    const target = focusTrapTarget(idx, items.length, e.shiftKey);
+    if (target !== null) {
+      e.preventDefault();
+      items[target]?.focus();
+    }
+  });
+
+  // ── Dashboards view ─────────────────────────────────────────────────────
+  let currentDashId: string | null = null;
+  let dashReturnFocus: HTMLElement | null = null;
+
+  function disposeDashCharts() {
+    for (const t of liveDashCharts) t.inst?.dispose();
+    liveDashCharts.length = 0;
+  }
+
+  function openDashboards() {
+    dashReturnFocus = document.activeElement as HTMLElement;
+    currentDashId = null;
+    dashView.hidden = false;
+    document.body.classList.add('ch-dashview-open');
+    renderDashList();
+    requestAnimationFrame(() => dashViewBack.focus());
+  }
+
+  function closeDashboards() {
+    disposeDashCharts();
+    dashView.hidden = true;
+    document.body.classList.remove('ch-dashview-open');
+    currentDashId = null;
+    if (dashReturnFocus && document.body.contains(dashReturnFocus)) dashReturnFocus.focus();
+    else dashNavBtn.focus();
+  }
+
+  // Back is contextual: from a dashboard's detail → back to the list; from the
+  // list → close the whole view.
+  function dashBack() {
+    if (currentDashId) {
+      disposeDashCharts();
+      currentDashId = null;
+      renderDashList();
+      requestAnimationFrame(() => dashViewBack.focus());
+    } else {
+      closeDashboards();
+    }
+  }
+
+  function renderDashList() {
+    disposeDashCharts();
+    dashViewTitle.textContent = 'Dashboards';
+    dashViewBack.setAttribute('aria-label', 'Close dashboards');
+    const boards = dashStore ? listDashboards(dashStore) : [];
+    dashViewBody.innerHTML = '';
+    if (!boards.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ch-dash-empty';
+      empty.innerHTML =
+        '<p class="ch-dash-empty-title">No dashboards yet</p>' +
+        '<p class="ch-dash-empty-sub">Pin a chart from any answer — use “Pin to dashboard” under an answer’s raw data.</p>';
+      dashViewBody.appendChild(empty);
+      return;
+    }
+    const grid = document.createElement('div');
+    grid.className = 'ch-dash-list';
+    for (const d of boards) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'ch-dash-card';
+      card.innerHTML =
+        '<span class="ch-dash-card-title"></span>' +
+        `<span class="ch-dash-card-meta">${d.tiles.length} tile${d.tiles.length === 1 ? '' : 's'} · updated ${esc(fmtDate(d.updated))}</span>`;
+      (card.querySelector('.ch-dash-card-title') as HTMLElement).textContent = d.title;
+      card.addEventListener('click', () => openDashboard(d.id));
+      grid.appendChild(card);
+    }
+    dashViewBody.appendChild(grid);
+  }
+
+  function openDashboard(id: string) {
+    if (!dashStore) return;
+    const dash = loadDashboard(dashStore, id);
+    if (!dash) { renderDashList(); return; }
+    currentDashId = id;
+    renderDashDetail(dash);
+    requestAnimationFrame(() => dashViewBack.focus());
+  }
+
+  // Persist a mutated dashboard and re-render the detail from the saved copy so
+  // the view and storage never drift. Surfaces a save failure via the title bar.
+  function saveAndRerender(dash: Dashboard) {
+    if (!dashStore) return;
+    const res = saveDashboard(dashStore, dash);
+    updateDashNavCount();
+    if (!res.ok) { dashViewTitle.textContent = dash.title + ' — ' + res.error; return; }
+    renderDashDetail(dash);
+  }
+
+  function renderDashDetail(dash: Dashboard) {
+    disposeDashCharts();
+    currentDashId = dash.id;
+    dashViewTitle.textContent = dash.title;
+    dashViewBack.setAttribute('aria-label', 'Back to dashboards');
+    dashViewBody.innerHTML = '';
+
+    // Detail header: dashboard title + rename control + tile count.
+    const head = document.createElement('div');
+    head.className = 'ch-dash-detail-head';
+    const count = document.createElement('span');
+    count.className = 'ch-dash-detail-count';
+    count.textContent = `${dash.tiles.length} tile${dash.tiles.length === 1 ? '' : 's'}`;
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.className = 'ch-dash-mini';
+    renameBtn.textContent = 'Rename dashboard';
+    renameBtn.addEventListener('click', () =>
+      inlineRename(dash.title, 'Dashboard name', (name) => saveAndRerender(renameDashboard(dash, name)))
+    );
+    head.appendChild(count);
+    head.appendChild(renameBtn);
+    dashViewBody.appendChild(head);
+
+    if (!dash.tiles.length) {
+      const empty = document.createElement('p');
+      empty.className = 'ch-dash-empty-sub';
+      empty.textContent = 'This dashboard is empty. Pin a chart from an answer to add a tile.';
+      dashViewBody.appendChild(empty);
+      return;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'ch-dash-grid';
+    dash.tiles.forEach((tile, i) => grid.appendChild(buildTileCard(dash, tile, i)));
+    dashViewBody.appendChild(grid);
+
+    // Lazily init each tile's chart as it scrolls into view; initially-visible
+    // tiles fire immediately on observe. Charts are disposed on view exit.
+    initTileChartsLazily();
+  }
+
+  function buildTileCard(dash: Dashboard, tile: Tile, index: number): HTMLElement {
+    const card = document.createElement('figure');
+    card.className = 'ch-dash-tile';
+
+    const head = document.createElement('figcaption');
+    head.className = 'ch-dash-tile-head';
+    const title = document.createElement('span');
+    title.className = 'ch-dash-tile-title';
+    title.textContent = tile.title;
+    head.appendChild(title);
+
+    const controls = document.createElement('div');
+    controls.className = 'ch-dash-tile-controls';
+
+    const upBtn = miniBtn('↑', 'Move tile up', () => saveAndRerender(moveTile(dash, tile.id, 'up')));
+    upBtn.disabled = index === 0;
+    const downBtn = miniBtn('↓', 'Move tile down', () => saveAndRerender(moveTile(dash, tile.id, 'down')));
+    downBtn.disabled = index === dash.tiles.length - 1;
+    const renameBtn = miniBtn('Rename', 'Rename tile', () =>
+      inlineRename(tile.title, 'Tile title', (name) => saveAndRerender(renameTile(dash, tile.id, name)))
+    );
+    const removeBtn = miniBtn('Remove', 'Remove tile', function (this: HTMLButtonElement) {
+      armConfirm(this, 'Remove?', () => saveAndRerender(removeTile(dash, tile.id)));
+    });
+    removeBtn.classList.add('ch-dash-tile-remove');
+
+    controls.appendChild(upBtn);
+    controls.appendChild(downBtn);
+    controls.appendChild(renameBtn);
+    controls.appendChild(removeBtn);
+    head.appendChild(controls);
+    card.appendChild(head);
+
+    const chartWrap = document.createElement('div');
+    chartWrap.className = 'ch-dash-tile-chart';
+    chartWrap.setAttribute('role', 'img');
+    chartWrap.setAttribute('aria-label', chartAriaLabel(tile.spec));
+    // Stash the spec on the element so the lazy initializer can read it.
+    (chartWrap as any).__spec = tile.spec;
+    card.appendChild(chartWrap);
+
+    // Provenance line: unit (if any) + the tile's source/vintage note.
+    const source = document.createElement('div');
+    source.className = 'ch-dash-tile-source';
+    const bits: string[] = [];
+    if (tile.spec.y_axis) bits.push(tile.spec.y_axis);
+    if (tile.sourceNote) bits.push(tile.sourceNote);
+    source.textContent = bits.join(' · ') || 'pinned chart';
+    card.appendChild(source);
+
+    return card;
+  }
+
+  function miniBtn(label: string, aria: string, onClick: (this: HTMLButtonElement) => void): HTMLButtonElement {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ch-dash-mini';
+    b.textContent = label;
+    b.setAttribute('aria-label', aria);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  // Swap a title element region for an inline text input with save/cancel,
+  // keyboard-operable (Enter saves, Escape cancels). Used for both dashboard
+  // and tile renames. A simple prompt-free inline editor.
+  function inlineRename(current: string, label: string, onSave: (name: string) => void) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'ch-input ch-dash-rename-input';
+    input.value = current;
+    input.setAttribute('aria-label', label);
+    input.maxLength = 80;
+
+    const bar = document.createElement('div');
+    bar.className = 'ch-dash-rename';
+    const save = () => {
+      const v = input.value.trim();
+      if (v) onSave(v);
+      else cleanup();
+    };
+    const cleanup = () => bar.remove();
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+    });
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'ch-dash-mini';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', save);
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'ch-dash-mini';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cleanup);
+    bar.appendChild(input);
+    bar.appendChild(saveBtn);
+    bar.appendChild(cancelBtn);
+    // Insert the editor at the top of the detail body so it is unmistakable.
+    dashViewBody.insertBefore(bar, dashViewBody.firstChild);
+    input.focus();
+    input.select();
+  }
+
+  // Init any not-yet-initialized tile charts as they enter the viewport.
+  function initTileChartsLazily() {
+    const wraps = Array.from(dashViewBody.querySelectorAll<HTMLElement>('.ch-dash-tile-chart'));
+    const init = async (el: HTMLElement) => {
+      if ((el as any).__inited) return;
+      (el as any).__inited = true;
+      const spec = (el as any).__spec as ChartSpec;
+      const echarts = await loadECharts();
+      const inst = echarts.init(el, null, { renderer: 'canvas' });
+      inst.setOption(buildOption(spec));
+      liveDashCharts.push({ el, spec, inst });
+    };
+    if (typeof IntersectionObserver === 'function') {
+      const io = new IntersectionObserver((entries, obs) => {
+        for (const en of entries) {
+          if (en.isIntersecting) {
+            void init(en.target as HTMLElement);
+            obs.unobserve(en.target);
+          }
+        }
+      }, { root: null, rootMargin: '200px' });
+      for (const w of wraps) io.observe(w);
+    } else {
+      for (const w of wraps) void init(w);
+    }
+  }
+
+  dashNavBtn.addEventListener('click', () => openDashboards());
+  dashViewBack.addEventListener('click', () => dashBack());
+  dashView.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); dashBack(); return; }
+    if (e.key !== 'Tab') return;
+    // Trap focus within the overlay while it is open.
+    const items = Array.from(dashView.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+      (el) => el.getClientRects().length > 0 || el === document.activeElement
+    );
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    const target = focusTrapTarget(idx, items.length, e.shiftKey);
+    if (target !== null) {
+      e.preventDefault();
+      items[target]?.focus();
+    }
+  });
+
+  updateDashNavCount();
+
   // ── "+ new question" (non-destructive two-step reset) ────────────────────
   // The reset is genuinely destructive: it wipes the whole thread AND unlocks
   // the source picker (the session's databases can only be changed by starting
@@ -2647,7 +3217,10 @@ const PRESETS = [
           tb.metaSection.style.display = 'block';
           renderTable(tb, out.rows, out.csv);
           renderCitations(tb, out.citations);
+          tb.lastCitations = out.citations;
         }
+        // A partial run that still rendered a chart can be pinned as-is.
+        if (tb.lastSpec) tb.pinBtn.style.display = '';
         if (out.finding) {
           tb.answerSection.style.display = 'block';
           renderFinding(tb, out.finding);
@@ -2704,6 +3277,8 @@ const PRESETS = [
       tb.lastCitations = out.citations;
       tb.lastVerification = out.verification;
       tb.shareBtn.style.display = '';
+      // A chart exists this turn ⇒ it can be pinned to a dashboard.
+      if (tb.lastSpec) tb.pinBtn.style.display = '';
 
       const costTxt = out.cost > 0 ? ` · ~$${out.cost.toFixed(4)}` : ' · free';
       setStatus(tb, 'ok', 'Done' + (out.retried ? ' (retried once)' : '') + costTxt);
@@ -2817,9 +3392,21 @@ const PRESETS = [
         tb.lastCitations = opts?.citations ?? [];
         tb.lastVerification = opts?.verification ?? null;
         tb.shareBtn.style.display = '';
+        tb.pinBtn.style.display = '';
         dbg.chart = tb.chartInstance;
         dbg.tb = tb;
         return tb.root;
+      },
+      // Dashboard test hooks: open the view, and clear all saved dashboards so a
+      // headless harness starts from a known-empty state. Render helpers only —
+      // still no agent/provider/session internals exposed.
+      openDashboards() {
+        openDashboards();
+      },
+      clearDashboards() {
+        if (!dashStore) return;
+        for (const d of listDashboards(dashStore)) deleteDashboard(dashStore, d.id);
+        updateDashNavCount();
       },
       // Build the share URL for the staged turn without touching the clipboard,
       // so a headless harness can capture it deterministically.
@@ -4723,6 +5310,249 @@ const PRESETS = [
   :global(.ch-cite a:hover) { color: var(--fg); }
 
   /* ── Responsive ── */
+  /* ── Dashboards: nav chip, pin action, pin picker, dashboard view ─────── */
+  .ch-dash-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 3px 11px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  .ch-dash-nav:hover { color: var(--fg); background: var(--bg-hover); border-color: color-mix(in srgb, var(--fg) 22%, transparent); }
+  .ch-dash-nav:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-dash-nav svg { flex-shrink: 0; }
+  .ch-dash-nav-count {
+    font-size: 10px;
+    min-width: 16px;
+    text-align: center;
+    padding: 0 4px;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--signal) 20%, transparent);
+    color: var(--fg);
+  }
+
+  /* Pin action: styled to match .ch-csv / .ch-share (same mono underline). */
+  .ch-pin {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    background: transparent;
+    color: var(--signal);
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    padding: 0;
+  }
+  .ch-pin:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* Pin picker: a centered modal dialog with a dimmed backdrop. */
+  .ch-pin-backdrop:not([hidden]) {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: color-mix(in srgb, var(--bg) 62%, transparent);
+  }
+  .ch-pin-dialog:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ch-pin-dialog {
+    position: fixed;
+    z-index: 41;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(420px, calc(100vw - 32px));
+    max-height: 85vh;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--fg) 6%, var(--bg));
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 48px color-mix(in srgb, var(--bg) 70%, transparent);
+    padding: var(--space-md);
+  }
+  .ch-pin-head { display: flex; align-items: center; justify-content: space-between; }
+  .ch-pin-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg);
+  }
+  .ch-pin-close {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--fg-muted); font-size: 15px; line-height: 1; padding: 4px;
+  }
+  .ch-pin-close:hover { color: var(--fg); }
+  .ch-pin-close:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; border-radius: 3px; }
+  .ch-pin-sub { font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+  .ch-pin-list { display: flex; flex-direction: column; gap: 6px; }
+  /* Rows inside the pin list are built in JS (no Astro scope attribute), so
+     their selectors must be :global — same discipline as the trace/citation
+     renderers elsewhere in this file. */
+  :global(.ch-pin-empty) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+  :global(.ch-pin-existing) {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    text-align: left;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 8px 11px;
+    color: var(--fg);
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-pin-existing:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-pin-existing:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-pin-existing-meta) { color: var(--fg-muted); flex-shrink: 0; }
+  .ch-pin-new { display: flex; flex-direction: column; gap: 5px; border-top: 1px dashed var(--fg-faint); padding-top: 10px; }
+  .ch-pin-new-row { display: flex; gap: 8px; }
+  .ch-pin-new-row .ch-input { flex: 1; min-width: 0; }
+  .ch-pin-create {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--signal) 16%, var(--bg));
+    color: var(--fg);
+    border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+    border-radius: var(--radius-md);
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .ch-pin-create:hover { background: color-mix(in srgb, var(--signal) 26%, var(--bg)); }
+  .ch-pin-create:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-pin-status { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); min-height: 1.1em; }
+  .ch-pin-status-error { color: color-mix(in srgb, var(--danger) 60%, var(--fg-muted)); }
+
+  /* Dashboards view: a full-column overlay over the app. */
+  .ch-dashview:not([hidden]) { display: block; }
+  .ch-dashview {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: var(--bg);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--space-lg) clamp(16px, 5vw, 48px) calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+  }
+  .ch-dashview-bar {
+    display: flex; align-items: center; gap: var(--space-md);
+    max-width: 1100px; margin: 0 auto var(--space-lg);
+  }
+  .ch-dashview-back {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  .ch-dashview-back:hover { color: var(--fg); background: var(--bg-hover); }
+  .ch-dashview-back:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  .ch-dashview-title { font-size: var(--text-section, 1.2rem); font-weight: 600; margin: 0; color: var(--fg); }
+  .ch-dashview-body { max-width: 1100px; margin: 0 auto; }
+
+  /* Everything below .ch-dashview-body is built in JS, so :global is required
+     for the styles to reach it (Astro scopes template markup only). */
+  :global(.ch-dash-empty) { text-align: center; padding: var(--space-lg) 0; }
+  :global(.ch-dash-empty-title) { font-family: var(--font-mono); font-size: var(--text-label); color: var(--fg); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  :global(.ch-dash-empty-sub) { font-size: var(--text-tag); color: var(--fg-muted); margin: 0; }
+
+  :global(.ch-dash-list) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-md);
+  }
+  :global(.ch-dash-card) {
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+    text-align: left;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-dash-card:hover) { border-color: color-mix(in srgb, var(--signal) 45%, transparent); background: var(--bg-hover); }
+  :global(.ch-dash-card:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-dash-card-title) { font-family: var(--font-serif, var(--font-mono)); font-size: 1.02rem; color: var(--fg); font-weight: 600; }
+  :global(.ch-dash-card-meta) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); }
+
+  :global(.ch-dash-detail-head) { display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md); flex-wrap: wrap; }
+  :global(.ch-dash-detail-count) { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--fg-muted); }
+  :global(.ch-dash-mini) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-dash-mini:hover:not(:disabled)) { color: var(--fg); background: var(--bg-hover); }
+  :global(.ch-dash-mini:disabled) { opacity: 0.35; cursor: default; }
+  :global(.ch-dash-mini:focus-visible) { outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent); outline-offset: 2px; }
+  :global(.ch-dash-tile-remove:hover:not(:disabled)) { color: var(--ch-danger, var(--danger)); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  :global(.ch-confirm-armed) {
+    color: var(--ch-danger, var(--danger));
+    border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+  }
+
+  :global(.ch-dash-rename) { display: flex; gap: 8px; margin-bottom: var(--space-md); flex-wrap: wrap; }
+  :global(.ch-dash-rename-input) {
+    flex: 1; min-width: 180px;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    padding: 5px 9px;
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-elevated);
+    color: var(--fg);
+  }
+
+  :global(.ch-dash-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+    gap: var(--space-md);
+  }
+  :global(.ch-dash-tile) {
+    margin: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  :global(.ch-dash-tile-head) { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  :global(.ch-dash-tile-title) {
+    font-family: var(--font-mono); font-size: var(--text-label);
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--fg);
+    min-width: 0; overflow-wrap: anywhere;
+  }
+  :global(.ch-dash-tile-controls) { display: flex; gap: 5px; flex-shrink: 0; flex-wrap: wrap; }
+  :global(.ch-dash-tile-chart) { width: 100%; height: 300px; min-width: 0; }
+  :global(.ch-dash-tile-source) {
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--fg-muted); margin-top: 8px; overflow-wrap: anywhere;
+  }
+
   @media (max-width: 700px) {
     .ch-panel-meta { display: none; }
     .ch-byok-row { flex-direction: column; align-items: stretch; }
@@ -4787,5 +5617,10 @@ const PRESETS = [
        natural width instead of collapsing the follow-up textarea. */
     .ch-console .ch-btn { width: 100%; }
     .ch-chart { height: 300px; }
+    /* Dashboards: keep the nav chip but tighten it; single-column tiles. */
+    .ch-dashview { padding: var(--space-md) 16px calc(var(--space-md) + env(safe-area-inset-bottom, 0px)); }
+    :global(.ch-dash-tile-chart) { height: 260px; }
+    :global(.ch-dash-tile-head) { flex-direction: column; }
+    .ch-pin-new-row { flex-direction: column; }
   }
 </style>
