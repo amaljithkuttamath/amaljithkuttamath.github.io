@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveCountry,
   resolveCountryList,
+  suggestCountries,
   formatResolutions,
   type MatchKind,
 } from './countries';
@@ -151,20 +152,58 @@ describe('resolveCountry — null on unresolvable input', () => {
 });
 
 describe('resolveCountryList — batch resolution + change tracking', () => {
-  it('rewrites loose inputs, passes canonical codes and unresolved names through', () => {
-    const { codes, changes } = resolveCountryList(['UK', 'USA', 'Holland', 'Freedonia']);
-    // Canonical order preserved; UK→GBR, USA stays, Holland→NLD, unknown passes through.
-    expect(codes).toEqual(['GBR', 'USA', 'NLD', 'Freedonia']);
+  // POLICY CHANGE (router-validation increment): an unresolvable token is now
+  // DROPPED (reported in `dropped`), NOT passed through to the API as a junk
+  // code (which the World Bank rejects with "provided parameter value is not
+  // valid"). This test previously asserted the token passed through in `codes`;
+  // it now asserts the drop. See routeFetch for how the drop is disclosed.
+  it('rewrites loose inputs, keeps canonical codes, and DROPS unresolved names', () => {
+    const { codes, changes, dropped } = resolveCountryList(['UK', 'USA', 'Holland', 'Freedonia']);
+    // Only resolved (canonical) codes reach `codes`; the junk token is gone.
+    expect(codes).toEqual(['GBR', 'USA', 'NLD']);
     // Only the two rewrites are reported as changes (USA was already canonical).
     expect(changes.map((c) => c.from)).toEqual(['UK', 'Holland']);
     expect(changes.find((c) => c.from === 'UK')?.code).toBe('GBR');
     expect(changes.find((c) => c.from === 'UK')?.name).toBe('United Kingdom');
+    // The unresolvable token is reported as a drop, not silently swallowed.
+    expect(dropped.map((d) => d.from)).toEqual(['Freedonia']);
   });
 
-  it('reports no changes when every input is already canonical', () => {
-    const { codes, changes } = resolveCountryList(['USA', 'IND', 'CHN']);
+  it('reports no changes and no drops when every input is already canonical', () => {
+    const { codes, changes, dropped } = resolveCountryList(['USA', 'IND', 'CHN']);
     expect(codes).toEqual(['USA', 'IND', 'CHN']);
     expect(changes).toEqual([]);
+    expect(dropped).toEqual([]);
+  });
+
+  it('drops EVERY token when nothing resolves (router turns this into a tool error)', () => {
+    const { codes, dropped } = resolveCountryList(['Scandinavia', 'Freedonia']);
+    expect(codes).toEqual([]);
+    expect(dropped.map((d) => d.from)).toEqual(['Scandinavia', 'Freedonia']);
+  });
+});
+
+describe('suggestCountries — nearest names for a dropped token', () => {
+  it('offers close catalog names for a partial input', () => {
+    expect(suggestCountries('German')).toContain('Germany');
+    expect(suggestCountries('Ital')).toContain('Italy');
+    // A shared prefix like "United" surfaces the United* family.
+    expect(suggestCountries('United')).toEqual(
+      expect.arrayContaining(['United Kingdom', 'United States'])
+    );
+  });
+
+  it('returns [] when nothing is close (a genuinely unknown region)', () => {
+    // The reported failure case: "Scandinavia" is not a WB country/aggregate and
+    // has no near name, so there is honestly nothing to suggest.
+    expect(suggestCountries('Scandinavia')).toEqual([]);
+    expect(suggestCountries('Freedonia')).toEqual([]);
+  });
+
+  it('caps suggestions and refuses too-short fragments', () => {
+    expect(suggestCountries('a')).toEqual([]);
+    expect(suggestCountries('un')).toEqual([]);
+    expect(suggestCountries('United').length).toBeLessThanOrEqual(4);
   });
 });
 

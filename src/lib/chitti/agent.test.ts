@@ -14,6 +14,7 @@ import {
   parseImfIndicators,
   parseOwidCatalog,
   parseWhoIndicators,
+  parseWorldBankError,
   fetchWho,
   DEFAULT_SOURCE_IDS,
   VFS,
@@ -278,6 +279,47 @@ describe('parseOwidCatalog — live OWID grapher catalog', () => {
         'string',
       ])
     ).toEqual([{ id: 'owid:gdp-per-capita-worldbank', name: 'gdp-per-capita-worldbank' }]);
+  });
+});
+
+// ── World Bank error-body parser (router-validation increment) ─────────────
+// Egress is blocked here, so the REAL World Bank rejection can't be reproduced;
+// these stubbed error-body shapes ARE the contract the parser is written to.
+// The reported live message ("The provided parameter value is not valid") is
+// included verbatim as the primary row.
+describe('parseWorldBankError — WB JSON error envelope', () => {
+  it('parses the reported "provided parameter value is not valid" shape', () => {
+    const body = [
+      { message: [{ id: '120', key: 'Invalid value', value: 'The provided parameter value is not valid' }] },
+    ];
+    const r = parseWorldBankError(body);
+    expect(r).not.toBeNull();
+    expect(r!.message).toBe('The provided parameter value is not valid');
+    expect(r!.invalidParameter).toBe(true);
+  });
+
+  it('treats an "Invalid value" key as an invalid-parameter rejection even without the value text', () => {
+    const r = parseWorldBankError([{ message: [{ id: '120', key: 'Invalid value' }] }]);
+    expect(r).not.toBeNull();
+    expect(r!.invalidParameter).toBe(true);
+    expect(r!.message).toBe('Invalid value');
+  });
+
+  it('surfaces a non-parameter WB message without the invalid-parameter flag', () => {
+    const r = parseWorldBankError([{ message: [{ id: '175', key: 'API', value: 'Something else went wrong' }] }]);
+    expect(r).not.toBeNull();
+    expect(r!.message).toBe('Something else went wrong');
+    expect(r!.invalidParameter).toBe(false);
+  });
+
+  it('returns null for a normal (non-error) WB response and for junk', () => {
+    // A real data response: [header, [rows...]] — not an error envelope.
+    expect(parseWorldBankError([{ page: 1, pages: 1 }, [{ value: 1 }]])).toBeNull();
+    // Empty / malformed bodies.
+    expect(parseWorldBankError([])).toBeNull();
+    expect(parseWorldBankError(null)).toBeNull();
+    expect(parseWorldBankError([{ message: [] }])).toBeNull();
+    expect(parseWorldBankError([{ message: [{}] }])).toBeNull();
   });
 });
 
@@ -555,6 +597,7 @@ import {
   countCountryMentions,
   parsePlanBrief,
   matchStepToEvent,
+  buildRejectionSteer,
   type PlanStep,
 } from './agent';
 
@@ -1825,6 +1868,252 @@ describe('fetch_series router + session cache (driven)', () => {
     // The sub-agent appended once; the cache hit did not re-append.
     expect(out.rows.length).toBe(1);
     expect(out.rows[0].indicator).toBe('SP.DYN.LE00.IN');
+  });
+});
+
+// ── Router validation: country drops, id guard, API-rejection steers ─────────
+// The reported symptom: an invalid indicator id / unresolvable country reached
+// the World Bank API and the failure surfaced raw instead of triggering
+// recovery. Egress is blocked here, so the REAL WB rejection can't be
+// reproduced — every fetch is a STUB, and the stubbed WB error-body shape (the
+// reported "provided parameter value is not valid" envelope) IS the contract.
+describe('router validation + recovery (driven)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const tc = (name: string, args: Record<string, unknown>, id: string) => ({ id, name, arguments: args });
+  const modelTurn = (calls: unknown[]) => ({ text: '', toolCalls: calls, usage: { input: 10, output: 5 } });
+  const verifyPass = () => ({ text: 'PASS: ok.', toolCalls: [], usage: { input: 2, output: 1 } });
+  const newSession = (sources?: string[]) =>
+    createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' }, sources ? { sources } : undefined);
+  const capture = () => {
+    let last: any[] = [];
+    const cb = { onTrace: (ev: any[]) => (last = ev), onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+    return { cb, trace: () => last };
+  };
+  const toolMsgById = (id: string): string => {
+    for (const call of mockComplete.mock.calls) {
+      const msgs = call[1] as any[];
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) if (m.role === 'tool' && m.tool_call_id === id) return m.content as string;
+    }
+    return '';
+  };
+  // ask() trims long tool-result messages to a marker at the END of a turn (so
+  // the post-hoc mock.calls read shows the marker, not the steer). To assert on
+  // the FULL tool text a steer handed the model, snapshot each tool message when
+  // complete() actually receives it — before end-of-turn trimming. `turns` is
+  // the queue of model responses; a follow-up turn is what triggers the
+  // complete() call that observes the previous turn's (untrimmed) tool result.
+  const driveCapture = (turns: any[]) => {
+    const seen: Record<string, string> = {};
+    let i = 0;
+    mockComplete.mockImplementation(async (_c: any, msgs: any[]) => {
+      if (Array.isArray(msgs)) for (const m of msgs) if (m.role === 'tool') seen[m.tool_call_id] = m.content;
+      return turns[i++] ?? verifyPass();
+    });
+    return seen;
+  };
+  // WB fetch stub: an indicator id containing "BADIND" returns the WB error
+  // envelope (HTTP 200 + [{message:[…]}]); everything else returns one India row.
+  // Also answers the live WB indicator-search fallback harmlessly.
+  const wbFetch = () => {
+    const urls: string[] = [];
+    const fn = vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('/indicator?')) return { ok: true, json: async () => [{ page: 1 }, []] };
+      if (u.includes('BADIND'))
+        return {
+          ok: true,
+          json: async () => [
+            { message: [{ id: '120', key: 'Invalid value', value: 'The provided parameter value is not valid' }] },
+          ],
+        };
+      if (u.includes('api.worldbank.org'))
+        return { ok: true, json: async () => [{ page: 1, pages: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+      if (u.includes('ourworldindata.org'))
+        return { ok: true, text: async () => 'Entity,Code,Year,V\nIndia,IND,2020,7\n' };
+      throw new Error('unexpected url ' + u);
+    });
+    return { fn, urls };
+  };
+
+  it('DROPS an unresolvable country, fetches only what resolved, and discloses it', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND', 'Scandinavia'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    // The junk token never reached the API; only the resolved country did.
+    expect(urls.some((u) => u.includes('/country/IND/'))).toBe(true);
+    expect(urls.some((u) => u.toLowerCase().includes('scandinavia'))).toBe(false);
+    // Disclosed in the model's tool result AND on the receipt.
+    expect(toolMsgById('f')).toContain('Could not resolve "Scandinavia"');
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toContain('dropped Scandinavia');
+    expect(out.rows.length).toBe(1);
+  });
+
+  it('NOTHING resolves → tool error with no API call at all', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    // Two turns: the bad fetch, then a finish — the finish's complete() call is
+    // what observes the (untrimmed) tool result the steer produced.
+    const seen = driveCapture([
+      modelTurn([tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['Scandinavia'], year_start: 2020, year_end: 2020 }, 'f')]),
+      modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]),
+    ]);
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    // No World Bank data call happened — junk never left the router.
+    expect(urls.some((u) => u.includes('/country/'))).toBe(false);
+    expect(seen['f']).toMatch(/none of the requested countries could be resolved/);
+    expect(out.rows.length).toBe(0);
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toBe('no countries resolved');
+  });
+
+  it('nothing-resolves error carries nearest suggestions when the resolver has any', async () => {
+    const { fn } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    // "Germ" does not resolve to a country but is close to "Germany" — a suggestion.
+    const seen = driveCapture([
+      modelTurn([tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['Germ'], year_start: 2020, year_end: 2020 }, 'f')]),
+      modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]),
+    ]);
+    const { cb } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+    expect(seen['f']).toContain('Did you mean');
+    expect(seen['f']).toContain('Germany');
+  });
+
+  it('curated-source unknown id → steer to find_series, no fetch', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'owid:totally-made-up-slug', countries: ['IND'] }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb } = capture();
+    const out = await newSession(['owid']).ask('q', cb);
+    expect(urls.some((u) => u.includes('ourworldindata.org'))).toBe(false);
+    expect(toolMsgById('f')).toMatch(/unknown OWID slug/);
+    expect(toolMsgById('f')).toMatch(/find_series/);
+    expect(out.rows.length).toBe(0);
+  });
+
+  it('unknown WORLD BANK id → proceeds (huge id space) but the receipt is marked "unverified id"', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'XX.MADE.UP', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'f'),
+        tc('finish_explanation', { explanation: 'done' }, 'fe'),
+      ])
+    );
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+    // It DID fetch (WB ids beyond our catalog are legitimate)…
+    expect(urls.some((u) => u.includes('XX.MADE.UP'))).toBe(true);
+    // …but the receipt flags it as unverified.
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toContain('unverified id');
+    expect(out.rows.length).toBe(1);
+  });
+
+  it('driven recovery: bad WB fetch → API-rejection steer → find_series → good fetch → answer', async () => {
+    const { fn } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    // Turn 1: model fetches a bad (unverified) WB id → API rejects → steer.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([tc('fetch_series', { id: 'BADIND', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'bad')])
+    );
+    // Turn 2: model recovers by searching.
+    mockComplete.mockResolvedValueOnce(modelTurn([tc('find_series', { query: 'child mortality' }, 'fs')]));
+    // Turn 3: model fetches a real id, charts, finishes.
+    mockComplete.mockResolvedValueOnce(
+      modelTurn([
+        tc('fetch_series', { id: 'SH.DYN.MORT', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'good'),
+        tc('render_chart', { type: 'line', title: 'T', series: [{ name: 'IND', data: [[2020, 100]] }] }, 'rc'),
+        tc('finish', { one_line_finding: 'recovered.' }, 'fin'),
+      ])
+    );
+    mockComplete.mockResolvedValueOnce(verifyPass());
+
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    // The bad fetch's tool result steered to find_series (recoverable, not raw).
+    expect(toolMsgById('bad')).toMatch(/World Bank rejected/);
+    expect(toolMsgById('bad')).toMatch(/find_series/);
+    // The receipts, in order: fetch(error) → find_series → fetch(ok) → chart → finish.
+    const seq = trace()
+      .filter((e) => ['fetch_series', 'find_series', 'render_chart', 'finish'].includes(e.tool))
+      .map((e) => `${e.tool}:${e.status}`);
+    expect(seq).toEqual([
+      'fetch_series:error',
+      'find_series:ok',
+      'fetch_series:ok',
+      'render_chart:ok',
+      'finish:ok',
+    ]);
+    expect(out.finding).toBe('recovered.');
+    expect(out.rows.length).toBe(1);
+  });
+
+  it('caps identical rejected fetches: a second rejection of the same id says STOP retrying', async () => {
+    const { fn } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    const seen = driveCapture([
+      modelTurn([
+        tc('fetch_series', { id: 'BADIND', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+        tc('fetch_series', { id: 'BADIND', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+      ]),
+      modelTurn([tc('finish_explanation', { explanation: 'gave up' }, 'fe')]),
+    ]);
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    // First rejection: a gentle "don't retry"; second identical rejection: hard STOP.
+    expect(seen['a']).not.toMatch(/AGAIN/);
+    expect(seen['a']).toMatch(/find_series/);
+    expect(seen['b']).toMatch(/AGAIN/);
+    expect(seen['b']).toMatch(/STOP retrying/);
+    // The escalation is also honest on the receipts (both error, second says stop).
+    const evs = trace().filter((e) => e.tool === 'fetch_series');
+    expect(evs.map((e) => e.status)).toEqual(['error', 'error']);
+    expect(evs[0].detail).toBe('API rejected id (unverified id)');
+    expect(evs[1].detail).toBe('rejected again — stop retrying (unverified id)');
+  });
+});
+
+// buildRejectionSteer — the pure steer builder behind the driven recovery above.
+describe('buildRejectionSteer', () => {
+  it('names the source + id and steers to find_series on the first rejection', () => {
+    const s = buildRejectionSteer('worldbank', 'BAD.ID', 1);
+    expect(s).toMatch(/World Bank rejected World Bank indicator "BAD.ID"/);
+    expect(s).toMatch(/find_series/);
+    expect(s).not.toMatch(/AGAIN/);
+  });
+  it('escalates to a hard STOP on a repeat rejection of the same id', () => {
+    const s = buildRejectionSteer('owid', 'owid:x', 2);
+    expect(s).toMatch(/AGAIN/);
+    expect(s).toMatch(/STOP retrying/);
+  });
+  it('uses source-appropriate labels', () => {
+    expect(buildRejectionSteer('imf', 'imf:X', 1)).toMatch(/IMF code/);
+    expect(buildRejectionSteer('who', 'who:X', 1)).toMatch(/WHO IndicatorCode/);
   });
 });
 

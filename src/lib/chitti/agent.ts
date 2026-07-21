@@ -29,6 +29,7 @@ import {
   citationHumanUrl,
   citationsToCsvComments,
   INDICATORS,
+  ApiRejection,
   resolveSources,
   schemasForSources,
   subAgentSchemasFor,
@@ -559,6 +560,55 @@ class AbortedError extends Error {
   }
 }
 
+// Thrown inside routeFetch when a data API STRUCTURALLY rejected a fetch (a bad
+// indicator/slug/code — see ApiRejection). It carries the model-facing steer
+// (already prefixed "ERROR:") and a short receipt detail. dispatch's catch
+// renders it as an error receipt and returns the steer as the tool result, so
+// the model recovers (find_series → corrected fetch) instead of the failure
+// surfacing raw. NEVER a run-killer, and never used for a network/CORS failure
+// (those keep their existing graceful-fallback wording).
+class FetchSteer extends Error {
+  readonly detail: string;
+  constructor(steer: string, detail: string) {
+    super(steer);
+    this.name = 'FetchSteer';
+    this.detail = detail;
+  }
+}
+
+// Build the model-facing steer for a structured API rejection. `attempt` is how
+// many times this EXACT fetch (id + countries + range) has now been rejected
+// this session; on the 2nd+ rejection the steer tells the model in no uncertain
+// terms to STOP retrying the id (loop safety — a stubborn model must not burn
+// the tool-call budget on one bad id). Pure + exported for the steer unit table.
+export function buildRejectionSteer(
+  source: 'worldbank' | 'owid' | 'imf' | 'who',
+  id: string,
+  attempt: number
+): string {
+  const label =
+    source === 'worldbank' ? 'World Bank indicator'
+      : source === 'owid' ? 'OWID slug'
+      : source === 'imf' ? 'IMF code'
+      : 'WHO IndicatorCode';
+  const sourceName =
+    source === 'worldbank' ? 'World Bank'
+      : source === 'owid' ? 'Our World in Data'
+      : source === 'imf' ? 'IMF'
+      : 'WHO';
+  if (attempt >= 2) {
+    return (
+      `ERROR: ${sourceName} rejected ${label} "${id}" AGAIN — you have now tried this exact id ${attempt} times ` +
+      'and it does not exist. STOP retrying it: call find_series for a DIFFERENT, valid id, or answer with the ' +
+      'data you already have.'
+    );
+  }
+  return (
+    `ERROR: ${sourceName} rejected ${label} "${id}" — it may not exist. Do NOT retry the same id; ` +
+    'call find_series to get a valid id, then fetch_series with it.'
+  );
+}
+
 export interface SessionOptions {
   // Active database ids (from tools.ts SOURCES). Empty/omitted → all sources.
   // The hard filter: only these sources' tools and prompt guidance reach the
@@ -609,6 +659,20 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
   // populates the cache the main loop can then hit. Only successful fetches are
   // cached.
   const fetchCache = new Map<string, { rows: DataRow[]; result: string; detail: string }>();
+
+  // Ids that came back from a find_series hit this session (namespaced, lower-
+  // cased). The indicator-id guard trusts these alongside the curated catalogs,
+  // so a model that legitimately searched then fetched is never second-guessed.
+  // Session-scoped and shared by the main loop AND sub-agents (both search
+  // through the one dispatch), like fetchCache.
+  const seenSeriesIds = new Set<string>();
+
+  // Loop safety: how many times a given fetch key (id + resolved countries +
+  // range) has been STRUCTURALLY rejected by its API this session. A second
+  // rejection of the identical fetch earns a harder "stop retrying this id"
+  // steer (buildRejectionSteer), so a stubborn model can't spend the whole
+  // tool-call budget re-fetching one bad id.
+  const failedFetches = new Map<string, number>();
 
   let turnCount = 0;
 
@@ -845,15 +909,73 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         );
       }
 
+      // ── Indicator-id guard (heuristic, not a wall) ──────────────────────
+      // Trust an id that is in a curated catalog OR came back from a find_series
+      // hit this session (seenSeriesIds). Otherwise:
+      //  - World Bank: its live id space is far larger than our local
+      //    indicators.json, so an unknown WB id PROCEEDS — but the receipt is
+      //    marked "unverified id", and we stand ready to translate an API
+      //    rejection into a find_series steer (see the ApiRejection catch below).
+      //  - Curated-catalog sources (OWID/IMF/WHO): the id space here is CLOSED
+      //    (a curated slug/code round-trips; anything else 404s), so an id that
+      //    is neither in the catalog nor a session hit is almost certainly a
+      //    hallucinated slug/code — refuse with a find_series steer rather than
+      //    spend a fetch that will fail.
+      const idLc = id.trim().toLowerCase();
+      const idSeen = seenSeriesIds.has(idLc);
+      let unverifiedWbId = false;
+      if (source === 'worldbank') {
+        const known = INDICATORS.some((i) => i.id.toLowerCase() === idLc);
+        unverifiedWbId = !known && !idSeen;
+      } else {
+        const catalogId =
+          source === 'owid' ? 'owid:' + id.replace(/^owid:/i, '')
+            : source === 'imf' ? 'imf:' + id.replace(/^imf:/i, '').toUpperCase()
+            : 'who:' + id.replace(/^who:/i, '');
+        if (datasetName(catalogId) === undefined && !idSeen) {
+          ev.detail = `unknown ${source} id`;
+          const label = source === 'owid' ? 'OWID slug' : source === 'imf' ? 'IMF code' : 'WHO IndicatorCode';
+          return (
+            `ERROR: unknown ${label} "${id}" — it is not in the ${source.toUpperCase()} catalog ` +
+            'or any recent find_series result. Call find_series to get a valid id, then fetch_series with it.'
+          );
+        }
+      }
+
+      // ── Country policy: DROP unresolvable tokens; never send junk to the API ─
       // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
-      // ISO3/aggregate codes ONCE, here at the choke point. Unresolved names
-      // pass through unchanged; the receipt surfaces any rewrites.
+      // ISO3/aggregate codes ONCE, here at the choke point. A token that cannot
+      // be resolved is DROPPED (was: passed through unchanged, which the World
+      // Bank then rejected with "provided parameter value is not valid"). We
+      // fetch only what resolved and disclose the drops in both the tool result
+      // and the receipt. If NOTHING resolves (yet countries WERE requested), we
+      // return a tool error WITHOUT touching the API — junk never leaves here.
       const hasCountries = Array.isArray(rawCountries) && rawCountries.length > 0;
       const resolved = hasCountries ? resolveCountryList(rawCountries!) : undefined;
       const codes = resolved?.codes ?? [];
       const changes = resolved?.changes ?? [];
-      const resNote = changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '';
-      const resDetail = changes.length ? `${formatResolutions(changes)} · ` : '';
+      const dropped = resolved?.dropped ?? [];
+
+      if (hasCountries && codes.length === 0) {
+        ev.detail = 'no countries resolved';
+        const names = dropped.map((d) => `"${d.from}"`).join(', ');
+        const sugg = [...new Set(dropped.flatMap((d) => d.suggestions))].slice(0, 5);
+        return (
+          `ERROR: none of the requested countries could be resolved (${names}) — nothing was fetched. ` +
+          (sugg.length ? `Did you mean: ${sugg.join(', ')}? ` : '') +
+          'Use ISO3 codes (e.g. USA, CHN), common country names, or one aggregate like WLD, then fetch_series again.'
+        );
+      }
+
+      const dropNote = dropped.length
+        ? `Could not resolve ${dropped.map((d) => `"${d.from}"`).join(', ')} — ` +
+          `fetched only the resolved ${codes.length === 1 ? 'country' : 'countries'}: ${codes.join(', ')}.\n`
+        : '';
+      const dropDetail = dropped.length ? `dropped ${dropped.map((d) => d.from).join(', ')} · ` : '';
+      const idDetail = unverifiedWbId ? 'unverified id · ' : '';
+
+      const resNote = (changes.length ? `Resolved countries: ${formatResolutions(changes)}.\n` : '') + dropNote;
+      const resDetail = idDetail + dropDetail + (changes.length ? `${formatResolutions(changes)} · ` : '');
 
       // Cache lookup on the normalized (id + resolved countries + range) key.
       const key = fetchCacheKey(id, codes, ys, ye);
@@ -871,6 +993,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       let nid = id; // the normalized indicator id used as the citation key part
       let requestUrl = ''; // the exact API URL that was hit
       let sourceUpdated: string | undefined; // source data vintage, when present
+      try {
       switch (source) {
         case 'worldbank': {
           if (hasCountries) {
@@ -930,6 +1053,25 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           detail = resDetail + `${rows.length} rows · WHO GHO`;
           break;
         }
+      }
+      } catch (err: any) {
+        // A user-stop unwinds untouched. A STRUCTURED rejection (ApiRejection:
+        // the API answered "no" to this id/parameter) becomes a model-recoverable
+        // steer, with loop-safety counting identical rejected fetches. Anything
+        // else (a network/CORS failure, or the WB "no data returned" plain Error)
+        // re-throws to dispatch's generic catch, keeping its graceful-fallback
+        // wording — only structured rejections are turned into steers.
+        if (err instanceof AbortedError || signal?.aborted) throw err;
+        if (err instanceof ApiRejection) {
+          const attempt = (failedFetches.get(key) ?? 0) + 1;
+          failedFetches.set(key, attempt);
+          throw new FetchSteer(
+            buildRejectionSteer(source, id, attempt),
+            (attempt >= 2 ? 'rejected again — stop retrying' : 'API rejected id') +
+              (unverifiedWbId ? ' (unverified id)' : '')
+          );
+        }
+        throw err;
       }
       state.rows = state.rows.concat(rows);
       // Cache only this successful result (and the rows it merged — the entry is
@@ -1035,6 +1177,9 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // The model still receives only the SeriesHit[] JSON (plus a single
             // orientation line) — no context bloat.
             ev.receipt = receipt;
+            // Remember these ids so the indicator-id guard trusts a subsequent
+            // fetch of any of them (the model searched, then fetched a real hit).
+            for (const h of hits) seenSeriesIds.add(String(h.id).trim().toLowerCase());
             if (hits.length) {
               const top = receipt.topMatch;
               const summary =
@@ -1286,6 +1431,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           ev.detail = 'stopped';
           updateTrace();
           throw new AbortedError();
+        }
+        // A structured API rejection: render an error receipt and hand the model
+        // the specific find_series steer (already "ERROR:"-prefixed). Recoverable
+        // — the model's find_series → corrected fetch streams as normal receipts.
+        if (err instanceof FetchSteer) {
+          ev.status = 'error';
+          ev.detail = err.detail;
+          updateTrace();
+          return err.message;
         }
         ev.status = 'error';
         ev.detail = err?.message ?? String(err);
