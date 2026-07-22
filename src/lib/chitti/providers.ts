@@ -465,12 +465,29 @@ export function estimateCost(model: string, usage: { input: number; output: numb
 export const COMPLETION_TIMEOUT_MS = 60_000; // one chat/verify/llm() completion
 export const CATALOG_TIMEOUT_MS = 15_000; // a /models catalog fetch
 
-// Retry policy (single bounded retry for transient classes only).
+// Retry policy. Most transient classes get one bounded same-model retry (a free
+// model that glitched empty/malformed most often answers on the second try, and
+// the free-model FALLBACK is the real remedy beyond that). Pure transport
+// failures are different: a network drop or a 5xx is usually a brief blip on an
+// otherwise-fine host, and no model substitution can fix it (same host) — so
+// those get several retries with exponential backoff before we give up.
 const RETRY_BASE_DELAY_MS = 600;
 const RETRY_JITTER_MS = 400;
 // Retry-After is honoured but capped — a provider asking us to wait 5 minutes
 // must not freeze a browser turn; we cap the wait and surface the class instead.
 const RETRY_AFTER_CAP_MS = 4_000;
+// Transport-only classes worth several retries: a connectivity blip / transient
+// 5xx tends to clear within a few seconds, and switching models can't help (the
+// host, not the model, was unreachable). `timeout` is deliberately excluded —
+// each attempt already waited the full completion timeout, so hammering it just
+// multiplies a long wait. Everything else keeps the single retry (+ fallback).
+const MULTI_RETRY_CLASSES = new Set<ProviderErrorClass>(['network', 'server']);
+// Max SAME-MODEL retries for a MULTI_RETRY class (attempts = 1 + this). Others
+// retry at most once.
+const MAX_TRANSPORT_RETRIES = 3;
+// Ceiling for one exponential-backoff wait, so the growth term can't stall a
+// browser turn even if the base (a Retry-After) is already near the cap.
+const RETRY_BACKOFF_CAP_MS = 8_000;
 
 export type ProviderErrorClass =
   | 'bad_key' // 401/403 or an explicit invalid-key body — surface, never mask
@@ -767,10 +784,12 @@ function asClassified(err: unknown, provider: ProviderId): ClassifiedError {
 // tried before it surfaced — so the run-failed line reads e.g. "…empty response
 // (retried, then tried a fallback model)." instead of pretending it was a
 // first-and-only attempt. Nothing is appended when neither recovery ran.
-function exhaustedError(ce: ClassifiedError, tried: { retried: boolean; fellBack: boolean }): ClassifiedError {
+function exhaustedError(ce: ClassifiedError, tried: { retries: number; fellBack: boolean }): ClassifiedError {
+  const n = tried.retries;
+  const retryPhrase = n === 1 ? 'after retry' : `after ${n} retries`;
   let suffix = '';
-  if (tried.retried && tried.fellBack) suffix = ' (retried, then tried a fallback model).';
-  else if (tried.retried) suffix = ' (after retry).';
+  if (n > 0 && tried.fellBack) suffix = ` (${retryPhrase}, then tried a fallback model).`;
+  else if (n > 0) suffix = ` (${retryPhrase}).`;
   else if (tried.fellBack) suffix = ' (after trying a fallback model).';
   if (!suffix) return ce;
   return new ClassifiedError({
@@ -785,11 +804,14 @@ function exhaustedError(ce: ClassifiedError, tried: { retried: boolean; fellBack
   });
 }
 
-// The delay before the single retry: a capped Retry-After when the provider
-// gave one, else a small base, both plus jitter to avoid synchronized retries.
-function retryDelayMs(ce: ClassifiedError, random: () => number): number {
+// The delay before a retry: a capped Retry-After when the provider gave one,
+// else a small base — grown exponentially per attempt (attempt 1,2,3 -> 1x,2x,
+// 4x), capped, plus jitter to avoid synchronized retries. `attempt` is 1-based
+// (the first retry). Defaults to 1 so a single-retry caller is unchanged.
+function retryDelayMs(ce: ClassifiedError, random: () => number, attempt = 1): number {
   const base = ce.retryAfterMs !== undefined ? Math.min(ce.retryAfterMs, RETRY_AFTER_CAP_MS) : RETRY_BASE_DELAY_MS;
-  return base + Math.floor(random() * RETRY_JITTER_MS);
+  const backoff = Math.min(base * 2 ** (attempt - 1), RETRY_BACKOFF_CAP_MS);
+  return backoff + Math.floor(random() * RETRY_JITTER_MS);
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -1179,19 +1201,31 @@ export async function complete(
     const fallbackEligibleFor = (c: ClassifiedError) =>
       c.fallbackEligible && cfg.provider === 'openrouter' && cfg.model.endsWith(':free');
 
-    // One bounded transport retry against the SAME model, for transient classes
-    // only (rate_limit / server / timeout / network / empty_completion). The
-    // same-model retry runs first: a free model that just glitched empty most
-    // often answers on a second try, and that's cheaper than a substitution.
-    let retried = false;
+    // Bounded same-model retries against transient classes, with exponential
+    // backoff. The same-model retry runs before any fallback: a free model that
+    // just glitched most often answers on a second try, and that's cheaper than
+    // a substitution. Most classes get ONE retry (then the free-model fallback,
+    // where eligible, is the real fix). Pure transport classes (network / 5xx)
+    // get up to MAX_TRANSPORT_RETRIES — a connectivity blip usually clears in a
+    // few seconds and no model swap can fix an unreachable host. The cap is read
+    // off the CURRENT error each pass, so a class that changes between attempts
+    // (e.g. network -> empty_completion) gets the right budget and can still
+    // hand off to the fallback below.
+    const maxRetriesFor = (c: ClassifiedError) =>
+      MULTI_RETRY_CLASSES.has(c.errorClass) ? MAX_TRANSPORT_RETRIES : 1;
+    let retries = 0;
     let current = ce;
-    if (ce.retryable) {
-      await sleep(retryDelayMs(ce, random));
-      retried = true;
+    while (current.retryable && retries < maxRetriesFor(current)) {
+      await sleep(retryDelayMs(current, random, retries + 1));
+      // The user may have stopped during the backoff wait — don't spend a fresh
+      // request on a cancelled turn.
+      if (deps.signal?.aborted) break;
+      retries++;
       try {
         return await attempt();
-      } catch (err2) {
-        current = asClassified(err2, cfg.provider);
+      } catch (errN) {
+        if (deps.signal?.aborted) throw asClassified(errN, cfg.provider);
+        current = asClassified(errN, cfg.provider);
       }
     }
 
@@ -1213,14 +1247,14 @@ export async function complete(
           // The fallback attempt's outcome is final — no further retry stacking.
           return await attempt(chain);
         } catch (err3) {
-          throw exhaustedError(asClassified(err3, cfg.provider), { retried, fellBack: true });
+          throw exhaustedError(asClassified(err3, cfg.provider), { retries, fellBack: true });
         }
       }
     }
 
     // Nothing recovered it — surface the (possibly post-retry) classified error
     // with an honest note of what was tried.
-    throw exhaustedError(current, { retried, fellBack: false });
+    throw exhaustedError(current, { retries, fellBack: false });
   }
 }
 

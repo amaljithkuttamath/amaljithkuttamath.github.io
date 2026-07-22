@@ -433,16 +433,46 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     expect(observed!.aborted).toBe(true);
   });
 
-  it('retries a transient server error ONCE, then surfaces (no 3rd attempt)', async () => {
+  it('retries a transient server error several times with backoff, then surfaces', async () => {
+    // server (5xx) is a pure transport class: a brief upstream blip, not fixable
+    // by switching models — so it gets up to MAX_TRANSPORT_RETRIES same-model
+    // retries (4 attempts total) before surfacing.
     const f = vi.fn(async () => httpErr(500, { error: { message: 'internal', code: 500 } }));
-    const sleep = vi.fn(async () => {});
+    const sleeps: number[] = [];
+    const sleep = vi.fn(async (ms: number) => { sleeps.push(ms); });
+    // random()=0 (deps default) → no jitter, so the sleeps are the pure backoff.
     await expect(
       complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { sleep }))
     ).rejects.toMatchObject({ errorClass: 'server' });
-    expect(f).toHaveBeenCalledTimes(2); // one original + one retry, never a third
-    expect(sleep).toHaveBeenCalledTimes(1);
-    // The surfaced message notes the request was retried.
-    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toThrow(/after retry/i);
+    expect(f).toHaveBeenCalledTimes(4); // one original + three retries
+    expect(sleep).toHaveBeenCalledTimes(3);
+    // Exponential backoff: each wait is strictly larger than the last.
+    expect(sleeps).toEqual([600, 1200, 2400]);
+    // The surfaced message notes how many retries were spent.
+    await expect(complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f))).rejects.toThrow(/after 3 retries/i);
+  });
+
+  it('retries a network/CORS failure several times before giving up (the live case)', async () => {
+    // The user-reported failure: `fetch` throws a TypeError before any response.
+    const f = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
+    const sleep = vi.fn(async () => {});
+    await expect(
+      complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { sleep }))
+    ).rejects.toMatchObject({ errorClass: 'network' });
+    expect(f).toHaveBeenCalledTimes(4); // one original + three retries
+    expect(sleep).toHaveBeenCalledTimes(3);
+  });
+
+  it('a network failure that recovers on a later retry returns the completion', async () => {
+    let n = 0;
+    const f = vi.fn(async () => {
+      n++;
+      if (n < 3) throw new TypeError('Failed to fetch');
+      return okChat();
+    });
+    const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+    expect(out.text).toBe('hello');
+    expect(f).toHaveBeenCalledTimes(3); // failed, failed, succeeded
   });
 
   it('a transient error that succeeds on the retry returns the completion', async () => {
@@ -580,7 +610,7 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
       ]);
       // Honest receipt: the surfaced message says what was tried.
       expect(err.message).toMatch(/empty response/i);
-      expect(err.message).toMatch(/retried, then tried a fallback model/i);
+      expect(err.message).toMatch(/after retry, then tried a fallback model/i);
     });
 
     it('a free OpenRouter primary: empty primary but the fallback model answers → substitution receipt', async () => {
