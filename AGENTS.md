@@ -73,6 +73,23 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 
+## Tracing (optional, off by default)
+
+Chitti can export each completed turn to **LangSmith** as a run tree (root
+`chitti.turn` chain + one child run per tool/LLM step), built from the same
+`TraceEvent` stream the UI shows. It is **off unless `PUBLIC_LANGSMITH_TRACING=1`**
+at build time, so the shipped site sends nothing.
+
+- The pure builder is `src/lib/chitti/tracing.ts` (`buildTurnRuns`, unit-tested);
+  the exporter fires fire-and-forget in `ui/composer.ts`'s `finally`.
+- **The API key never touches the browser.** The exporter POSTs to a same-origin
+  relay (`/langsmith/...`); the relay injects `LANGSMITH_API_KEY` server-side. In
+  `npm run dev` that relay is the Vite proxy in `astro.config.mjs`, which reads
+  the key from a local, gitignored `.env` (see `.env.example`). A static build
+  has no relay — to trace the deployed site, stand up a serverless relay and set
+  `PUBLIC_LANGSMITH_INGEST_URL` to it. **Never** reference the non-`PUBLIC_` key
+  from client code (Vite would inline it into the public bundle).
+
 ## Deploy
 
 Pushing to **`main`** triggers two GitHub Actions workflows — **CI** and

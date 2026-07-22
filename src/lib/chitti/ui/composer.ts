@@ -7,7 +7,9 @@ import { run, allTurns, liveChartTurns, consoleEl, threadEl, newConvoBtn, compos
 import { unlockSources, openByok, selectedSources, updateSourcesCount, currentProvider,
          rlmEnabled, lockSources } from './config';
 import { createSession } from '../agent';
+import { exportTurnTrace } from '../tracing';
 import type { ProviderConfig } from '../providers';
+import type { AgentOutput } from '../agent';
 import { prefersReducedMotion } from './dom';
 import { createTurnBlock, renderQuestion, setStatus } from './turns';
 import { renderTrace, renderFiles } from './trace';
@@ -121,6 +123,11 @@ export async function handleAskSubmit(e: SubmitEvent) {
   };
 
   run.running = true;
+  // Turn timing + terminal state for optional LangSmith tracing (fired in the
+  // finally). Off unless PUBLIC_LANGSMITH_TRACING is set — see tracing.ts.
+  const startedAt = Date.now();
+  let turnOut: AgentOutput | undefined;
+  let turnError: string | undefined;
   const controller = new AbortController();
   run.runController = controller;
   askBtn.disabled = true;
@@ -183,6 +190,7 @@ export async function handleAskSubmit(e: SubmitEvent) {
       onStatus: (msg, kind) => setStatus(tb, kind, msg),
       onModel: (served) => { tb.railModelEl.textContent = `${served} (fallback) / ${cfg.provider}`; },
     }, controller.signal);
+    turnOut = out;
 
     // Honest stopped state (the user hit stop). NOT an error and NOT verified:
     // no VERIFIED stamp, neutral wording. Any rows/citations fetched before the
@@ -278,6 +286,7 @@ export async function handleAskSubmit(e: SubmitEvent) {
     // second half of the "chat keeps jumping" bug.
   } catch (err: any) {
     console.error(err);
+    turnError = err?.message ?? String(err);
     setStatus(tb, 'error', 'Run failed: ' + (err?.message ?? String(err)));
     // The trace summary is only updated by trace events, so a failure
     // before/between events left it pulsing "Working…" forever.
@@ -301,5 +310,23 @@ export async function handleAskSubmit(e: SubmitEvent) {
     // cleanest hook: the view and the agent share storage, so a post-turn
     // reload is the single source-of-truth sync point — no event bus needed.
     syncDashboardsAfterTurn();
+
+    // Optional LangSmith tracing — fire-and-forget, no-op unless enabled at
+    // build time. Runs on EVERY terminal path (success, error, aborted) so a
+    // failed turn is traced too. Never awaited: it must not delay re-enabling
+    // the composer, and tracing.ts swallows its own errors.
+    void exportTurnTrace({
+      question: tb.question,
+      trace: tb.trace,
+      model: cfg.model,
+      provider: cfg.provider,
+      finding: turnOut?.finding,
+      verification: turnOut?.verification ?? null,
+      cost: turnOut?.cost,
+      aborted: turnOut?.aborted,
+      error: turnError,
+      startedAt,
+      endedAt: Date.now(),
+    });
   }
 }

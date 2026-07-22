@@ -7,3 +7,7 @@ docs/plans/
 .superpowers/
 .gstack/
 .claude/
+# Local secrets (LangSmith tracing key, etc.) — never commit
+.env
+.env.local
+.env.*.local
