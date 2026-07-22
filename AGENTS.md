@@ -51,6 +51,15 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `import './boot'`. `ui/state.ts` owns all shared state; `ui/boot.ts` is the
   composition root.
 
+## Skills
+
+- **`chitti-data-sources`** (`.claude/skills/chitti-data-sources/SKILL.md`) —
+  the how-to-query-and-chart reference for Chitti: the find_series → fetch_series
+  → compute → render_chart → finish pipeline, the four sources and their id
+  namespaces, country/year params, chart types, dashboards, and the query
+  gotchas. Read it before touching Chitti's data or chart layers; keep it in sync
+  with `prompts.ts`.
+
 ## Conventions & gotchas
 
 - **Pure helpers are exported for tests.** Parsing/normalizing/formatting logic
