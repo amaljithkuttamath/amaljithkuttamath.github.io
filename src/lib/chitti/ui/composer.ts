@@ -267,6 +267,7 @@ export async function handleAskSubmit(e: SubmitEvent) {
     tb.lastCitations = out.citations;
     tb.lastVerification = out.verification;
     tb.shareBtn.style.display = '';
+    tb.mdBtn.style.display = '';
     // A chart exists this turn ⇒ it can be pinned to a dashboard.
     if (tb.lastSpec) tb.pinBtn.style.display = '';
 

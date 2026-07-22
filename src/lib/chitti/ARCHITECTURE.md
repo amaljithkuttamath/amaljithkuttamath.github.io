@@ -50,6 +50,7 @@ the 472 tests pass unmodified. See the **UI layer** section below.
 | `planner.ts` | The gated planner heuristic (`needsPlan` + helpers, `countCountryMentions`), `parsePlanBrief`, `matchStepToEvent`, `PlanStep`/`InsightBrief`. |
 | `verifier.ts` | `verify` (the second-LLM check) + `parseVerifierVerdict` + verdict types. |
 | `spec.ts` | `normalizeSpec` — guard a model chart spec into a valid `ChartSpec`. |
+| `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`ui/actions.ts`). |
 | `abort.ts` | `AbortedError` — the user-cancel sentinel (loop + refresh pipeline). |
 | `dashboards-agent.ts` | Agent-side dashboard glue: `resolveTileRef`, the session-less refresh pipeline (`refreshDashboard`/`refreshTile`/`refetchCitation`), `buildCitation`, `indicatorName`, `defaultDashboardTitle`. |
 | `session.ts` | **The session core**: `createSession` + its per-turn closures (`ask`/`agentPass`/`dispatch`/`routeFetch`/`runSubAgent`/`makeLlm`/`runPlan`/`runVerify`), session state, session types (`ChittiSession`/`SessionOptions`/`AgentCallbacks`/`AgentOutput`), `runAgent`, `buildRejectionSteer`. |

@@ -3,6 +3,7 @@
 // Pure of shared mutable state; encodeShareState comes from share.ts.
 import type { TurnBlock } from './state';
 import { encodeShareState } from '../share';
+import { buildFindingOkf } from '../okf';
 
 // ── Share permalink (backlog #15) ────────────────────────────────────────
 // Encode this turn's answer state into a #share= fragment, build an absolute
@@ -44,6 +45,22 @@ export async function shareTurn(tb: TurnBlock) {
   }
   const note = built.lossy ? ' (chart only; rows omitted for size)' : '';
   await copyToClipboard(tb, built.url, 'Link copied' + note);
+}
+
+// Export the turn as an OKF (Open Knowledge Format) Markdown concept and copy
+// it to the clipboard — a portable finding (front matter + citations as links)
+// that can drop straight into an agent knowledge base. Builds from the same
+// captured turn state the share permalink uses; the format lives in okf.ts.
+export async function exportTurnMarkdown(tb: TurnBlock) {
+  const md = buildFindingOkf({
+    question: tb.question,
+    finding: tb.lastFinding,
+    spec: tb.lastSpec,
+    citations: tb.lastCitations,
+    verification: tb.lastVerification,
+    createdAt: new Date().toISOString(),
+  });
+  await copyToClipboard(tb, md, 'Markdown copied');
 }
 
 // The async-clipboard write, feature-guarded. true on success; false when the

@@ -179,6 +179,7 @@ const PRESETS = [
             <div class="ch-data-actions">
               <button type="button" class="ch-pin" style="display:none" aria-haspopup="dialog" aria-label="Pin this chart to a dashboard">Pin to dashboard</button>
               <button type="button" class="ch-share" style="display:none" aria-label="Copy a shareable link to this answer">Share link</button>
+              <button type="button" class="ch-md" style="display:none" aria-label="Copy this answer as Markdown (Open Knowledge Format)">Copy Markdown</button>
               <button type="button" class="ch-csv">Download CSV</button>
             </div>
             <!-- aria-live region for the "copied" confirmation, announced to
@@ -2060,9 +2061,11 @@ const PRESETS = [
     letter-spacing: 0;
     padding: 0;
   }
-  /* Share action, styled to match .ch-csv (same mono underline, same amber
-     --signal the CSV button already spends — no new accent introduced). */
-  .ch-share {
+  /* Share + Markdown-export actions, styled to match .ch-csv (same mono
+     underline, same amber --signal the CSV button already spends — no new
+     accent introduced). */
+  .ch-share,
+  .ch-md {
     font-family: var(--font-mono);
     font-size: var(--text-tag);
     background: transparent;
@@ -2075,7 +2078,8 @@ const PRESETS = [
     letter-spacing: 0;
     padding: 0;
   }
-  .ch-share:focus-visible {
+  .ch-share:focus-visible,
+  .ch-md:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--signal) 55%, transparent);
     outline-offset: 3px;
     border-radius: 2px;

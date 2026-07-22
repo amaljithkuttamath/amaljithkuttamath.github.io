@@ -119,6 +119,7 @@ export interface TurnBlock {
   dataCount: HTMLElement;
   csvBtn: HTMLButtonElement;
   shareBtn: HTMLButtonElement;
+  mdBtn: HTMLButtonElement;
   pinBtn: HTMLButtonElement;
   shareStatus: HTMLElement;
   shareBanner: HTMLElement;

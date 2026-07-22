@@ -54,6 +54,7 @@ export function installDebugSeam() {
         tb.lastCitations = opts?.citations ?? [];
         tb.lastVerification = opts?.verification ?? null;
         tb.shareBtn.style.display = '';
+        tb.mdBtn.style.display = '';
         tb.pinBtn.style.display = '';
         dbg.chart = tb.chartInstance;
         dbg.tb = tb;

@@ -4,7 +4,7 @@
 import type { TurnBlock } from './state';
 import { threadEl, turnTemplate } from './state';
 import { q } from './dom';
-import { shareTurn } from './actions';
+import { shareTurn, exportTurnMarkdown } from './actions';
 import { openPinPicker } from './dashboards-view';
 
 export function createTurnBlock(): TurnBlock {
@@ -38,6 +38,7 @@ export function createTurnBlock(): TurnBlock {
     dataCount: q(root, '.ch-data-count'),
     csvBtn: q<HTMLButtonElement>(root, '.ch-csv'),
     shareBtn: q<HTMLButtonElement>(root, '.ch-share'),
+    mdBtn: q<HTMLButtonElement>(root, '.ch-md'),
     pinBtn: q<HTMLButtonElement>(root, '.ch-pin'),
     shareStatus: q(root, '.ch-share-status'),
     shareBanner: q(root, '.ch-share-banner'),
@@ -74,6 +75,12 @@ export function createTurnBlock(): TurnBlock {
     e.preventDefault();
     e.stopPropagation();
     void shareTurn(tb);
+  });
+
+  tb.mdBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void exportTurnMarkdown(tb);
   });
 
   tb.pinBtn.addEventListener('click', (e) => {
