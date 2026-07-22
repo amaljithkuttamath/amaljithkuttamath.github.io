@@ -2536,6 +2536,19 @@ describe('rlm flag: the system prompt withholds llm() when off', () => {
     expect(buildSystemPrompt(sources, false)).toBe(buildSystemPrompt(sources));
   });
 
+  it('teaches how to query (id formats, year rule) and how to chart (per-type guidance)', () => {
+    const p = buildSystemPrompt(sources);
+    // Querying: id routing + year rule are spelled out for the agent.
+    expect(p).toMatch(/colon-prefixed id/i);
+    expect(p).toContain('NY.GDP.PCAP.CD'); // a concrete bare World Bank code
+    expect(p).toMatch(/Years are plain numbers/i);
+    // Charting: the spec shape + when to use each of the four types.
+    expect(p).toMatch(/\[x, y\] pair/i);
+    for (const t of ['line', 'bar', 'scatter', 'grouped-bar']) expect(p).toContain(t);
+    expect(p).toMatch(/relationship between TWO indicators/i);
+    expect(p).toMatch(/missing value is a gap/i);
+  });
+
   it('includes the bounded llm() guidance and the provenance rule when on', () => {
     const p = buildSystemPrompt(sources, true);
     expect(p).toContain('await llm(');

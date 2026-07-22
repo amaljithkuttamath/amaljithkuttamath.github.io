@@ -40,14 +40,19 @@ PIPELINE — one step at a time, about 4-5 calls total:
    ${activeLine}
 ${snippets}
 
-2. FETCH ONCE with fetch_series(id, …): pass the id from find_series verbatim — it routes to the right source automatically. Give explicit countries (ISO3 codes or loose names like "UK"; or one aggregate like WLD) for named countries/regions, or OMIT countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself).
+2. FETCH ONCE with fetch_series(id, countries?, year_start?, year_end?): pass the id from find_series VERBATIM — a colon-prefixed id ("owid:"/"imf:"/"who:") routes to that source, a bare code (e.g. NY.GDP.PCAP.CD) to World Bank. Give explicit countries (ISO3 like USA/CHN, loose names like "UK"/"Korea", or one aggregate like WLD) for named countries/regions, or OMIT countries for "every country" questions (fetch_series batches World Bank internally — never build the full country list yourself). Years are plain numbers; omit a bound for "no limit".
 
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
    - correlate → relationship between two fetched indicators.
    - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.${llmLine}
 
-4. render_chart. line = time series · bar = ranking · scatter = two indicators · grouped-bar = a few countries side by side. The call's arguments ARE the spec — build them from step 3's result.
+4. render_chart — the call's arguments ARE the spec: {type, title, x_axis, y_axis, series:[{name, data:[[x,y],…]}]}. Each point is an [x, y] pair: x is the YEAR (a number) for line/scatter, or a category LABEL (a string) for bar; y is the value. One series per line/country. Choose the type by the answer's shape:
+   - line — a value over time (a time series); x = year.
+   - bar — a ranking or single-year comparison across countries; x = country label.
+   - scatter — the relationship between TWO indicators, one point per country (x = indicator A, y = indicator B).
+   - grouped-bar — a few countries compared side by side across categories.
+   Build the points from step 3's result — never hand-type numbers you didn't fetch or compute. A missing value is a gap: omit that point, don't send 0.
 
 5. finish — 1-2 sentences of INSIGHT: the top-line number, then what's notable (the outlier, trend break, or implication). Not a caption. If you used IMF projected years, say "IMF projection". No methodology, no caveats.
 
