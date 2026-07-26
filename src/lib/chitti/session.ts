@@ -164,6 +164,7 @@ export interface ChittiSession {
 }
 
 import { AbortedError } from './abort';
+import { profileSeries, breakdown, formatProfile, formatBreakdown, breakdownChartData } from './eda';
 import {
   resolveTileRef,
   refreshDashboard,
@@ -951,6 +952,43 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ? JSON.stringify(stats.slice(0, 60))
               : 'No computable rows — fetch data first (need 2+ years per country).';
             ev.detail = `${stats.length} countries`;
+            break;
+          }
+          case 'profile_series': {
+            const p = profileSeries(state.rows, a.indicator_id ? String(a.indicator_id) : undefined);
+            if (!p) {
+              result = 'No rows to profile — fetch a series first.';
+              ev.detail = 'no rows';
+              break;
+            }
+            result = formatProfile(p);
+            ev.detail =
+              `${p.countryCount} countries · ${p.missingPct.toFixed(0)}% missing` +
+              (p.latestUsableYear !== null ? ` · latest usable ${p.latestUsableYear}` : '');
+            break;
+          }
+          case 'breakdown': {
+            const by = a.by === 'income' ? 'income' : 'region';
+            const b = breakdown(state.rows, by, {
+              indicator: a.indicator_id ? String(a.indicator_id) : undefined,
+              year: a.year !== undefined ? Number(a.year) : undefined,
+            });
+            if (!b) {
+              result =
+                'Could not group these rows — fetch a series covering many countries first ' +
+                '(a breakdown needs real countries, not just aggregates).';
+              ev.detail = 'not groupable';
+              break;
+            }
+            // Hand back the chart-ready points alongside the prose, so the model
+            // can render the breakdown without retyping numbers it was just
+            // given — the same "never hand-type fetched values" discipline the
+            // chart step already follows.
+            result =
+              formatBreakdown(b) +
+              '\n\nChart-ready (bar, x=group, y=median): ' +
+              JSON.stringify(breakdownChartData(b));
+            ev.detail = `${b.groups.length} ${by} groups · ${b.year}`;
             break;
           }
           case 'correlate': {

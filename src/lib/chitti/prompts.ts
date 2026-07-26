@@ -45,6 +45,8 @@ ${snippets}
 3. COMPUTE with ONE call — never rank/diff numbers in your own reasoning:
    - growth_stats → "changed the most/least" questions (per-country change, %, CAGR, pre-sorted). Prefer this.
    - correlate → relationship between two fetched indicators.
+   - profile_series → what the data IS: coverage, how much is missing, the distribution, the named outliers, and the last year with broad reporting. Use it whenever the user asks what the data looks like / how complete or reliable it is / what is typical / who is unusual — and before ranking on a recent year, because the final year of a pull is usually near-empty.
+   - breakdown(by: "region" | "income") → group the countries by World Bank region or income group: median, range and extremes per group, ranked, with the gap between top and bottom. The strongest way to turn many countries into ONE insight; the classification is bundled, so it costs no extra fetch.
    - execute_js → anything else; \`rows\` is every fetched row: {country, iso3, year, value, indicator}.${llmLine}
 
 4. render_chart — the call's arguments ARE the spec: {type, title, x_axis, y_axis, series:[{name, data:[[x,y],…]}]}. Each point is an [x, y] pair: x is the YEAR (a number) for line/scatter, or a category LABEL (a string) for bar; y is the value. One series per line/country. Choose the type by the answer's shape:
