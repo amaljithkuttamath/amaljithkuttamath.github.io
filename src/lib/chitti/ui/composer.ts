@@ -45,6 +45,9 @@ export function resetNewQuestionChip() {
 export function performNewQuestion() {
   resetNewQuestionChip();
   run.session = null;
+  // "Start fresh" means fresh: a pending escalation request from a wiped turn
+  // must not silently skip the fast path when that question is asked again.
+  escalateQuestion = null;
   unlockSources();
   // Dispose live charts before clearing the DOM so ECharts releases its
   // global registry entry and resize listener.
@@ -131,7 +134,16 @@ async function renderDirectAnswer(question: string, res: FastPathResult) {
   tb.renderFlag.style.display = 'none';
   tb.answerSection.style.display = 'block';
   tb.metaSection.style.display = 'block';
-  renderFinding(tb, res.summary);
+  // buildFastSummary returns '' when the rows describe no change (a single year
+  // on a time series), rather than inventing a trend from one point. That is the
+  // right call for the pure helper, but an empty answer line reads as a broken
+  // render — so state plainly what was fetched instead.
+  const countries = res.plan.countryNames.join(', ');
+  renderFinding(
+    tb,
+    res.summary ||
+      `${res.spec.y_axis || res.hit.name}: ${res.rows.length} value${res.rows.length === 1 ? '' : 's'} fetched for ${countries}.`
+  );
   // Say plainly what this is. No verifier ran because no model ran — and that
   // is the selling point, not a caveat to bury: nothing in this path is capable
   // of inventing a number.
@@ -182,17 +194,48 @@ async function renderDirectAnswer(question: string, res: FastPathResult) {
 // Try to answer without a model. Returns true when it did (the caller stops),
 // false to fall through to the agent. Never throws: any failure is a fall-through.
 async function tryDirectAnswer(question: string): Promise<boolean> {
-  if (escalateQuestion === question) { escalateQuestion = null; return false; }
+  // The user asked for the agent on this exact question. NOT cleared here: if
+  // the agent path then stops at the key gate, the flag must survive so that
+  // pressing send again (now with a key) still reaches the agent instead of
+  // silently serving the direct answer they just rejected. handleAskSubmit
+  // clears it once the agent run actually commits.
+  if (escalateQuestion === question) return false;
+
+  // A conversation in progress belongs to the agent. The fast path never
+  // creates or feeds a session, so answering mid-conversation would leave the
+  // model blind to a turn the user can plainly see — and the next "add China to
+  // that" would be answered from history that has a hole in it. Before any
+  // session exists (the common case, including every key-less visit) this guard
+  // is inert, because a direct answer never starts one.
+  if (run.session) return false;
+
+  // Honour the database hard filter. `resolveSources([])` treats an empty list
+  // as "no filter" and searches everything, so an empty selection here would
+  // silently query databases the user switched OFF. The agent path refuses to
+  // run in that state; the fast path must refuse too, and fall through so the
+  // user gets the same "pick a database" prompt.
+  const sources = selectedSources();
+  if (!sources.length) return false;
+
   const plan = parseFastPath(question);
   if (!plan) return false;
   run.running = true;
   askBtn.disabled = true;
   askBtn.classList.add('ch-send-working');
   try {
-    const res = await runFastPath(plan, {
-      sources: selectedSources(),
-      signal: AbortSignal.timeout(FAST_PATH_TIMEOUT_MS),
-    });
+    // Belt and braces on the time ceiling: the signal covers the fetch, but the
+    // catalog search can also reach the network (the live search APIs) and takes
+    // no signal, so the whole attempt races a timer. Without this a hung search
+    // would leave the composer disabled with no stop control and no way back.
+    const res = await Promise.race([
+      runFastPath(plan, {
+        sources,
+        signal: AbortSignal.timeout(FAST_PATH_TIMEOUT_MS),
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('fast path timed out')), FAST_PATH_TIMEOUT_MS)
+      ),
+    ]);
     // A miss is not a failure to report — it is exactly the case the agent is
     // better at, so say nothing and let it take over.
     if ('ok' in res) return false;
@@ -200,7 +243,10 @@ async function tryDirectAnswer(question: string): Promise<boolean> {
     consoleEl.style.display = 'none';
     resetNewQuestionChip();
     newConvoBtn.style.display = '';
-    composerQ.placeholder = 'Ask a follow-up — or + new question for a fresh start…';
+    // "Another question", not "a follow-up": a direct answer starts no session,
+    // so there is no conversation for the next question to build on. Promising
+    // one would be a lie the very next turn.
+    composerQ.placeholder = 'Ask another question — or + new question to start over…';
     const tb = await renderDirectAnswer(question, res);
     requestAnimationFrame(() =>
       tb.root.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
@@ -253,6 +299,10 @@ export async function handleAskSubmit(e: SubmitEvent) {
     apiKey,
     requestReasoning: modelSel.selectedOptions[0]?.dataset.reasoning === '1',
   };
+
+  // Past every gate — the agent run is committed, so an escalation request for
+  // this question has been honoured and must not survive into a later turn.
+  escalateQuestion = null;
 
   run.running = true;
   // Turn timing + terminal state for optional LangSmith tracing (fired in the
