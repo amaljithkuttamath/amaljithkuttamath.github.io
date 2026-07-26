@@ -221,6 +221,31 @@ export async function encodeShareState(
   return { ok: false, reason: 'too-large' };
 }
 
+// ── Shared inbound whitelist ────────────────────────────────────────────────
+// Rebuild a ShareStateV1 from an arbitrary parsed object, copying ONLY the
+// known fields (each through its own cleaner). This is the trust boundary for
+// every answer state the renderer is handed from outside a live run: a decoded
+// `#share=` fragment (below) and the pre-baked demo answers (`demos.ts`). Both
+// arrive as untrusted JSON, so both go through exactly this pass — the version
+// gate included. Returns null for anything that isn't a v1 payload.
+export function cleanShareState(input: unknown): ShareStateV1 | null {
+  if (!input || typeof input !== 'object') return null;
+  const obj = input as Record<string, unknown>;
+  if (obj.v !== SHARE_VERSION) return null; // version gate
+  const state: ShareStateV1 = {
+    v: SHARE_VERSION,
+    q: str(obj.q),
+    answer: str(obj.answer),
+    spec: cleanSpec(obj.spec),
+    rows: cleanRows(obj.rows),
+    citations: cleanCitations(obj.citations),
+    verification: cleanVerification(obj.verification),
+    ts: str(obj.ts),
+  };
+  if (obj.lossy === true) state.lossy = true;
+  return state;
+}
+
 // ── Public decode ───────────────────────────────────────────────────────────
 // Decodes a fragment payload back to a ShareStateV1, defensively: any
 // malformed/oversized/unknown-version input yields null. Never throws, never
@@ -232,23 +257,7 @@ export async function decodeShareState(payload: string): Promise<ShareStateV1 | 
   try {
     const json = await unpackJson(payload, { maxBytes: MAX_SHARE_BYTES });
     if (json == null) return null;
-    const obj = JSON.parse(json) as Record<string, unknown>;
-    if (!obj || typeof obj !== 'object') return null;
-    if (obj.v !== SHARE_VERSION) return null; // version gate
-
-    // Re-whitelist on the way out: never trust the payload's shape.
-    const state: ShareStateV1 = {
-      v: SHARE_VERSION,
-      q: str(obj.q),
-      answer: str(obj.answer),
-      spec: cleanSpec(obj.spec),
-      rows: cleanRows(obj.rows),
-      citations: cleanCitations(obj.citations),
-      verification: cleanVerification(obj.verification),
-      ts: str(obj.ts),
-    };
-    if (obj.lossy === true) state.lossy = true;
-    return state;
+    return cleanShareState(JSON.parse(json));
   } catch {
     return null;
   }

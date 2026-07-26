@@ -77,6 +77,7 @@
     setSource, updateSourcesCount, rlmEnabled, lockSources, unlockSources, sourcesLocked, vv,
   } from './config';
   import { resetNewQuestionChip, handleNewConvoClick, maybeDisarmOnClick, handleAskSubmit } from './composer';
+  import { renderDemos } from './demos-view';
   import { installDebugSeam } from './debug-seam';
 
 
@@ -263,6 +264,12 @@
   // Every turn block created so far, regardless of whether it has a chart.
 
 
+
+  // ── Worked examples ──────────────────────────────────────────────────────
+  // Built before the fragment restore below: a #share= / #dash= link hides the
+  // whole console anyway, so the order only matters for the plain empty state,
+  // where the cards must be present on first paint.
+  renderDemos();
 
   // ── Shared-answer banner + restore (backlog #15) ─────────────────────────
   void maybeRestoreFromFragment();

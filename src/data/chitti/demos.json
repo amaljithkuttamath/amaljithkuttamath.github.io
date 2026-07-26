@@ -1,0 +1,5 @@
+{
+  "_comment": "GENERATED FILE — do not hand-edit. Every number here must be fetched, never authored. Regenerate with: npm run demos:refresh (see scripts/gen-chitti-demos.mjs). An empty demos array simply hides the examples section on the empty state.",
+  "generated": null,
+  "demos": []
+}
