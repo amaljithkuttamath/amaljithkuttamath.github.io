@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demos:refresh": "node scripts/gen-chitti-demos.mjs"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.17",

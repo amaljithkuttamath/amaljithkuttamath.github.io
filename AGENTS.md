@@ -24,6 +24,7 @@ npm install          # install deps
 npm run dev          # local dev server (astro dev)
 npm test             # run the full vitest suite (npx vitest run) — 500+ tests
 npm run build        # production build (astro build) — run before deploying UI/template edits
+npm run demos:refresh  # re-fetch Chitti's empty-state demo answers (needs network)
 ```
 
 - **Always run `npm test` before committing.** The suite is fast (~2–3s) and
@@ -70,6 +71,15 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
 - **BYOK / zero-backend / privacy.** No server, no telemetry, no secrets in the
   repo. Keys live only in the browser; the share/export formats whitelist fields
   (never keys, trace, or the VFS).
+- **Demo answers are fetched, never authored.** `src/data/chitti/demos.json`
+  holds the key-free worked examples on Chitti's empty state. It is written
+  **only** by `npm run demos:refresh` (`scripts/gen-chitti-demos.mjs`), which
+  drives the real adapters/compute helpers/citation builder and fails loudly
+  rather than emitting a partial or invented series. **Never hand-edit numbers
+  into that file** — a fabricated example in a provenance tool is the app lying
+  at the exact moment a first-time visitor decides whether to trust it. The
+  demos render through the same `restoreSharedAnswer` path a `#share=` link
+  uses, and through the same `cleanShareState` whitelist.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 

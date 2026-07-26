@@ -47,6 +47,11 @@ export const consoleEl = $('ch-console');
 export const askForm = $('ch-ask') as HTMLFormElement;
 export const qIn = $('ch-q') as HTMLTextAreaElement;
 export const chips = $('ch-chips');
+// Worked-example cards on the empty state (ui/demos-view.ts). Both are absent
+// on any page that reuses these modules without the demos markup, so every
+// reader null-checks them.
+export const demosSection = $('ch-demos') as HTMLElement | null;
+export const demoCards = $('ch-demo-cards') as HTMLElement | null;
 
 export const composerForm = $('ch-composer') as HTMLFormElement;
 export const composerQ = $('ch-composer-q') as HTMLTextAreaElement;
