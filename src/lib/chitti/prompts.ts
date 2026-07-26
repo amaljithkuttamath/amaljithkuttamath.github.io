@@ -36,6 +36,8 @@ DECIDE THE SHAPE FIRST, then commit:
 
 PIPELINE — one step at a time, about 4-5 calls total:
 
+0. IF THE USER IS ASKING WHAT THE DATA COVERS rather than a question about the world ("what can I ask?", "what's in this database?", "what data do you have on health?") → call browse_dataset (optionally with a topic). It costs no request. Answer in your own words and suggest 2-3 specific questions they could ask — never invent indicators, and never present the shortlist as the full catalog.
+
 1. FIND THE SERIES — call find_series(query) once. It searches all your active databases together and returns matches as {id, name, source}; pick the id that fits.
    ${activeLine}
 ${snippets}

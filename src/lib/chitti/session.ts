@@ -165,6 +165,7 @@ export interface ChittiSession {
 
 import { AbortedError } from './abort';
 import { profileSeries, breakdown, formatProfile, formatBreakdown, breakdownChartData } from './eda';
+import { describeCatalog, browseTopic, formatCatalog, formatTopic } from './catalog';
 import {
   resolveTileRef,
   refreshDashboard,
@@ -952,6 +953,20 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               ? JSON.stringify(stats.slice(0, 60))
               : 'No computable rows — fetch data first (need 2+ years per country).';
             ev.detail = `${stats.length} countries`;
+            break;
+          }
+          case 'browse_dataset': {
+            const topic = a.topic ? String(a.topic).trim() : '';
+            if (topic) {
+              const hits = browseTopic(topic, sourceIds);
+              result = formatTopic(topic, hits);
+              ev.detail = `${hits.length} under "${topic}"`;
+            } else {
+              const cat = describeCatalog(sourceIds);
+              result = formatCatalog(cat);
+              const topics = cat.sources.reduce((n, s) => n + s.topics.length, 0);
+              ev.detail = `${cat.sources.length} database(s) · ${topics} topics · ${cat.countryCount} countries`;
+            }
             break;
           }
           case 'profile_series': {

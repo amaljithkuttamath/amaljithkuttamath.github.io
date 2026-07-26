@@ -206,6 +206,26 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
+    name: 'browse_dataset',
+    description:
+      'Answer "what is IN the database I connected?" — the topics available, example indicators ' +
+      'under each, and the country/region/income coverage. Costs no request (the taxonomy is ' +
+      'bundled). Use it when the user asks what they can explore, what data is available, what ' +
+      'this database covers, or for suggestions of what to ask — instead of guessing or making ' +
+      'up indicators. Pass `topic` to list the shortlisted indicators under one topic. NOTE the ' +
+      'result is a curated shortlist, not the full catalog: never present it as everything the ' +
+      'database has, and use find_series for anything not listed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'Optional topic to drill into, e.g. "health", "climate", "poverty".',
+        },
+      },
+    },
+  },
+  {
     name: 'render_chart',
     description:
       'Render the final chart. Provide a spec with a chart type, title, axis labels, and series. ' +
@@ -385,7 +405,7 @@ export const RETURN_FINDINGS_SCHEMA: ToolSchema = {
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
   'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
-  'profile_series', 'breakdown',
+  'profile_series', 'breakdown', 'browse_dataset',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file', 'save_to_dashboard',
   'edit_dashboard',
 ];
