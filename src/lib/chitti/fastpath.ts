@@ -282,7 +282,7 @@ export async function runFastPath(
     ts: Date.now(),
   };
   push(findEv);
-  const { hits, receipt } = await findSeriesWithReceipt(plan.indicatorQuery, opts.sources);
+  const { hits, receipt } = await findSeriesWithReceipt(plan.indicatorQuery, opts.sources, opts.signal);
   findEv.receipt = receipt;
   if (!hits.length) {
     settle(findEv, 'error', 'no matching series');

@@ -117,10 +117,10 @@ export interface SourceAdapter extends SourceDef {
   usesSharedCatalog: boolean;
   // The source's PRIMARY search contribution (World Bank's curated+live-API
   // search). Run first, before the shared catalog block. Catalog sources omit it.
-  primarySearch?(query: string): Promise<SeriesHit[]>;
+  primarySearch?(query: string, signal?: AbortSignal): Promise<SeriesHit[]>;
   // The live-catalog fallback: widen past the curated list when this source is
   // active and returned fewer than 3 curated hits. Any failure degrades to [].
-  liveCatalogSearch?(query: string): Promise<SeriesHit[]>;
+  liveCatalogSearch?(query: string, signal?: AbortSignal): Promise<SeriesHit[]>;
 
   // ── Id-space guard (routeFetch) ──
   // World Bank's live id space dwarfs indicators.json, so an unknown WB id

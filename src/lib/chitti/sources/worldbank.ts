@@ -7,6 +7,7 @@ import type { DataRow, Indicator } from '../tools';
 import { ApiRejection, INDICATORS, listCountries } from '../tools';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
+import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';
 
 const WB = 'https://api.worldbank.org/v2';
 
@@ -17,10 +18,10 @@ const WB_CODE = /^[A-Za-z]{1,4}(?:\.[A-Za-z0-9]+)+$/;
 
 // Resolve an exact indicator code via the WB `/indicator/{code}` endpoint.
 // Returns undefined when offline/blocked or the code doesn't exist. Never throws.
-async function resolveWbIndicatorCode(code: string): Promise<Indicator | undefined> {
+async function resolveWbIndicatorCode(code: string, signal?: AbortSignal): Promise<Indicator | undefined> {
   try {
     const url = `${WB}/indicator/${encodeURIComponent(code)}?format=json`;
-    const resp = await fetch(url);
+    const resp = await fetchWithTimeout(url, { signal, timeoutMs: SEARCH_TIMEOUT_MS });
     if (!resp.ok) return undefined;
     const data = await resp.json();
     const row = Array.isArray(data) && Array.isArray(data[1]) ? data[1][0] : undefined;
@@ -32,7 +33,7 @@ async function resolveWbIndicatorCode(code: string): Promise<Indicator | undefin
 }
 
 // search_indicators: filter the curated list; if <3 hits, hit the WB search API.
-export async function searchIndicators(query: string, topic?: string): Promise<Indicator[]> {
+export async function searchIndicators(query: string, topic?: string, signal?: AbortSignal): Promise<Indicator[]> {
   const q = (query || '').toLowerCase().trim();
   let pool = INDICATORS;
   if (topic) {
@@ -58,7 +59,7 @@ export async function searchIndicators(query: string, topic?: string): Promise<I
   const code = query.trim();
   if (!topic && WB_CODE.test(code)) {
     const curated = INDICATORS.find((i) => i.id.toLowerCase() === code.toLowerCase());
-    const exact = curated ?? (await resolveWbIndicatorCode(code));
+    const exact = curated ?? (await resolveWbIndicatorCode(code, signal));
     if (exact) return dedup([exact, ...scored]).slice(0, 12);
   }
 
@@ -69,7 +70,7 @@ export async function searchIndicators(query: string, topic?: string): Promise<I
     const url =
       `${WB}/indicator?format=json&per_page=25&source=2&search=` +
       encodeURIComponent(q);
-    const resp = await fetch(url);
+    const resp = await fetchWithTimeout(url, { signal, timeoutMs: SEARCH_TIMEOUT_MS });
     if (resp.ok) {
       const data = await resp.json();
       const rows: any[] = Array.isArray(data) && data.length > 1 && Array.isArray(data[1]) ? data[1] : [];
@@ -163,7 +164,7 @@ export async function fetchWorldbank(
   const url =
     `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
     `?format=json${worldbankDateParam(yearStart, yearEnd)}&per_page=2000`;
-  const resp = await fetch(url, signal ? { signal } : undefined);
+  const resp = await fetchWithTimeout(url, { signal });
   if (!resp.ok) throw new Error('World Bank API HTTP ' + resp.status);
   const data = await resp.json();
   if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1])) {
@@ -264,8 +265,8 @@ export const worldbankAdapter: SourceAdapter = {
   normalizeId: (id) => id,
   curated: [],
   usesSharedCatalog: false,
-  primarySearch: async (query) =>
-    (await searchIndicators(query)).map((i) => ({ id: i.id, name: i.name, source: 'worldbank' })),
+  primarySearch: async (query, signal) =>
+    (await searchIndicators(query, undefined, signal)).map((i) => ({ id: i.id, name: i.name, source: 'worldbank' })),
   openIdSpace: true,
   idLabel: 'World Bank indicator',
   hasCuratedId: (id) => INDICATORS.some((i) => i.id.toLowerCase() === id.trim().toLowerCase()),

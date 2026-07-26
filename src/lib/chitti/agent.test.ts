@@ -2241,6 +2241,47 @@ describe('router validation + recovery (driven)', () => {
     expect(evs[0].detail).toBe('API rejected id (unverified id)');
     expect(evs[1].detail).toBe('rejected again — stop retrying (unverified id)');
   });
+
+  it('stops hammering a source the browser cannot reach, and steers to another database', async () => {
+    // The incident this guards: the IMF DataMapper API is not reliably CORS-open
+    // to browsers. A CORS block is a plain transport error, not a structured
+    // ApiRejection, so the per-id rejection cap above never applied — the model
+    // retried the same series five times and then delegated a sub-agent that
+    // tried twice more, burning the turn against a wall no retry can pass.
+    let imfCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes('imf.org')) { imfCalls++; throw new TypeError('Load failed'); }
+        if (u.includes('/indicator?')) return { ok: true, json: async () => [{ page: 1 }, []] };
+        if (u.includes('api.worldbank.org'))
+          return { ok: true, json: async () => [{ page: 1, pages: 1 }, [{ country: { value: 'India' }, countryiso3code: 'IND', date: '2020', value: 100 }]] };
+        throw new Error('unexpected url ' + u);
+      })
+    );
+    const args = { id: 'imf:NGDP_RPCH', countries: ['IND'], year_start: 2024, year_end: 2030 };
+    const seen = driveCapture([
+      modelTurn([tc('fetch_series', args, 'a')]),
+      modelTurn([tc('fetch_series', args, 'b')]),
+      modelTurn([tc('fetch_series', args, 'c')]),
+      // Even a DIFFERENT IMF id must be refused — the block is the source's, not
+      // the series'. This is the step that used to send the model id-hunting.
+      modelTurn([tc('fetch_series', { ...args, id: 'imf:NGDP_RPCH_OTHER' }, 'd')]),
+      modelTurn([tc('finish_explanation', { explanation: 'IMF was unavailable.' }, 'fe')]),
+    ]);
+    const { cb, trace } = capture();
+    await newSession(['imf', 'worldbank']).ask('q', cb);
+
+    // Two real attempts, then the wall: no third request leaves the browser.
+    expect(imfCalls).toBe(2);
+    expect(seen['c']).toMatch(/UNREACHABLE from this browser/);
+    expect(seen['c']).toMatch(/DIFFERENT database/);
+    expect(seen['d']).toMatch(/UNREACHABLE from this browser/);
+    const evs = trace().filter((e) => e.tool === 'fetch_series');
+    expect(evs.map((e) => e.status)).toEqual(['error', 'error', 'error', 'error']);
+    expect(evs[2].detail).toMatch(/unreachable — not retried/);
+  });
 });
 
 // buildRejectionSteer — the pure steer builder behind the driven recovery above.
