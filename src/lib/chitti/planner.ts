@@ -35,17 +35,41 @@ const COUNTRY_NOISE = new Set([
   'as', 'an', 'on', 'to', 'we', 'the', 'and', 'a', 'i', 'me', 'my', 'id', 'im',
 ]);
 
-// Count DISTINCT country/region mentions in a question, reusing the countries.ts
-// resolver but guarding against its short-code noise: single tokens must be an
-// explicit 3-letter ISO3 (all-caps in the original) or be at least 4 letters and
-// not a stopword; 2–3 word spans are resolved greedily so "United States" counts
-// once (never also as "states"). Exported for the heuristic's unit table.
-export function countCountryMentions(question: string): number {
-  const words = String(question ?? '')
+// One resolved country/region mention, with the span of WORD indices (into the
+// returned `words` array) it consumed — so a caller can subtract the mention
+// from the question and keep what's left. `start`/`end` are a half-open range.
+export interface CountryMention {
+  code: string;
+  name: string;
+  start: number;
+  end: number;
+}
+
+// Find country/region mentions in a question, reusing the countries.ts resolver
+// but guarding against its short-code noise: single tokens must be an explicit
+// 3-letter ISO3 (all-caps in the original) or be at least 4 letters and not a
+// stopword; 2–3 word spans are resolved greedily so "United States" matches once
+// (never also as "states"). The scan is shared by the plan gate (which only
+// needs the distinct count) and the fast path (which needs the codes AND the
+// spans, to strip them out of the indicator phrase). Exported for both unit
+// tables.
+export function extractCountryMentions(question: string): {
+  words: string[];
+  rawWords: string[];
+  mentions: CountryMention[];
+} {
+  // Two aligned views of the same tokens. `words` is letters-only (what country
+  // resolution has always matched on); `rawWords` keeps digits, because a caller
+  // reusing these spans for a search query needs "CO2", not "CO". Both are
+  // filtered by the SAME predicate — a token with no letters at all (a bare
+  // year) is dropped from both — so the indices stay in step.
+  const tokens = String(question ?? '')
     .split(/\s+/)
-    .map((w) => w.replace(/[^A-Za-z]/g, ''))
-    .filter(Boolean);
-  const codes = new Set<string>();
+    .map((w) => ({ word: w.replace(/[^A-Za-z]/g, ''), raw: w.replace(/[^A-Za-z0-9]/g, '') }))
+    .filter((t) => t.word);
+  const words = tokens.map((t) => t.word);
+  const rawWords = tokens.map((t) => t.raw);
+  const mentions: CountryMention[] = [];
   let i = 0;
   while (i < words.length) {
     let advanced = false;
@@ -63,7 +87,7 @@ export function countCountryMentions(question: string): number {
       // real country mention resolves via exact code, ISO2, exact name, or a
       // curated alias, all of which are kept. Multi-word spans may still fuzzy.
       if (r && !(n === 1 && r.matched === 'fuzzy')) {
-        codes.add(r.code);
+        mentions.push({ code: r.code, name: r.name, start: i, end: i + n });
         i += n;
         advanced = true;
         break;
@@ -71,6 +95,13 @@ export function countCountryMentions(question: string): number {
     }
     if (!advanced) i += 1;
   }
+  return { words, rawWords, mentions };
+}
+
+// Count DISTINCT country/region mentions in a question. Thin wrapper over the
+// shared scan above; behaviour unchanged.
+export function countCountryMentions(question: string): number {
+  const codes = new Set(extractCountryMentions(question).mentions.map((m) => m.code));
   return codes.size;
 }
 

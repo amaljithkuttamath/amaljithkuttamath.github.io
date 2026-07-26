@@ -47,6 +47,7 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
 - **Agent layer** — `session.ts` (the loop: `ask`/`dispatch`/`routeFetch`/
   `runSubAgent`), `providers.ts` (the BYOK LLM client + retry/fallback),
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
+  `fastpath.ts` (the no-model direct answer — see below),
   `agent.ts` (facade re-exporting `session` + the split modules).
 - **UI layer** — `ui/*`, all loaded by `src/pages/apps/chitti.astro` via one
   `import './boot'`. `ui/state.ts` owns all shared state; `ui/boot.ts` is the
@@ -71,6 +72,16 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
 - **BYOK / zero-backend / privacy.** No server, no telemetry, no secrets in the
   repo. Keys live only in the browser; the share/export formats whitelist fields
   (never keys, trace, or the VFS).
+- **The fast path refuses rather than guesses.** `fastpath.ts` answers
+  "indicator × countries × years" questions with NO model call — no key, no
+  cost, nothing that can hallucinate — by driving `findSeriesWithReceipt` →
+  `adapter.fetchSeries` → a deterministic spec. `handleAskSubmit` tries it
+  *before* the key gate; a miss falls through to the agent, which is where
+  ambiguous questions belong. When touching `parseFastPath`, the question is
+  never "could we handle this?" but **"would we handle it wrong?"** — a wrong
+  fast answer is worse than a slower right one, so every gate errs toward
+  refusing. `MIN_MATCH_SCORE` is calibrated against the curated catalog (see its
+  comment) and deliberately under-fires.
 - **Demo answers are fetched, never authored.** `src/data/chitti/demos.json`
   holds the key-free worked examples on Chitti's empty state. It is written
   **only** by `npm run demos:refresh` (`scripts/gen-chitti-demos.mjs`), which

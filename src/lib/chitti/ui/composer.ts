@@ -3,10 +3,12 @@
 // state; boot keeps the actual event-listener registrations (order unchanged)
 // and points them at these handlers. unlockSources comes from config.ts.
 import { run, allTurns, liveChartTurns, consoleEl, threadEl, newConvoBtn, composerQ,
-         qIn, keyIn, byokSum, modelSel, askBtn, sourcesSearch } from './state';
+         qIn, keyIn, byokSum, modelSel, askBtn, sourcesSearch, askForm } from './state';
 import { unlockSources, openByok, selectedSources, updateSourcesCount, currentProvider,
          rlmEnabled, lockSources } from './config';
 import { createSession } from '../agent';
+import { parseFastPath, runFastPath, type FastPathResult } from '../fastpath';
+import { rowsToCSV } from '../tools';
 import { exportTurnTrace } from '../tracing';
 import type { ProviderConfig } from '../providers';
 import type { AgentOutput } from '../agent';
@@ -16,6 +18,7 @@ import { renderTrace, renderFiles } from './trace';
 import { renderChart } from './charts';
 import { renderTable, renderCitations, renderFinding, renderVerification, renderRunningTotal } from './evidence';
 import { syncDashboardsAfterTurn } from './dashboards-view';
+import { renderChartUnavailable } from './restore';
 
 // ── "+ new question" (non-destructive two-step reset) ────────────────────
 // The reset is genuinely destructive: it wipes the whole thread AND unlocks
@@ -89,12 +92,141 @@ export function maybeDisarmOnClick(e: MouseEvent) {
   }
 }
 
+// ── The direct (no-model) answer ────────────────────────────────────────
+// Set by the "run the full agent" escalation on a fast-path turn: the next
+// submit of exactly this question skips the fast path and goes to the agent.
+// Scoped to the question text so it can never silently disable the fast path
+// for something else the user types afterwards.
+let escalateQuestion: string | null = null;
+
+// A hung source API must not leave the composer disabled with no way out, and
+// the fast path's whole promise is that it is quick — so it gets a hard ceiling
+// and falls through to the agent if it can't beat it.
+const FAST_PATH_TIMEOUT_MS = 20_000;
+
+// Render a completed fast-path answer as a turn. Deliberately reuses the same
+// render functions a live agent turn uses, so the result is not a lesser view:
+// same chart, same evidence table, same citation ledger, same CSV.
+async function renderDirectAnswer(question: string, res: FastPathResult) {
+  const tb = createTurnBlock();
+  tb.question = question;
+  renderQuestion(tb, question);
+  allTurns.push(tb);
+  liveChartTurns.push(tb);
+  tb.panel.style.display = 'block';
+  tb.railModelEl.textContent = 'no model · direct from source';
+  renderFiles(tb, {});
+  renderTrace(tb, res.trace);
+  tb.canvasEl.classList.remove('ch-canvas-pending');
+  // Same treatment as a restored answer: the chart is the one part of this view
+  // that needs the network (ECharts is a CDN import), and losing it must not
+  // leave a blank box or a stuck "rendering…" flag over an answer that is
+  // otherwise complete.
+  try {
+    await renderChart(tb, res.spec);
+  } catch (err) {
+    console.error('chart render failed', err);
+    renderChartUnavailable(tb, res.spec.title);
+  }
+  tb.renderFlag.style.display = 'none';
+  tb.answerSection.style.display = 'block';
+  tb.metaSection.style.display = 'block';
+  renderFinding(tb, res.summary);
+  // Say plainly what this is. No verifier ran because no model ran — and that
+  // is the selling point, not a caveat to bury: nothing in this path is capable
+  // of inventing a number.
+  tb.verifyEl.textContent = '';
+  tb.verifyEl.className = 'ch-verify ch-verify-direct';
+  tb.verifyEl.style.display = 'block';
+  const tag = document.createElement('span');
+  tag.className = 'ch-verify-tag';
+  tag.textContent = 'answered directly from the source — no model ran, nothing generated';
+  tb.verifyEl.appendChild(tag);
+  renderTable(tb, res.rows, rowsToCSV(res.rows));
+  renderCitations(tb, res.citations);
+  tb.lastFinding = res.summary;
+  tb.lastCitations = res.citations;
+  tb.lastVerification = null;
+  tb.shareBtn.style.display = '';
+  tb.mdBtn.style.display = '';
+  if (tb.lastSpec) tb.pinBtn.style.display = '';
+  setStatus(tb, 'ok', 'Done · free · no key used');
+  tb.panelDot.className = 'ch-panel-dot';
+  tb.panelLabel.textContent = `${res.trace.length} steps · no model call`;
+
+  // The escalation. A direct answer is literal — it reports the series and
+  // stops — so anyone who wanted analysis needs one click to get the agent,
+  // not a retyped question.
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'ch-escalate';
+  more.textContent = 'Want analysis? Run the full agent on this →';
+  more.addEventListener('click', () => {
+    escalateQuestion = question;
+    qIn.value = question;
+    // Resubmit in a FRESH task, not inline. Submitting inline runs
+    // handleAskSubmit up to its first await; the microtask checkpoint after
+    // this listener then resumes it, so `openByok(true)` from the key gate
+    // lands BEFORE the click has finished bubbling — and the document-level
+    // "close the sheet on an outside click" handler in boot.ts, which fires
+    // last, immediately closed the sheet it had just opened. Escalating with
+    // no key looked like a dead button. Deferring lets the click dispatch
+    // finish (the sheet is still hidden, so that handler no-ops) before the
+    // submit runs.
+    setTimeout(() => askForm.requestSubmit(), 0);
+  });
+  tb.answerSection.appendChild(more);
+  return tb;
+}
+
+// Try to answer without a model. Returns true when it did (the caller stops),
+// false to fall through to the agent. Never throws: any failure is a fall-through.
+async function tryDirectAnswer(question: string): Promise<boolean> {
+  if (escalateQuestion === question) { escalateQuestion = null; return false; }
+  const plan = parseFastPath(question);
+  if (!plan) return false;
+  run.running = true;
+  askBtn.disabled = true;
+  askBtn.classList.add('ch-send-working');
+  try {
+    const res = await runFastPath(plan, {
+      sources: selectedSources(),
+      signal: AbortSignal.timeout(FAST_PATH_TIMEOUT_MS),
+    });
+    // A miss is not a failure to report — it is exactly the case the agent is
+    // better at, so say nothing and let it take over.
+    if ('ok' in res) return false;
+    qIn.value = '';
+    consoleEl.style.display = 'none';
+    resetNewQuestionChip();
+    newConvoBtn.style.display = '';
+    composerQ.placeholder = 'Ask a follow-up — or + new question for a fresh start…';
+    const tb = await renderDirectAnswer(question, res);
+    requestAnimationFrame(() =>
+      tb.root.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+    );
+    return true;
+  } catch (err) {
+    console.error('direct answer failed', err);
+    return false;
+  } finally {
+    run.running = false;
+    askBtn.disabled = false;
+    askBtn.classList.remove('ch-send-working');
+  }
+}
+
 // ── Run: the submit + stop flow (delegated to by the sticky composer) ──
 export async function handleAskSubmit(e: SubmitEvent) {
   e.preventDefault();
   if (run.running) return;
   const question = qIn.value.trim() || (qIn.placeholder || '').trim();
   if (!question) return;
+
+  // Before anything else — including the key gate. A question the deterministic
+  // pipeline can answer costs no key, no model call and no money, so it must
+  // never be held behind a credentials prompt.
+  if (await tryDirectAnswer(question)) return;
 
   const apiKey = keyIn.value.trim();
   if (!apiKey) {
