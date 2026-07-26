@@ -131,8 +131,8 @@ export function sourceOfId(id: string): 'worldbank' | 'owid' | 'imf' | 'who' | '
 // database holds the metric. Each source contributes hits from its own
 // catalog; the returned id already carries the namespace the fetch tools
 // route on, and `source` names the database for the model's benefit.
-export async function findSeries(query: string, activeIds?: string[]): Promise<SeriesHit[]> {
-  return (await findSeriesWithReceipt(query, activeIds)).hits;
+export async function findSeries(query: string, activeIds?: string[], signal?: AbortSignal): Promise<SeriesHit[]> {
+  return (await findSeriesWithReceipt(query, activeIds, signal)).hits;
 }
 
 // findSeries plus the UI receipt, GENERIC over the active adapters. The search
@@ -143,9 +143,14 @@ export async function findSeries(query: string, activeIds?: string[]): Promise<S
 // before; (3) each active source's live-catalog fallback, when it returned
 // fewer than 3 hits. Then the same candidateCount / dedup / cross-source score
 // re-rank / cap / receipt as the original.
+// `signal` is the turn's stop control. It MUST reach every request in here:
+// ask() only tests the signal between steps, so a search that ignored it made
+// the whole step — and therefore the stop button — unresponsive until the
+// network returned on its own.
 export async function findSeriesWithReceipt(
   query: string,
-  activeIds?: string[]
+  activeIds?: string[],
+  signal?: AbortSignal
 ): Promise<{ hits: SeriesHit[]; receipt: SearchReceipt }> {
   const activeSources = resolveSources(activeIds);
   const hits: SeriesHit[] = [];
@@ -153,7 +158,7 @@ export async function findSeriesWithReceipt(
   // 1. Primary searches (World Bank), in registry order. searchIndicators also
   //    falls back to the live WB search API when the curated set is thin.
   for (const s of activeSources) {
-    if (s.primarySearch) hits.push(...(await s.primarySearch(query)));
+    if (s.primarySearch) hits.push(...(await s.primarySearch(query, signal)));
   }
 
   // 2. The shared curated dataset catalog (OWID/IMF/WHO), filtered to whichever
@@ -170,7 +175,7 @@ export async function findSeriesWithReceipt(
   //    inside a source's liveCatalogSearch degrades to [] (curated hits stand).
   for (const s of activeSources) {
     if (s.liveCatalogSearch && hits.filter((h) => h.source === s.id).length < 3) {
-      hits.push(...(await s.liveCatalogSearch(query)));
+      hits.push(...(await s.liveCatalogSearch(query, signal)));
     }
   }
 

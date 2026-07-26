@@ -6,6 +6,7 @@ import { ApiRejection } from '../tools';
 import { parseCsvLine } from '../csv';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
+import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';
 
 // OWID grapher slugs — each serves CSV at ourworldindata.org/grapher/<slug>.csv,
 // so every id here round-trips: a find_series hit fetches through the router's
@@ -72,7 +73,7 @@ export async function fetchOwid(
   const url = `https://ourworldindata.org/grapher/${encodeURIComponent(clean)}.csv?csvType=full`;
   let resp: Response;
   try {
-    resp = await fetch(url, signal ? { signal } : undefined);
+    resp = await fetchWithTimeout(url, { signal });
   } catch (err: any) {
     // A user-cancel must keep its AbortError identity so the loop unwinds as a
     // stop — not get rewritten into a "CORS block, fall back to World Bank" steer
@@ -161,9 +162,9 @@ export function parseOwidCatalog(data: unknown): { id: string; name: string }[] 
 // find_series simply returns the (expanded) curated hits. The parser above — not
 // this URL — is the tested contract.
 let owidCatalogCache: { id: string; name: string }[] | null = null;
-async function owidCatalog(): Promise<{ id: string; name: string }[]> {
+async function owidCatalog(signal?: AbortSignal): Promise<{ id: string; name: string }[]> {
   if (owidCatalogCache) return owidCatalogCache;
-  const resp = await fetch('https://ourworldindata.org/charts.json');
+  const resp = await fetchWithTimeout('https://ourworldindata.org/charts.json', { signal, timeoutMs: SEARCH_TIMEOUT_MS });
   if (!resp.ok) throw new Error('OWID charts HTTP ' + resp.status);
   owidCatalogCache = parseOwidCatalog(await resp.json());
   return owidCatalogCache;
@@ -172,9 +173,9 @@ async function owidCatalog(): Promise<{ id: string; name: string }[]> {
 // Search the live OWID catalog with the shared scorer. Any failure (offline,
 // CORS, no such endpoint, shape change) degrades to an empty list — findSeries
 // then just returns the curated OWID hits, never an error.
-async function searchOwidCatalog(query: string): Promise<SeriesHit[]> {
+async function searchOwidCatalog(query: string, signal?: AbortSignal): Promise<SeriesHit[]> {
   try {
-    const cat = await owidCatalog();
+    const cat = await owidCatalog(signal);
     return cat
       .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
       .filter((x) => x.score > 0)
@@ -208,7 +209,7 @@ export const owidAdapter: SourceAdapter = {
   normalizeId: (id) => 'owid:' + id.replace(/^owid:/i, ''),
   curated: OWID_CATALOG,
   usesSharedCatalog: true,
-  liveCatalogSearch: (query) => searchOwidCatalog(query),
+  liveCatalogSearch: (query, signal) => searchOwidCatalog(query, signal),
   openIdSpace: false,
   idLabel: 'OWID slug',
   hasCuratedId: (id) => OWID_CATALOG.some((c) => c.id === 'owid:' + id.replace(/^owid:/i, '')),

@@ -22,11 +22,26 @@ for (const topic of Object.keys(indicatorsData as Record<string, [string, string
 // something only this app does: ranking/CAGR computed across every country,
 // a correlation between two series, a join across two different databases, an
 // IMF forward projection, or a pinned tile that re-fetches itself later.
+// Suggested questions. Deliberately NOT "chart one well-known indicator" —
+// Our World in Data already answers those in one click, for free, with no key,
+// so leading with them advertises Chitti at its weakest. Each preset here needs
+// something only this app does: ranking/CAGR computed across every country,
+// a correlation between two series, a join across two different databases, or
+// a pinned tile that re-fetches itself later — plus one that the deterministic
+// fast path answers instantly with no key at all.
+//
+// A preset is a PROMISE: clicking it submits immediately, so anything listed
+// here must actually work. An IMF-projection preset used to sit in this list
+// and was removed — the IMF DataMapper API is not reliably CORS-open to
+// browsers, so it sent first-time visitors into a chain of failed fetches and
+// retries. IMF stays available as a source for anyone who picks it; it must not
+// be what the front page leads with. Check any new preset end to end in a real
+// browser before adding it.
 const PRESETS = [
+  'Chart life expectancy in Japan, Italy and Spain since 1960',
   'Rank the 10 countries where child mortality fell fastest since 2000',
   'Does higher health spending buy lower child mortality? Chart the relationship',
   'Compare CO₂ per capita against GDP per capita for the G7 since 1990',
-  'Which economies does the IMF project to grow fastest through 2030?',
   'Chart India’s GDP per capita since 2000 and pin it to a dashboard',
 ];
 ---

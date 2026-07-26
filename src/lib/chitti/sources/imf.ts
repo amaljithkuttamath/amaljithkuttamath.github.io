@@ -5,6 +5,7 @@ import type { DataRow } from '../tools';
 import { ApiRejection, COUNTRIES } from '../tools';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
+import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';
 
 // IMF DataMapper codes — JSON at imf.org/external/datamapper/api/v1/<code>.
 // Distinctive value: includes IMF FORECASTS several years ahead.
@@ -34,7 +35,7 @@ export async function fetchImf(
   const url = `https://www.imf.org/external/datamapper/api/v1/${path}`;
   let resp: Response;
   try {
-    resp = await fetch(url, signal ? { signal } : undefined);
+    resp = await fetchWithTimeout(url, { signal });
   } catch (err: any) {
     // Preserve a user-cancel's AbortError identity (see owid.ts) instead of
     // rewriting it into a World Bank fallback steer.
@@ -93,9 +94,9 @@ export function parseImfIndicators(data: unknown): { id: string; name: string }[
 // live-fallback equivalent of World Bank's search API. Same host Chitti already
 // fetches IMF *data* from, so it shares that host's (browser-open) CORS policy.
 let imfCatalogCache: { id: string; name: string }[] | null = null;
-async function imfCatalog(): Promise<{ id: string; name: string }[]> {
+async function imfCatalog(signal?: AbortSignal): Promise<{ id: string; name: string }[]> {
   if (imfCatalogCache) return imfCatalogCache;
-  const resp = await fetch('https://www.imf.org/external/datamapper/api/v1/indicators');
+  const resp = await fetchWithTimeout('https://www.imf.org/external/datamapper/api/v1/indicators', { signal, timeoutMs: SEARCH_TIMEOUT_MS });
   if (!resp.ok) throw new Error('IMF indicators HTTP ' + resp.status);
   imfCatalogCache = parseImfIndicators(await resp.json());
   return imfCatalogCache;
@@ -104,9 +105,9 @@ async function imfCatalog(): Promise<{ id: string; name: string }[]> {
 // Search the live IMF catalog with the shared scorer. Any failure (offline,
 // CORS, shape change) degrades to an empty list — findSeries then just returns
 // the curated hits, never an error.
-async function searchImfCatalog(query: string): Promise<SeriesHit[]> {
+async function searchImfCatalog(query: string, signal?: AbortSignal): Promise<SeriesHit[]> {
   try {
-    const cat = await imfCatalog();
+    const cat = await imfCatalog(signal);
     return cat
       .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
       .filter((x) => x.score > 0)
@@ -139,7 +140,7 @@ export const imfAdapter: SourceAdapter = {
   normalizeId: (id) => 'imf:' + id.replace(/^imf:/i, '').toUpperCase(),
   curated: IMF_CATALOG,
   usesSharedCatalog: true,
-  liveCatalogSearch: (query) => searchImfCatalog(query),
+  liveCatalogSearch: (query, signal) => searchImfCatalog(query, signal),
   openIdSpace: false,
   idLabel: 'IMF code',
   hasCuratedId: (id) => IMF_CATALOG.some((c) => c.id === 'imf:' + id.replace(/^imf:/i, '').toUpperCase()),

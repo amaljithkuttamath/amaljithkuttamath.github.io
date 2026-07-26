@@ -5,6 +5,7 @@ import type { DataRow } from '../tools';
 import { ApiRejection, COUNTRIES } from '../tools';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
+import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';
 
 // WHO Global Health Observatory (GHO) IndicatorCodes — each fetches OData rows
 // at ghoapi.azureedge.net/api/<IndicatorCode>, so every id here round-trips: a
@@ -85,7 +86,7 @@ export async function fetchWho(
   const url = `https://ghoapi.azureedge.net/api/${encodeURIComponent(clean)}?$filter=${encodeURIComponent(filter)}`;
   let resp: Response;
   try {
-    resp = await fetch(url, signal ? { signal } : undefined);
+    resp = await fetchWithTimeout(url, { signal });
   } catch (err: any) {
     // Preserve a user-cancel's AbortError identity (see owid.ts) instead of
     // rewriting it into a World Bank fallback steer.
@@ -153,9 +154,9 @@ export function parseWhoIndicators(data: unknown): { id: string; name: string }[
 // open) CORS policy. Offline-honest: this endpoint could NOT be confirmed from
 // the build sandbox; the parser above — not this URL — is the tested contract.
 let whoCatalogCache: { id: string; name: string }[] | null = null;
-async function whoCatalog(): Promise<{ id: string; name: string }[]> {
+async function whoCatalog(signal?: AbortSignal): Promise<{ id: string; name: string }[]> {
   if (whoCatalogCache) return whoCatalogCache;
-  const resp = await fetch('https://ghoapi.azureedge.net/api/Indicator');
+  const resp = await fetchWithTimeout('https://ghoapi.azureedge.net/api/Indicator', { signal, timeoutMs: SEARCH_TIMEOUT_MS });
   if (!resp.ok) throw new Error('WHO GHO indicators HTTP ' + resp.status);
   whoCatalogCache = parseWhoIndicators(await resp.json());
   return whoCatalogCache;
@@ -164,9 +165,9 @@ async function whoCatalog(): Promise<{ id: string; name: string }[]> {
 // Search the live WHO catalog with the shared scorer. Any failure (offline,
 // CORS, shape change) degrades to an empty list — findSeries then just returns
 // the curated WHO hits, never an error.
-async function searchWhoCatalog(query: string): Promise<SeriesHit[]> {
+async function searchWhoCatalog(query: string, signal?: AbortSignal): Promise<SeriesHit[]> {
   try {
-    const cat = await whoCatalog();
+    const cat = await whoCatalog(signal);
     return cat
       .map((d) => ({ d, score: scoreSeries(query, d.id, d.name) }))
       .filter((x) => x.score > 0)
@@ -199,7 +200,7 @@ export const whoAdapter: SourceAdapter = {
   normalizeId: (id) => 'who:' + id.replace(/^who:/i, ''),
   curated: WHO_CATALOG,
   usesSharedCatalog: true,
-  liveCatalogSearch: (query) => searchWhoCatalog(query),
+  liveCatalogSearch: (query, signal) => searchWhoCatalog(query, signal),
   openIdSpace: false,
   idLabel: 'WHO IndicatorCode',
   hasCuratedId: (id) => WHO_CATALOG.some((c) => c.id === 'who:' + id.replace(/^who:/i, '')),

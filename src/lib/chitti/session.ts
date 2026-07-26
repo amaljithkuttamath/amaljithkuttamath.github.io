@@ -296,6 +296,19 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
   // tool-call budget re-fetching one bad id.
   const failedFetches = new Map<string, number>();
 
+  // Loop safety for TRANSPORT failures, keyed by SOURCE rather than by fetch key.
+  // A structured rejection (above) is about one id, so it is counted per id. A
+  // CORS block or a dead host is about the whole source: every id under it will
+  // fail identically. Counting per id let a model burn its entire budget walking
+  // through ids of a source the browser simply cannot reach — observed in the
+  // wild against the IMF DataMapper API, which is not reliably CORS-open: five
+  // fetches of the same series, then a delegated sub-agent that tried it twice
+  // more. After the second failure the source is treated as unreachable FOR THIS
+  // SESSION and further fetches are refused without a network call, so the model
+  // is pushed to a different database instead of retrying a wall.
+  const unreachableSources = new Map<string, number>();
+  const UNREACHABLE_AFTER = 2;
+
   let turnCount = 0;
 
   async function ask(question: string, cb: AgentCallbacks, signal?: AbortSignal): Promise<AgentOutput> {
@@ -553,6 +566,27 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         );
       }
 
+      // ── Unreachable-source guard ────────────────────────────────────────
+      // Checked BEFORE the id guard below, deliberately: when a source cannot be
+      // reached at all, which id was asked for is irrelevant, and answering
+      // "unknown id — call find_series" would send the model off to find another
+      // id of the same unreachable source. Refusing here ends that loop in one
+      // step, with an instruction to change database rather than change id.
+      // Thrown as a FetchSteer rather than returned like the sibling guards
+      // below: those refuse a malformed REQUEST (an ok receipt with an
+      // explanatory detail is fair), but this one reports that a source is down.
+      // Something really did fail, the receipts either side of it are errors,
+      // and a green line reading "unreachable" would misrepresent the run.
+      if ((unreachableSources.get(source) ?? 0) >= UNREACHABLE_AFTER) {
+        throw new FetchSteer(
+          `ERROR: ${adapter.sourceLabel} is UNREACHABLE from this browser (its last ${UNREACHABLE_AFTER} requests ` +
+            `failed — most likely a CORS block, which no retry will fix). Do NOT call fetch_series for any "${source}" ` +
+            `id again this session. Call find_series and pick an id from a DIFFERENT database, or answer from the data ` +
+            `you already have and say which source was unavailable.`,
+          `${adapter.sourceLabel} unreachable — not retried`
+        );
+      }
+
       // ── Indicator-id guard (heuristic, not a wall) ──────────────────────
       // Trust an id that is in a curated catalog OR came back from a find_series
       // hit this session (seenSeriesIds). Otherwise:
@@ -671,6 +705,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               (unverifiedWbId ? ' (unverified id)' : '')
           );
         }
+        // Not a structured rejection and not a stop ⇒ a transport failure (CORS,
+        // DNS, offline, our own timeout). Count it against the SOURCE so a second
+        // one trips the guard above instead of inviting a third.
+        unreachableSources.set(source, (unreachableSources.get(source) ?? 0) + 1);
         throw err;
       }
       state.rows = state.rows.concat(rows);
@@ -754,7 +792,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           case 'find_series': {
             const { hits, receipt } = await findSeriesWithReceipt(
               String(a.query ?? ''),
-              sourceIds
+              sourceIds,
+              signal
             );
             // Attach the structured receipt for the UI's search-receipt card.
             // The model still receives only the SeriesHit[] JSON (plus a single
