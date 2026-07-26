@@ -90,7 +90,10 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   into that file** — a fabricated example in a provenance tool is the app lying
   at the exact moment a first-time visitor decides whether to trust it. The
   demos render through the same `restoreSharedAnswer` path a `#share=` link
-  uses, and through the same `cleanShareState` whitelist.
+  uses, and through the same `cleanShareState` whitelist. The generator needs
+  outbound access to the source APIs, which a sandbox often lacks — run the
+  **Refresh Chitti demos** workflow from the Actions tab instead and merge the
+  PR it opens.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 
@@ -116,6 +119,14 @@ at build time, so the shipped site sends nothing.
 Pushing to **`main`** triggers two GitHub Actions workflows — **CI** and
 **Deploy to GitHub Pages** — and publishes the site. Confirm both are green
 after a push. Feature work happens on a branch; `main` is production.
+
+A third workflow, **Refresh Chitti demos**, is manual (`workflow_dispatch`
+only). It re-fetches the empty-state demo answers on a runner — which has the
+network access a sandbox may not — validates them with the suite and a build,
+and opens a PR. It never pushes to `main`, and it skips the PR when only the
+timestamps moved. Note that CI does **not** re-run on that PR (GitHub does not
+trigger `pull_request` workflows for `GITHUB_TOKEN`-authored PRs), which is why
+the workflow runs the tests and build itself before opening it.
 
 <!-- Convention adopted from langchain-ai/openwiki (an agent-facing AGENTS.md).
      Kept hand-authored — this repo has no doc-generation pipeline. -->
