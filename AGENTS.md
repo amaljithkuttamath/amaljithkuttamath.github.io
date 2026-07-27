@@ -163,6 +163,14 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   workflow on the runner, whose generator loads `sources/worldbank.ts` as its
   entry point. `mirror.test.ts` now imports each source module first, in turn,
   as the regression guard.
+- **The layering is asserted, not just described.** `layering.test.ts` walks the
+  real import graph and fails on any runtime cycle (type-only imports are erased
+  and don't count). It exists because "kept acyclic" was written in two docs
+  while a cycle had been live for a while: a runtime cycle is not a compile
+  error and not a test failure — it only shows as a half-initialised module, and
+  only when entered through the wrong file, so the app stayed green and a CI
+  runner was the first thing to notice. If it fails, move the shared value into
+  `core.ts` rather than reordering imports.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 
