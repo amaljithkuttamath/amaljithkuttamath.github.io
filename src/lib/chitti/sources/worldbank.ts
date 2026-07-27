@@ -147,6 +147,19 @@ export function worldbankDateParam(yearStart?: number, yearEnd?: number): string
   return '';
 }
 
+// One retry for a TRANSIENT failure only. A 4xx is the API saying the request
+// itself is wrong — repeating it verbatim just wastes time and hammers a public
+// endpoint — so only 429 and 5xx are retried, once, after a short pause. Aborts
+// and timeouts propagate untouched: a user who pressed stop must not wait out a
+// retry they did not ask for.
+async function fetchWbWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
+  const resp = await fetchWithTimeout(url, { signal });
+  if (resp.ok || (resp.status !== 429 && resp.status < 500)) return resp;
+  await new Promise((r) => setTimeout(r, 1200));
+  if (signal?.aborted) return resp;
+  return fetchWithTimeout(url, { signal });
+}
+
 export async function fetchWorldbank(
   indicatorId: string,
   countryIds: string[],
@@ -164,8 +177,23 @@ export async function fetchWorldbank(
   const url =
     `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
     `?format=json${worldbankDateParam(yearStart, yearEnd)}&per_page=2000`;
-  const resp = await fetchWithTimeout(url, { signal });
-  if (!resp.ok) throw new Error('World Bank API HTTP ' + resp.status);
+  const resp = await fetchWbWithRetry(url, signal);
+  if (!resp.ok) {
+    // Include the URL and whatever the API said. A bare "HTTP 400" is
+    // undiagnosable — it hides which of a batched every-country pull was
+    // rejected and why, which is exactly the hole a real failure fell into: a
+    // demo-generation run died on HTTP 400 and the log could not say what had
+    // been asked for. The URL is built from public ids and carries no secret.
+    let detail = '';
+    try {
+      detail = (await resp.text()).replace(/\s+/g, ' ').slice(0, 200);
+    } catch {
+      /* body unreadable — the status and URL still tell most of the story */
+    }
+    throw new Error(
+      `World Bank API HTTP ${resp.status} for ${url}${detail ? ' — ' + detail : ''}`
+    );
+  }
   const data = await resp.json();
   if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1])) {
     // A World Bank error envelope (HTTP 200 + [{message:[…]}]) is a STRUCTURED

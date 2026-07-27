@@ -61,8 +61,19 @@ function addsVocabulary(note, name) {
 // survey-instrument series that no one asks for by name.
 const SKIP_TOPIC = /doing business|enterprise surveys|jobs diagnostics|wdi database archives/i;
 
+// `source=2` is World Development Indicators — the World Bank's flagship
+// database, and the one `searchIndicators` already queries for its live
+// fallback. Without it the endpoint serves EVERY World Bank database at once:
+// the first real run pulled ~6,000 topiced indicators and produced a 934KB
+// file, three times the budget, before the guard refused to write it. Those
+// extra thousands are programme-specific series from databases the app never
+// fetches from, so including them would have bloated the bundle with ids that
+// could not be charted. Pinning to WDI keeps the knowledge base over exactly
+// the id space the rest of the app searches.
+const SOURCE_WDI = 2;
+
 async function fetchPage(page) {
-  const url = `${WB}/indicator?format=json&per_page=500&page=${page}`;
+  const url = `${WB}/indicator?format=json&per_page=500&source=${SOURCE_WDI}&page=${page}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`World Bank /indicator HTTP ${resp.status} (page ${page})`);
   const body = await resp.json();
@@ -102,8 +113,9 @@ async function main() {
     rows.push(...next.rows);
   }
   if (rows.length < 500) {
-    // A catalogue this small means the API changed shape or served an error
-    // body; writing it would silently shrink the knowledge base.
+    // WDI carries well over a thousand indicators; a handful back means the API
+    // changed shape or served an error body, and writing it would silently
+    // shrink the knowledge base.
     throw new Error(`only ${rows.length} indicators returned — refusing to write a truncated catalogue`);
   }
 
