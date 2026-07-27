@@ -1,0 +1,5 @@
+{
+  "_comment": "GENERATED FILE — do not hand-edit. The long tail of the World Bank catalogue, built from the API's own topic + description metadata by scripts/gen-chitti-kb.mjs. The hand-tuned core lives in src/lib/chitti/kb.ts and always wins on conflict. Regenerate with: npm run kb:refresh. An empty entries array simply means the knowledge base is the authored core alone.",
+  "generated": null,
+  "entries": []
+}

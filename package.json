@@ -7,7 +7,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "test": "vitest run",
-    "demos:refresh": "node scripts/gen-chitti-demos.mjs"
+    "demos:refresh": "node scripts/gen-chitti-demos.mjs",
+    "kb:refresh": "node scripts/gen-chitti-kb.mjs"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.17",
