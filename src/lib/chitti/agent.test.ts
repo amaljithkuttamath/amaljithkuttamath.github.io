@@ -2624,6 +2624,57 @@ describe('rlm flag: the system prompt withholds llm() when off', () => {
   });
 });
 
+// ── Clarify: the agent may ask, but the asking is fenced ──────────────────
+// The gate exists because a data agent's worst failure is confidently
+// answering the wrong question — the wrong indicator family, the wrong country
+// scope, the wrong window. The fences matter as much as the capability: an
+// agent that interrogates before every question would make the empty-state
+// demos feel like paperwork, and would spend an LLM call at the one moment a
+// key-free visitor has seen Chitti do nothing worth trusting yet.
+describe('clarify gate: ask only when the answer turns on it', () => {
+  const sources = resolveSources(['worldbank', 'owid']);
+
+  it('tells the agent to ask, and to ask through finish_explanation', () => {
+    const p = buildSystemPrompt(sources);
+    expect(p).toMatch(/ASK ONE QUESTION/);
+    // No new tool: a clarifying question is a prose turn, and the session is
+    // multi-turn, so the user's reply is the next turn.
+    expect(p).toMatch(/ONE question, via finish_explanation/);
+  });
+
+  it('fences it: default to answering, one question, and never block', () => {
+    const p = buildSystemPrompt(sources);
+    // Bias is toward answering, not toward interrogating.
+    expect(p).toMatch(/Default to answering/);
+    expect(p).toMatch(/answerable as asked, answer it/);
+    // A stated default means a user who does not care is never held up.
+    expect(p).toMatch(/STATE THE DEFAULT/);
+    expect(p).toMatch(/never blocked/);
+    // And it cannot turn into an interview.
+    expect(p).toMatch(/at most once per question/);
+  });
+
+  it('keeps the options honest and off the data itself', () => {
+    const p = buildSystemPrompt(sources);
+    // Same rule as everywhere else in this app: never name what you have not
+    // seen. Options come from a real search, not from the model's memory.
+    expect(p).toMatch(/never an indicator you haven't seen/);
+    expect(p).toMatch(/find_series or browse_dataset/);
+    // Coverage and completeness are measurable, so they are never a question
+    // for the user.
+    expect(p).toMatch(/profile_series questions, not user questions/);
+  });
+
+  it('sub-agents are told they have no user to ask', () => {
+    // A sub-agent's only exit is return_findings; there is no channel to a
+    // human. Without this it would imitate the main loop's asking and stall.
+    const sub = buildSubAgentPrompt(sources[0]);
+    expect(sub).toMatch(/never ask/);
+    expect(sub).toMatch(/no one on the other end/);
+    expect(sub).not.toMatch(/ASK ONE QUESTION/);
+  });
+});
+
 describe('rlm flag: the llm() primitive in the execute_js sandbox', () => {
   const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
   const cfg = { provider: 'openrouter' as const, model: 'test-model', apiKey: 'x' };
