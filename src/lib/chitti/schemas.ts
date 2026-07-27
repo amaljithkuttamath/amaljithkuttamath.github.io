@@ -162,6 +162,70 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
   {
+    name: 'profile_series',
+    description:
+      'EXPLORE what you just fetched before drawing conclusions from it. Returns coverage ' +
+      '(countries, year range), how much is MISSING, the distribution at the latest ' +
+      'well-reported year (min/Q1/median/Q3/max, mean, sd), and the named outliers. Aggregate ' +
+      'rows (WLD, income/region aggregates) are excluded from the statistics. Use it when the ' +
+      'user asks what the data looks like, how complete or reliable it is, what is typical, ' +
+      'or which countries are unusual — and use it before ranking on a recent year, because it ' +
+      'tells you the last year with broad reporting (the final year of a pull is usually ' +
+      'near-empty, and ranking on it ranks who reports early, not who leads).',
+    parameters: {
+      type: 'object',
+      properties: {
+        indicator_id: {
+          type: 'string',
+          description: 'Restrict to one indicator id (recommended when multiple were fetched).',
+        },
+      },
+    },
+  },
+  {
+    name: 'breakdown',
+    description:
+      'Group the fetched countries by World Bank REGION or INCOME GROUP at one year and describe ' +
+      'each group: median, range, country count, and the highest/lowest country within it, ranked ' +
+      'by median, plus the gap between the top and bottom group. This is the strongest way to turn ' +
+      'a list of countries into an insight ("is the income gap closing?", "which region leads?") ' +
+      'and cannot be got by charting the series alone. Countries are classified from bundled World ' +
+      'Bank metadata — no extra fetch needed. Defaults to the latest well-reported year.',
+    parameters: {
+      type: 'object',
+      properties: {
+        by: {
+          type: 'string',
+          enum: ['region', 'income'],
+          description: 'Group countries by World Bank region, or by income group.',
+        },
+        indicator_id: { type: 'string', description: 'Restrict to one indicator id.' },
+        year: { type: 'number', description: 'Optional; defaults to the latest well-reported year.' },
+      },
+      required: ['by'],
+    },
+  },
+  {
+    name: 'browse_dataset',
+    description:
+      'Answer "what is IN the database I connected?" — the topics available, example indicators ' +
+      'under each, and the country/region/income coverage. Costs no request (the taxonomy is ' +
+      'bundled). Use it when the user asks what they can explore, what data is available, what ' +
+      'this database covers, or for suggestions of what to ask — instead of guessing or making ' +
+      'up indicators. Pass `topic` to list the shortlisted indicators under one topic. NOTE the ' +
+      'result is a curated shortlist, not the full catalog: never present it as everything the ' +
+      'database has, and use find_series for anything not listed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          description: 'Optional topic to drill into, e.g. "health", "climate", "poverty".',
+        },
+      },
+    },
+  },
+  {
     name: 'render_chart',
     description:
       'Render the final chart. Provide a spec with a chart type, title, axis labels, and series. ' +
@@ -341,6 +405,7 @@ export const RETURN_FINDINGS_SCHEMA: ToolSchema = {
 // and country lookup. Always available regardless of which databases are on.
 export const CORE_TOOL_NAMES = [
   'find_series', 'fetch_series', 'list_countries', 'execute_js', 'growth_stats', 'correlate',
+  'profile_series', 'breakdown', 'browse_dataset',
   'render_chart', 'finish', 'finish_explanation', 'write_file', 'read_file', 'save_to_dashboard',
   'edit_dashboard',
 ];
