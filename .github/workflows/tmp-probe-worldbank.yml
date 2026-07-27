@@ -9,6 +9,12 @@
 #
 # Scoped to one branch and triggered by push, so it needs no dispatch
 # permission. It writes nothing and touches no data.
+#
+# Every request carries a 20s deadline. The first version of this file had none
+# and stalled past five minutes on one case — an unbounded request, which is the
+# very bug this session had already fixed in the app. A diagnostic that can hang
+# tells you nothing; bounding each case is what makes a slow host distinguishable
+# from a rejected request.
 name: TMP probe World Bank
 
 on:
@@ -17,6 +23,11 @@ on:
 
 permissions:
   contents: read
+
+# One probe at a time: a degraded API is not helped by two runs of this racing.
+concurrency:
+  group: tmp-probe-worldbank
+  cancel-in-progress: true
 
 jobs:
   probe:
@@ -57,7 +68,7 @@ jobs:
               for (const [label, url] of cases) {
                 const t0 = Date.now();
                 try {
-                  const r = await fetch(url);
+                  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
                   const body = await r.text();
                   let shape = '(unparseable)';
                   try {
