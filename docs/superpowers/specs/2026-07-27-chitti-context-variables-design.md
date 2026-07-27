@@ -92,33 +92,55 @@ The agent must be able to *use* a variable, not merely have one described to
 it. Three mechanisms, in order of importance — and the first two add no new
 tool at all.
 
-**1. Every tool that takes `indicator_id` accepts a variable name.** That is
-the whole feature on the agent side. `growth_stats`, `profile_series`,
-`breakdown` and `correlate` already resolve a string against `rows[].indicator`;
-resolution gains one step in front — if the string names a binding, select that
-binding's rows, otherwise fall back to matching by indicator exactly as today.
-Backwards compatible by construction: every existing call keeps working,
-because an id that isn't a binding name behaves as it always did.
+The mechanism must be **generic or it does not scale**. A first draft of this
+section listed the four tools that would learn to accept a variable name. That
+is the wrong shape: it makes referencing a property of each tool, so every tool
+written afterwards has to remember to support it, and the one that forgets is
+not obviously broken — it just quietly ignores the reference. Eighteen cases in
+`dispatch` today, and the feature would rot at the rate new ones are added.
+
+So: **two seams, both in `dispatch` (`session.ts:778`), and no tool knows
+variables exist.**
+
+**Seam 1 — resolve on the way in.** Before the switch, walk the tool call's
+arguments and replace any reference token with what it points at. Every `case`
+below receives plain concrete values and is written exactly as it is today. A
+new tool inherits referencing for free, by existing.
+
+**Seam 2 — bind on the way out.** After the switch, any result that carried
+rows registers a binding. Not "fetch and compute bind" — that is another list
+that goes stale. The rule is structural: a tool returned data, so the data gets
+a name. A new tool inherits binding for free too.
+
+**What a reference resolves to.** One thing, uniformly: a **row selector** —
+the (indicator, countries, year range) triple that the binding stands for.
+Every compute tool here already filters `state.rows` down to a subset; today
+that filter is by indicator alone, via `indicator_id`. Resolution hands them a
+fuller selector through the same filtering path. So there is no per-parameter
+type dispatch, no "this argument wants an id but that one wants rows" — one
+token, one selector, one shared filter. `execute_js` is the exception only in
+that it receives the selected rows directly, since it already receives `rows`.
 
 This is why the general form matters. `correlate(indicator_a: "NY.GDP.PCAP.CD",
 indicator_b: "EN.ATM.CO2E.PC")` silently correlates across whatever countries
 happen to be in `rows` for each. `correlate(indicator_a: "@g7_gdp",
-indicator_b: "@g7_co2")` correlates two *stated* sets, and the answer says which.
+indicator_b: "@g7_co2")` correlates two *stated* sets, and the answer can say
+which. Same tool, unmodified.
 
-**2. Binding names arrive in tool results.** A successful `fetch_series`
-returns its summary with the name it just bound. The agent learns the name the
-same way it learns row counts — by reading the result of the call it made. No
-lookup tool, no preamble listing the environment, nothing to keep in sync.
+**Backwards compatible by construction.** A string that names no binding falls
+through untouched and matches by indicator exactly as today, so every existing
+call keeps working and every existing test keeps passing.
 
-**3. `execute_js` gets them in scope.** It already receives `rows` as every
-fetched row. It also gets the bindings, so a script can work with a named
-subset instead of re-filtering `rows` by indicator and country. This is where a
-variable stops being a label and becomes a handle.
+**How the agent learns a name.** From the result of the call that created it —
+a successful `fetch_series` reports the name it bound alongside the row count.
+No lookup tool, no environment preamble, nothing to keep in sync. Renaming is
+the only variable-specific verb, and it is optional.
 
-Binding happens automatically on fetch and on compute, so the agent never has
-to declare anything to get one. It may rename a binding to something meaningful
-when it plans to refer back to it; that is the only variable-specific verb, and
-it is optional.
+**Why the single seam is a safety property, not just tidiness.** Provenance has
+to survive every dereference (below). With per-tool support, a tool author who
+forgets to carry the `derived` flag launders model-derived numbers into a cited
+chart. With resolution and binding in one place each, no tool author is in a
+position to forget, because none of them touch it.
 
 ## In the composer
 
@@ -142,16 +164,27 @@ citations rendering the upstream URL rather than our copy of it.
 This is the "features" half — a variable is data *plus* the affordances that
 come with knowing what it is.
 
+**The set of actions is not enumerated anywhere, and must not be.** A fixed
+menu of verbs is the same mistake as a fixed list of tools, one layer up: it
+would need extending every time the agent gains a capability. What a variable
+can be acted on by is simply *every tool*, present and future, because seam 1
+resolves references before any tool runs. The list below is what that yields
+today — a consequence, not a catalogue.
+
 - **Reference it** — "chart @g7_gdp against @g7_co2". No re-fetch: the cache
   key is the binding, so a referenced variable is a cache hit by construction.
 - **Inspect it** — coverage, completeness, outliers, last broadly-reported year.
   This is `profile_series` on an existing binding rather than a fresh pull.
 - **Derive from it** — any compute tool, with the new result bound to a new name
-  and its provenance inherited.
+  by seam 2 and its provenance inherited.
 - **Cite it** — a variable dereferences to its ledger entry, so anything built
   on it inherits a real citation rather than needing a new one.
 - **Export it** — CSV of exactly those rows, already how the evidence table
   works.
+
+Add a tool tomorrow and it can act on every existing variable without being
+told they exist. That is the test of whether this is generic: if a new
+capability needs code to participate, the design has failed.
 
 ## The constraint that matters
 
