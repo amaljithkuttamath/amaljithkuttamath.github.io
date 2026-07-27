@@ -782,6 +782,68 @@ const PRESETS = [
     border-color: color-mix(in srgb, var(--fg) 30%, transparent);
     background: var(--bg-hover);
   }
+  /* ── The dashboard's own composer ──
+     Sits at the top of a board, above the tiles: in a dashboard-native app,
+     asking is the primary action, not a detour. Styled as a peer of the
+     inputbar rather than of the small header controls, so it reads as an input
+     you type into and not another mini-button. JS-built, hence :global(). */
+  :global(.ch-dash-ask) {
+    display: block;
+    margin: 0 0 var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+  }
+  :global(.ch-dash-ask-row) {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+  }
+  :global(.ch-dash-ask-input) {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.5;
+    color: var(--fg);
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 4px 0;
+  }
+  :global(.ch-dash-ask-input::placeholder) { color: var(--ch-meta); }
+  :global(.ch-dash-ask-input:disabled) { opacity: 0.6; }
+  :global(.ch-dash-ask-btn) {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--fg) 28%, transparent);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  }
+  :global(.ch-dash-ask-btn:hover:not(:disabled)) {
+    border-color: color-mix(in srgb, var(--fg) 55%, transparent);
+    background: var(--bg-hover);
+  }
+  :global(.ch-dash-ask-btn:disabled) { opacity: 0.5; cursor: default; }
+  :global(.ch-dash-ask-status) {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: var(--ch-meta);
+    min-height: 1.2em;
+    margin-top: 6px;
+  }
+  /* Errors are muted, not alarming: "needs a key" and "no chart for that one"
+     are ordinary outcomes of asking, not faults. */
+  :global(.ch-dash-ask-status.is-error) { color: var(--fg-muted); }
+  :global(.ch-dash-ask-status.is-ok) { color: var(--fg); }
+
   /* ── Direct (no-model) answers ──
      The cue on a fast-path turn. Muted like the other verification cues and
      never amber: it is a statement of provenance, not a verdict. Reads as a
@@ -818,6 +880,21 @@ const PRESETS = [
      the mobile query), and Astro's scoping attribute puts that rule at the same
      specificity as a two-class selector — where it would win on source order
      and leave a tall empty box. The ancestor breaks the tie. */
+  /* Same treatment inside a dashboard tile, where the height is set by
+     .ch-dash-tile-chart rather than .ch-chart. */
+  :global(.ch-dash-tile-chart.ch-chart-fallback) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    height: auto;
+    min-height: 96px;
+    padding: var(--space-md);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    line-height: 1.5;
+    color: var(--ch-meta);
+  }
   :global(.ch-canvas .ch-chart.ch-chart-fallback) {
     display: flex;
     align-items: center;

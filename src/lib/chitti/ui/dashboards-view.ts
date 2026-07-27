@@ -28,6 +28,7 @@ import { esc, fmtDate } from './dom';
 import { buildOption } from './chart-option';
 import { loadECharts } from './charts';
 import { writeClipboard, clipboardFallback, announceShare } from './actions';
+import { renderDashAsk, resetDashChat } from './dash-chat';
 
 // ── Dashboards (pin picker + saved-dashboard view) ───────────────────────
 // Client-side, localStorage-backed. Nothing here touches the network or the
@@ -671,6 +672,14 @@ export function renderDashDetail(dash: Dashboard) {
   }
   dashViewBody.appendChild(head);
 
+  // The board's own composer. Sits directly under the header — above the tiles
+  // and above the refresh log — because in a dashboard-native app asking IS the
+  // primary action, not something you go elsewhere to do. Handing it
+  // renderDashDetail as the callback means a new tile simply re-renders the
+  // board it just landed on.
+  resetDashChat(dash.id);
+  dashViewBody.appendChild(renderDashAsk(dash, (next) => renderDashDetail(next)));
+
   // Re-show the last refresh log for THIS dashboard, if any (survives the
   // post-run re-render so the receipts stay visible next to the fresh tiles).
   // Also render it while a refresh is still IN FLIGHT (done === false), even
@@ -689,7 +698,9 @@ export function renderDashDetail(dash: Dashboard) {
   if (!dash.tiles.length) {
     const empty = document.createElement('p');
     empty.className = 'ch-dash-empty-sub';
-    empty.textContent = 'This dashboard is empty. Pin a chart from an answer to add a tile.';
+    empty.textContent =
+      'This dashboard is empty — ask for a chart above and it lands here. ' +
+      'You can also pin a chart from any answer in the thread.';
     dashViewBody.appendChild(empty);
     return;
   }
@@ -960,10 +971,22 @@ export function initTileChartsLazily() {
     if ((el as any).__inited) return;
     (el as any).__inited = true;
     const spec = (el as any).__spec as ChartSpec;
-    const echarts = await loadECharts();
-    const inst = echarts.init(el, null, { renderer: 'canvas' });
-    inst.setOption(buildOption(spec));
-    liveDashCharts.push({ el, spec, inst });
+    try {
+      const echarts = await loadECharts();
+      const inst = echarts.init(el, null, { renderer: 'canvas' });
+      inst.setOption(buildOption(spec));
+      liveDashCharts.push({ el, spec, inst });
+    } catch (err) {
+      // ECharts is a CDN import, so a content blocker, a corporate proxy or an
+      // offline load leaves this slot empty. A board full of blank rectangles
+      // reads as a broken dashboard; say what happened instead. The tile's
+      // title, provenance line and data are unaffected — matching how a turn
+      // and a restored share link already degrade.
+      console.error('tile chart render failed', err);
+      el.removeAttribute('role');
+      el.textContent = 'Chart unavailable — the chart library could not be loaded.';
+      el.classList.add('ch-chart-fallback');
+    }
   };
   if (typeof IntersectionObserver === 'function') {
     const io = new IntersectionObserver((entries, obs) => {
