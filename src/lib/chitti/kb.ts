@@ -49,6 +49,7 @@
 import { INDICATORS } from './tools';
 import { scoreSeries } from './scoring';
 import { resolveSources } from './sources/index';
+import kbData from '../../data/chitti/kb.json';
 
 export interface KbNode {
   // Slash path, e.g. "health/mortality/SH.DYN.MORT". Stable and human-readable
@@ -138,6 +139,57 @@ const SERIES_ALIASES: Record<string, string[]> = {
   'MS.MIL.XPND.GD.ZS': ['military spending', 'defence spending'],
 };
 
+// ── The generated tier ───────────────────────────────────────────────────────
+// The authored tables above are the tuned core: small, covered by the eval, and
+// the reason the common queries resolve correctly. They cannot cover the whole
+// World Bank catalogue, which runs to well over a thousand indicators — so
+// `kb.json` carries the long tail, built by scripts/gen-chitti-kb.mjs from the
+// API's OWN topic and description metadata.
+//
+// The two tiers are not peers. The authored core ALWAYS wins on conflict: a
+// generated entry can add an indicator the core never mentioned, but can never
+// move one the core has already placed or override its vocabulary. That
+// ordering is what keeps the eval meaningful — a regenerate can broaden
+// coverage but cannot silently change an answer the eval pins down.
+//
+// Generated descriptions come from the World Bank's `sourceNote` (its own prose
+// definition of the indicator), so they are FETCHED metadata, not invented
+// vocabulary. That distinction matters: the generator never writes aliases it
+// made up, only text the source published.
+export interface KbGeneratedEntry {
+  seriesId: string;
+  name: string;
+  topic: string;
+  // The source's own description, trimmed. Folded into the leaf's haystack so
+  // an indicator is findable by the words its publisher used to define it.
+  note?: string;
+}
+
+function loadGenerated(): KbGeneratedEntry[] {
+  const raw = (kbData as { entries?: unknown }).entries;
+  if (!Array.isArray(raw)) return [];
+  const out: KbGeneratedEntry[] = [];
+  for (const e of raw) {
+    if (!e || typeof e !== 'object') continue;
+    const o = e as Record<string, unknown>;
+    const seriesId = typeof o.seriesId === 'string' ? o.seriesId.trim() : '';
+    const name = typeof o.name === 'string' ? o.name.trim() : '';
+    const topic = typeof o.topic === 'string' ? o.topic.trim() : '';
+    if (!seriesId || !name || !topic) continue;
+    const note = typeof o.note === 'string' ? o.note.trim() : '';
+    out.push(note ? { seriesId, name, topic, note } : { seriesId, name, topic });
+  }
+  return out;
+}
+
+const GENERATED = loadGenerated();
+
+// Every series id the authored core already places, so the generated tier can
+// be filtered to genuinely new ground.
+function authoredIds(): Set<string> {
+  return new Set(GROUPS.flatMap((g) => g.ids));
+}
+
 // ── Tree construction ────────────────────────────────────────────────────────
 // Composed at import time from bundled data — no request, no data file.
 function buildWorldBank(): KbNode {
@@ -171,6 +223,41 @@ function buildWorldBank(): KbNode {
     }
     if (groupNode.children.length) topicNode.children.push(groupNode);
   }
+  // Hang the generated long tail off its World Bank topic, in its own group so
+  // the split between tuned and generated stays visible in any route we show.
+  // Anything the authored core already placed is skipped — the core wins.
+  const placed = authoredIds();
+  const genByTopic = new Map<string, KbGeneratedEntry[]>();
+  for (const e of GENERATED) {
+    if (placed.has(e.seriesId)) continue;
+    const list = genByTopic.get(e.topic) || [];
+    list.push(e);
+    genByTopic.set(e.topic, list);
+  }
+  for (const [topic, entries] of genByTopic) {
+    let topicNode = topics.get(topic);
+    if (!topicNode) {
+      topicNode = { path: `worldbank/${slug(topic)}`, title: topic, aliases: [], children: [] };
+      topics.set(topic, topicNode);
+    }
+    topicNode.children.push({
+      path: `${topicNode.path}/more`,
+      title: `More ${topic.toLowerCase()} indicators`,
+      aliases: [],
+      children: entries.map((e) => ({
+        path: `${topicNode!.path}/more/${e.seriesId}`,
+        // The publisher's own definition, folded in as searchable text rather
+        // than as an authored alias — it is fetched metadata, not vocabulary
+        // anyone here invented.
+        title: e.name,
+        aliases: e.note ? [e.note] : [],
+        seriesId: e.seriesId,
+        source: 'worldbank',
+        children: [],
+      })),
+    });
+  }
+
   // A topic's vocabulary is the union of its groups'. Authored once at the
   // group level and rolled up, so the top level a model sees first is
   // navigable without a second authored table to keep in sync.

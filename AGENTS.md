@@ -25,6 +25,7 @@ npm run dev          # local dev server (astro dev)
 npm test             # run the full vitest suite (npx vitest run) — 500+ tests
 npm run build        # production build (astro build) — run before deploying UI/template edits
 npm run demos:refresh  # re-fetch Chitti's empty-state demo answers (needs network)
+npm run kb:refresh     # re-fetch the World Bank catalogue into the knowledge base (needs network)
 ```
 
 - **Always run `npm test` before committing.** The suite is fast (~2–3s) and
@@ -82,6 +83,18 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   fast answer is worse than a slower right one, so every gate errs toward
   refusing. `MIN_MATCH_SCORE` is calibrated against the curated catalog (see its
   comment) and deliberately under-fires.
+- **The knowledge base has two tiers, and the tuned one wins.** `kb.ts` resolves
+  a phrase to a series by navigating a hierarchy rather than scoring a flat list
+  — a leaf inherits its ancestors' vocabulary, so "child mortality" reaches an
+  under-5 series whose own name never says "child". Its hand-authored core
+  (groups + aliases) is small, covered by the retrieval eval in `kb.test.ts`,
+  and **always wins on conflict**; `src/data/chitti/kb.json` carries the long
+  tail of the World Bank catalogue and can only ADD indicators the core never
+  placed. That ordering is what keeps the eval meaningful. Aliases are authored
+  and that is fine — an alias is a claim about language, not about the world —
+  but generated descriptions come from the source's own `sourceNote`, never
+  from a model. **When you change retrieval, run the eval**: it is a regression
+  table, and one case asserts it still holds with a generated tier present.
 - **Demo answers are fetched, never authored.** `src/data/chitti/demos.json`
   holds the key-free worked examples on Chitti's empty state. It is written
   **only** by `npm run demos:refresh` (`scripts/gen-chitti-demos.mjs`), which
@@ -120,13 +133,20 @@ Pushing to **`main`** triggers two GitHub Actions workflows — **CI** and
 **Deploy to GitHub Pages** — and publishes the site. Confirm both are green
 after a push. Feature work happens on a branch; `main` is production.
 
-A third workflow, **Refresh Chitti demos**, is manual (`workflow_dispatch`
-only). It re-fetches the empty-state demo answers on a runner — which has the
-network access a sandbox may not — validates them with the suite and a build,
-and opens a PR. It never pushes to `main`, and it skips the PR when only the
-timestamps moved. Note that CI does **not** re-run on that PR (GitHub does not
-trigger `pull_request` workflows for `GITHUB_TOKEN`-authored PRs), which is why
-the workflow runs the tests and build itself before opening it.
+Two further workflows are manual (`workflow_dispatch` only), both on the same
+pattern: fetch on a runner — which has the network access a sandbox may not —
+validate with the suite and a build, then open a PR. Neither pushes to `main`,
+and both skip the PR when only the timestamps moved.
+
+- **Refresh Chitti demos** — the empty-state demo answers.
+- **Refresh Chitti knowledge base** — the long tail of the World Bank
+  catalogue. The validation is the point: the suite carries the retrieval eval,
+  so a catalogue refresh that would shift an answer fails on the runner instead
+  of landing.
+
+Note that CI does **not** re-run on those PRs (GitHub does not trigger
+`pull_request` workflows for `GITHUB_TOKEN`-authored PRs), which is why each
+workflow runs the tests and build itself before opening one.
 
 <!-- Convention adopted from langchain-ai/openwiki (an agent-facing AGENTS.md).
      Kept hand-authored — this repo has no doc-generation pipeline. -->
