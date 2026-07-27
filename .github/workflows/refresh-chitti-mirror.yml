@@ -1,0 +1,157 @@
+# Recapture Chitti's same-origin snapshot of the curated World Bank series.
+#
+# WHAT THIS IS. One JSON file per curated indicator under
+# public/apps/chitti/mirror/, plus the bundled index at
+# src/data/chitti/mirror-manifest.json. Those files are SERVED, not bundled, so
+# a visitor pays for the one indicator their question touches — and pays it to
+# this origin, with no CORS, no rate limit and no key. That is what makes the
+# key-free first run reliable rather than dependent on a public API that
+# throttles.
+#
+# WHY A PARTIAL RUN IS FINE. Missing is never wrong: an indicator that fails to
+# fetch is simply absent from the manifest, and the app serves it live exactly
+# as it does today. So the generator records failures and carries on rather than
+# aborting, and it fails hard only when NOTHING succeeded. Read the tail of the
+# log — it names every indicator that was skipped and why. A list that grows
+# from run to run means the API is degrading and the snapshot is shrinking.
+#
+# WHAT THE VALIDATION IS FOR. The suite carries a round-trip test between this
+# generator and the reader the app uses, so a layout change that would shift
+# every value by a year fails on the runner instead of landing.
+#
+# Run it from the Actions tab. It never pushes to main.
+name: Refresh Chitti data snapshot
+
+on:
+  workflow_dispatch:
+  # The World Bank revises WDI a few times a year, so a monthly recapture keeps
+  # the snapshot close without churning the repo. Left off by default so the
+  # repo doesn't accrue unread PRs.
+  # schedule:
+  #   - cron: '0 5 2 * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-chitti-mirror
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # Generous: 50 indicators, each batched and paced against a throttling API.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Snapshot the current manifest
+        run: git show HEAD:src/data/chitti/mirror-manifest.json > "$RUNNER_TEMP/manifest-before.json"
+
+      # Fails only if every indicator failed. A partial capture is a valid
+      # outcome and the log names what was skipped.
+      - name: Capture the World Bank series
+        run: npm run mirror:refresh
+
+      # The PR this job opens is created with GITHUB_TOKEN, and GitHub does not
+      # run `on: pull_request` workflows for such PRs — so CI will NOT run on it.
+      # These two steps are the real gate: the suite includes the generator ↔
+      # reader round trip and the "a snapshot is never presented as a live fetch"
+      # provenance cases, and the build proves the manifest still bundles.
+      - run: npx vitest run
+      - run: npm run build
+
+      # Every run rewrites `generated` and each file's `mirroredAt`, so a plain
+      # diff is never empty. Compare with those stripped, and only open a PR when
+      # the DATA moved.
+      - name: Decide whether the data changed
+        id: diff
+        run: |
+          node -e "
+            const fs = require('fs');
+            const strip = (s) => JSON.stringify(
+              JSON.parse(s),
+              (k, v) => (k === 'generated' || k === 'mirroredAt' ? undefined : v)
+            );
+            const before = strip(fs.readFileSync(process.env.RUNNER_TEMP + '/manifest-before.json', 'utf8'));
+            const after = strip(fs.readFileSync('src/data/chitti/mirror-manifest.json', 'utf8'));
+            // The manifest alone is not enough — it indexes the files but does
+            // not carry their values, so a pure data revision would look
+            // unchanged. Ask git about the served files too, ignoring the
+            // per-file mirroredAt line.
+            const { execSync } = require('child_process');
+            const names = execSync('git status --porcelain public/apps/chitti/mirror', { encoding: 'utf8' }).trim();
+            let filesMoved = false;
+            for (const line of names ? names.split('\n') : []) {
+              const path = line.slice(3).trim();
+              if (!path.endsWith('.json')) continue;
+              let head = '';
+              try { head = execSync('git show HEAD:' + path, { encoding: 'utf8' }); } catch { filesMoved = true; break; }
+              if (strip(head) !== strip(fs.readFileSync(path, 'utf8'))) { filesMoved = true; break; }
+            }
+            const changed = before !== after || filesMoved;
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'changed=' + changed + '\n');
+          "
+
+      - name: Report what was captured
+        run: |
+          node -e "
+            const m = require('./src/data/chitti/mirror-manifest.json');
+            const ids = Object.keys(m.indicators || {});
+            console.log(ids.length + ' indicators in the snapshot');
+          "
+
+      - name: Open a pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: chore/refresh-chitti-mirror
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # One long-lived branch: a second run force-pushes onto it and updates
+          # the open PR instead of stacking a new one.
+          git fetch origin "$BRANCH" || true
+          git checkout -B "$BRANCH"
+          git add src/data/chitti/mirror-manifest.json public/apps/chitti/mirror
+          COUNT=$(node -e "console.log(Object.keys(require('./src/data/chitti/mirror-manifest.json').indicators || {}).length)")
+          git commit \
+            -m "Chitti: recapture the World Bank data snapshot" \
+            -m "Regenerated by .github/workflows/refresh-chitti-mirror.yml. ${COUNT} indicators captured from the live API; anything not captured is served live."
+          git push --force-with-lease origin "$BRANCH"
+
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "PR already open for $BRANCH — force-pushed the refreshed snapshot to it."
+            exit 0
+          fi
+
+          cat > "$RUNNER_TEMP/pr-body.md" <<BODY
+          Recaptured by the \`Refresh Chitti data snapshot\` workflow, via \`scripts/gen-chitti-mirror.mjs\`, straight from the World Bank API. **${COUNT}** indicators are in this snapshot; any curated indicator not in it is fetched live, exactly as before — missing is never wrong.
+
+          Every value here was fetched, never authored. The only transform is rounding to 6 significant figures, recorded in each file's \`precision\` field. Nulls are the source's own gaps and are never filled.
+
+          Each answer served from this snapshot is dated as one: the citation shows \`snapshot <date>\` instead of \`fetched\`, keeps the upstream World Bank request URL, and the reference heading drops its "fetched live" claim. World Bank Open Data is CC BY 4.0, so redistribution with attribution is what the citations already do.
+
+          The full suite — including the generator ↔ reader round trip and the provenance cases — plus a production build ran against these files on the runner before the PR was opened. Note that CI does **not** re-run on this PR: it was created with \`GITHUB_TOKEN\`, and GitHub does not trigger \`pull_request\` workflows for those.
+
+          ---
+          _Generated by [Claude Code](https://claude.ai/code)_
+          BODY
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Chitti: recapture the World Bank data snapshot" \
+            --body-file "$RUNNER_TEMP/pr-body.md"
+
+      - name: Nothing to do
+        if: steps.diff.outputs.changed != 'true'
+        run: echo "Snapshot is unchanged apart from timestamps — no PR opened."

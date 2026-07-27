@@ -136,7 +136,11 @@ export function buildCitation(
   ye: number | undefined,
   rowCount: number,
   requestUrl: string,
-  sourceUpdated: string | undefined
+  sourceUpdated: string | undefined,
+  // Optional and trailing so every existing call site stays correct: a caller
+  // that does not know about the snapshot simply does not pass it, and the
+  // citation then says "live", which is what those paths are.
+  mirroredAt?: string
 ): Citation {
   // Citation identity is now GENERIC over the source adapter (same strings the
   // legacy citationHumanUrl/citationSourceLabel produced, sourced from the one
@@ -156,6 +160,7 @@ export function buildCitation(
     yearRange: ys !== undefined || ye !== undefined ? { start: ys, end: ye } : null,
     fetchedAt: new Date().toISOString(),
     ...(sourceUpdated ? { sourceUpdated } : {}),
+    ...(mirroredAt ? { mirroredAt } : {}),
     rowCount,
     cached: false,
   };

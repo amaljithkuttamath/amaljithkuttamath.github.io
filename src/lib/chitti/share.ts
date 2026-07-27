@@ -139,6 +139,11 @@ function cleanCitations(citations: unknown): Citation[] {
     };
     if (o.requestUrl != null) cit.requestUrl = str(o.requestUrl);
     if (o.sourceUpdated != null) cit.sourceUpdated = str(o.sourceUpdated);
+    // Must survive the whitelist. Dropping it would strip the snapshot date on
+    // the way out and re-render a shared or demo answer as a live fetch — the
+    // disclosure has to travel with the numbers it qualifies, and a share link
+    // is exactly where those numbers outlive the session that made them.
+    if (o.mirroredAt != null) cit.mirroredAt = str(o.mirroredAt);
     return cit;
   });
 }

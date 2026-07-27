@@ -358,7 +358,8 @@ export async function runFastPath(
       plan.yearEnd,
       rows.length,
       result.requestUrl || '',
-      result.sourceUpdated
+      result.sourceUpdated,
+      result.mirroredAt
     ),
   ];
 

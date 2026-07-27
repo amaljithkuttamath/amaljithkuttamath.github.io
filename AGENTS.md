@@ -22,10 +22,11 @@ before changing it.
 ```bash
 npm install          # install deps
 npm run dev          # local dev server (astro dev)
-npm test             # run the full vitest suite (npx vitest run) — 500+ tests
+npm test             # run the full vitest suite (npx vitest run) — 690+ tests
 npm run build        # production build (astro build) — run before deploying UI/template edits
-npm run demos:refresh  # re-fetch Chitti's empty-state demo answers (needs network)
-npm run kb:refresh     # re-fetch the World Bank catalogue into the knowledge base (needs network)
+npm run demos:refresh   # re-fetch Chitti's empty-state demo answers (needs network)
+npm run kb:refresh      # re-fetch the World Bank catalogue into the knowledge base (needs network)
+npm run mirror:refresh  # recapture the same-origin World Bank data snapshot (needs network)
 ```
 
 - **Always run `npm test` before committing.** The suite is fast (~2–3s) and
@@ -127,6 +128,27 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `pairCoverage` (`eda.ts`) — the pair-wise analogue of `latestUsableYear`, same
   60% floor — and refuse when it returns `null` rather than settling for the
   least-bad year.
+- **The data snapshot is an accelerator, never a gate.** `sources/mirror.ts`
+  serves the 50 curated World Bank series from same-origin files under
+  `public/apps/chitti/mirror/` — no CORS, no rate limit, no key, cacheable,
+  offline — so the key-free first run no longer depends on a public API that
+  throttles. Two rules keep it honest, and both are covered by tests. **Missing
+  is never wrong**: an id absent from the manifest, a 404, a payload that fails
+  its shape check all return `null` and fall through to the live API, so the
+  snapshot can only make an answer faster, never different. **A snapshot says
+  so**: the result carries `mirroredAt`, the citation renders `snapshot <date>`
+  in place of `fetched`, keeps the upstream World Bank URL, and the reference
+  heading drops its "fetched live" claim (`citationsHeadline`). `mirroredAt`
+  must survive `cleanShareState`, or a share link would re-render a snapshot as
+  a live fetch. Only the manifest is bundled; the data files are fetched at
+  runtime, which is why this does not cost every page load the way `kb.json`
+  and `demos.json` do.
+- **`fetchWorldbank` walks pages.** The API paginates and reports the count in
+  the response header; reading only page one silently truncated any pull over
+  `PER_PAGE` rows, and since rows arrive ordered by country, what vanished was
+  whole countries off the end of the alphabet. A 60-country batch across
+  1960–2024 is 3,900 rows. If you touch that function, keep the page walk and
+  its pacing.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 
@@ -163,6 +185,11 @@ and both skip the PR when only the timestamps moved.
   catalogue. The validation is the point: the suite carries the retrieval eval,
   so a catalogue refresh that would shift an answer fails on the runner instead
   of landing.
+- **Refresh Chitti data snapshot** — the same-origin capture of the curated
+  series. Unlike the other two it tolerates a partial result: an indicator it
+  cannot fetch is left out of the manifest and served live, so the log's tail
+  (which names every skipped indicator) is the thing to read. It fails only when
+  nothing at all was captured.
 
 Note that CI does **not** re-run on those PRs (GitHub does not trigger
 `pull_request` workflows for `GITHUB_TOKEN`-authored PRs), which is why each

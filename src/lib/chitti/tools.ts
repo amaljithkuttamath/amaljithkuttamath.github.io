@@ -280,6 +280,11 @@ export interface Citation {
   // Data vintage from the source's own response (WB `lastupdated`), when the
   // source provides one. Omitted otherwise — never invented.
   sourceUpdated?: string;
+  // Set only when the rows were served from Chitti's same-origin snapshot of
+  // the source rather than a live call: the ISO timestamp of when that snapshot
+  // was taken. `fetchedAt` still records when Chitti served the answer, so the
+  // two together say "captured then, served now". Absent means a live fetch.
+  mirroredAt?: string;
   rowCount: number;
   // Whether the record's underlying fetch was a real network call. Always false
   // on the stored ledger entry (it IS the real fetch); a later cache hit reuses
@@ -312,6 +317,20 @@ export function citationHumanUrl(source: Citation['source'], id: string): string
   return 'https://data.worldbank.org/indicator/' + encodeURIComponent(id);
 }
 
+// The heading over the reference list. It used to be the fixed string "every
+// number fetched live & cited", which stopped being true the moment a series
+// could be served from the same-origin snapshot. A provenance tool cannot carry
+// a provenance claim it does not check, so the claim is now derived from the
+// citations it sits above. Pure and tested.
+export function citationsHeadline(citations: Citation[]): string {
+  const mirrored = citations.filter((c) => c.mirroredAt).length;
+  if (!mirrored) return 'References — every number fetched live & cited';
+  if (mirrored === citations.length) {
+    return 'References — every number from a dated snapshot of the source, cited';
+  }
+  return `References — every number cited; ${mirrored} of ${citations.length} from a dated snapshot`;
+}
+
 // Compact one-line-per-source provenance header for CSV export. Emitted as
 // `#`-prefixed comment lines so it rides along at the top of the file without
 // breaking spreadsheet import (Excel/Sheets/pandas all skip or isolate a
@@ -324,9 +343,19 @@ export function citationsToCsvComments(citations: Citation[]): string {
       : '';
     const where = c.countries.length ? ` — countries: ${c.countries.join(', ')}` : ' — all countries';
     const vintage = c.sourceUpdated ? ` — source updated ${c.sourceUpdated}` : '';
-    return `# Source: ${c.sourceLabel} — ${c.indicatorName} (${c.indicatorId}) — ${c.url}${where}${range} — fetched ${c.fetchedAt}${vintage}`;
+    // Same rule as the on-screen reference list: a snapshot is dated as a
+    // snapshot. An exported CSV outlives the session it came from, so this line
+    // is often the only provenance a later reader ever sees.
+    const when = c.mirroredAt
+      ? ` — from snapshot taken ${c.mirroredAt}`
+      : ` — fetched ${c.fetchedAt}`;
+    return `# Source: ${c.sourceLabel} — ${c.indicatorName} (${c.indicatorId}) — ${c.url}${where}${range}${when}${vintage}`;
   });
-  return ['# Chitti — data provenance (every number fetched live and cited):', ...lines, '#'].join('\n') + '\n';
+  const anyMirrored = citations.some((c) => c.mirroredAt);
+  const head = anyMirrored
+    ? '# Chitti — data provenance (every number from the source below, cited and dated):'
+    : '# Chitti — data provenance (every number fetched live and cited):';
+  return [head, ...lines, '#'].join('\n') + '\n';
 }
 
 // The tool schemas (TOOL_SCHEMAS) and the sub-agent terminal tool schema

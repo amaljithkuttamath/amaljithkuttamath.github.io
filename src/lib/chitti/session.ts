@@ -668,6 +668,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       const nid = adapter.normalizeId(id);
       let requestUrl = ''; // the exact API URL that was hit
       let sourceUpdated: string | undefined; // source data vintage, when present
+      // Set only when the adapter served this from the same-origin snapshot.
+      // It must reach the citation, or the ledger would report a snapshot as a
+      // live fetch — the one thing the mirror is not allowed to do.
+      let mirroredAt: string | undefined;
       try {
         // One generic fetch through the adapter — it owns per-source id handling,
         // request URL, vintage, and (for World Bank) every-country batching.
@@ -675,6 +679,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         rows = r.rows;
         requestUrl = r.requestUrl;
         sourceUpdated = r.sourceUpdated;
+        mirroredAt = r.mirroredAt;
         state.indicators.set(nid, adapter.indicatorLabel(nid, r));
         if (adapter.reportsBatches && !hasCountries) {
           // Every-country path (World Bank batches internally): its own detail,
@@ -723,7 +728,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       // never overwrites. Only a real, successful fetch writes a citation, so a
       // model-derived artifact can never enter the ledger. Mirrored into the VFS
       // as citations.json (via:'fetch') so the model can read it with read_file.
-      recordCitation(key, source, nid, codes, ys, ye, rows.length, requestUrl, sourceUpdated);
+      recordCitation(key, source, nid, codes, ys, ye, rows.length, requestUrl, sourceUpdated, mirroredAt);
       ev.detail = detail;
       return body;
     }
@@ -743,9 +748,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       ye: number | undefined,
       rowCount: number,
       requestUrl: string,
-      sourceUpdated: string | undefined
+      sourceUpdated: string | undefined,
+      mirroredAt?: string
     ): void {
-      const citation = buildCitation(key, source, nid, codes, ys, ye, rowCount, requestUrl, sourceUpdated);
+      const citation = buildCitation(key, source, nid, codes, ys, ye, rowCount, requestUrl, sourceUpdated, mirroredAt);
       state.citations.set(key, citation);
       vfs.write(
         'citations.json',
