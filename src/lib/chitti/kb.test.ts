@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildKb, searchKb, navigateKb, formatChoices, KB_MIN_SCORE, type KbNode } from './kb';
 import { scoreSeries } from './scoring';
 import { INDICATORS } from './tools';
+import kbData from '../../data/chitti/kb.json';
 
 // Name-only keyword scoring over the World Bank shortlist — the mechanism this
 // module replaces. NOTE this is not all of what find_series does: it also
@@ -117,12 +118,27 @@ describe('buildKb', () => {
     expect(leaves(buildKb(['owid'])).every((l) => l.source === 'owid')).toBe(true);
   });
 
-  it('only ever points at ids that exist in the catalogue', () => {
-    // An invented id would 404 at fetch time. Every leaf must come from bundled
-    // data, never from the authored layer alone.
-    const known = new Set(INDICATORS.map((i) => i.id));
+  it('only ever points at ids that came from real data, never invented ones', () => {
+    // An invented id would 404 at fetch time, so every leaf must trace back to
+    // bundled data. There are two legitimate origins, and this assertion once
+    // knew only the first: the curated shortlist (INDICATORS) and the generated
+    // World Bank catalogue (kb.json). The first live catalogue refresh failed
+    // here on SG.VAW.1549.ZS — a perfectly real WDI indicator that simply is not
+    // among the curated 50. The test was stale, not the data: it encoded "the KB
+    // holds only curated ids", which was true before the generated tier existed
+    // and is false by design now. What it MEANT — no id may be conjured — is
+    // what it checks now.
+    const known = new Set([
+      ...INDICATORS.map((i) => i.id),
+      ...((kbData as { entries?: { seriesId?: string }[] }).entries ?? [])
+        .map((e) => e?.seriesId)
+        .filter((id): id is string => !!id),
+    ]);
     for (const leaf of leaves(buildKb(['worldbank']))) {
-      expect(known.has(leaf.seriesId!), `${leaf.seriesId} is not in the catalogue`).toBe(true);
+      expect(
+        known.has(leaf.seriesId!),
+        `${leaf.seriesId} is in neither the curated shortlist nor the generated catalogue`
+      ).toBe(true);
     }
   });
 
