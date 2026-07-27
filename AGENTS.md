@@ -101,12 +101,32 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   drives the real adapters/compute helpers/citation builder and fails loudly
   rather than emitting a partial or invented series. **Never hand-edit numbers
   into that file** — a fabricated example in a provenance tool is the app lying
-  at the exact moment a first-time visitor decides whether to trust it. The
-  demos render through the same `restoreSharedAnswer` path a `#share=` link
-  uses, and through the same `cleanShareState` whitelist. The generator needs
-  outbound access to the source APIs, which a sandbox often lacks — run the
-  **Refresh Chitti demos** workflow from the Actions tab instead and merge the
-  PR it opens.
+  at the exact moment a first-time visitor decides whether to trust it. That
+  rule covers the PROSE too: every clause of a demo's answer is derived from a
+  computed number (the correlation's strength word from `|r|`, "N of the ten
+  more than halved" from a count), because a hand-written finding sitting above
+  fetched data is the same lie in a softer form. The demos render through the
+  same `restoreSharedAnswer` path a `#share=` link uses, and through the same
+  `cleanShareState` whitelist. The generator needs outbound access to the source
+  APIs, which a sandbox often lacks — run the **Refresh Chitti demos** workflow
+  from the Actions tab instead and merge the PR it opens.
+- **Test a recipe before spending a workflow run on it.** Because the generator
+  only ever executes on a runner, that runner used to be the first place recipe
+  logic ran, and two bugs shipped that way: an authored `n >= 50` correlation
+  floor with no basis in the data, and an aggregate filter testing membership in
+  `COUNTRIES` — which holds all 78 World Bank aggregates — while its comment
+  claimed the opposite. Both are analysis bugs, and analysis needs no network.
+  `scripts/gen-chitti-demos.test.ts` drives each recipe offline through its one
+  outbound seam (`lib.adapterOfId`) against a synthetic series shaped like real
+  World Bank data — broad history, partial final year, aggregates mixed in. Add
+  a case there when you add a recipe.
+- **Never correlate on the latest shared year.** `correlate` defaults to it, and
+  on World Bank data that is a trap: the final year of a pull is a partial
+  release, so two series ending in different partial years overlap on whoever
+  filed early and the resulting `r` describes reporting speed. Use
+  `pairCoverage` (`eda.ts`) — the pair-wise analogue of `latestUsableYear`, same
+  60% floor — and refuse when it returns `null` rather than settling for the
+  least-bad year.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 

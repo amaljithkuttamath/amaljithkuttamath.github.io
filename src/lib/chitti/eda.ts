@@ -162,6 +162,65 @@ export function profileSeries(rows: DataRow[], indicator?: string): SeriesProfil
   };
 }
 
+// ── Joint coverage of two series ─────────────────────────────────────────────
+// `correlate` matches two indicators at one year, defaulting to the latest year
+// they share. On World Bank data that default is a trap for the same reason
+// `latestUsableYear` exists: the final year of a pull is a partial release, so
+// two series ending in different partial years overlap on whoever filed early.
+// A correlation computed there is a statistic about reporting speed.
+//
+// This is the pair-wise analogue — same 60% floor, same reasoning. It is used
+// by scripts/gen-chitti-demos.mjs, whose correlation demo hit exactly this
+// (r=-0.35 over n=22 where the honest year gives an order of magnitude more
+// countries); it lives here rather than in that script so the rule is unit
+// tested, and so a live correlation can adopt it without reimplementing it.
+export const JOINT_COVERAGE = 0.6;
+
+export interface PairCoverage {
+  // Countries reporting BOTH indicators at some year in the fetched range.
+  universe: number;
+  // Paired-country count per year, ascending by year.
+  byYear: { year: number; n: number }[];
+  // Latest year clearing JOINT_COVERAGE of the universe; null if none does,
+  // which means the caller should refuse rather than pick something.
+  latestWellPaired: number | null;
+}
+
+export function pairCoverage(rows: DataRow[], indicatorA: string, indicatorB: string): PairCoverage {
+  const perYear = new Map<number, Map<string, Set<string>>>();
+  const ever = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (r.value === null || !isRealCountry(r.iso3)) continue;
+    if (r.indicator !== indicatorA && r.indicator !== indicatorB) continue;
+    const seen = ever.get(r.iso3) ?? new Set<string>();
+    seen.add(r.indicator);
+    ever.set(r.iso3, seen);
+    const year = perYear.get(r.year) ?? new Map<string, Set<string>>();
+    const per = year.get(r.iso3) ?? new Set<string>();
+    per.add(r.indicator);
+    year.set(r.iso3, per);
+    perYear.set(r.year, year);
+  }
+  // A country counts as paired only when it reports both — the same test at
+  // both scopes, so `n` can never exceed `universe`.
+  const both = (m: Map<string, Set<string>>) => {
+    let n = 0;
+    for (const s of m.values()) if (s.size === 2) n++;
+    return n;
+  };
+  const universe = both(ever);
+  const byYear = [...perYear.entries()]
+    .map(([year, m]) => ({ year, n: both(m) }))
+    .sort((a, b) => a.year - b.year);
+  const floor = universe * JOINT_COVERAGE;
+  const clearing = byYear.filter((y) => y.n >= floor && y.n > 0).map((y) => y.year);
+  return {
+    universe,
+    byYear,
+    latestWellPaired: clearing.length ? Math.max(...clearing) : null,
+  };
+}
+
 export type BreakdownDimension = 'region' | 'income';
 
 export interface BreakdownGroup {
