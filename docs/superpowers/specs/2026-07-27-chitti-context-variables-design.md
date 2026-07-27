@@ -26,11 +26,33 @@ Almost all of the substrate exists.
 | `vfs.ts` | Named entries (`files: Record<string,string>`) with per-path provenance (`meta.derived`, `meta.via`), mirrored to the UI on every write |
 | `fetchCache` | Keyed by `fetchCacheKey(id, codes, ys, ye)` — every distinct fetch is already a uniquely identified object holding `{rows, result, detail}` |
 | citation ledger | One entry per distinct fetch, keyed by the same cache key, carrying `requestUrl`, `sourceUpdated`, `rowCount`, `mirroredAt` |
-| `INDICATOR_MAP` | Already loaded in UI state — the name↔code table an autocomplete needs |
+| `indicator_id` params | `growth_stats`, `correlate`, `breakdown` and `profile_series` already select their input by a free-form string matched against `rows[].indicator` |
 
 A fetch already produces a uniquely-keyed, provenance-carrying object. The
 cache key `sp.dyn.le00.in|IND|2020:2020` *is* an identifier. What's missing is
 a human-legible name for it, and a way to say that name from either side.
+
+That last row matters most: **the agent already addresses subsets of its data
+by name.** `indicator_id` is a variable in everything but generality — it
+selects by indicator alone, so two fetches of the same series with different
+country sets or year windows collapse into one name and cannot be addressed
+separately. Variables are the general form of a selector that already exists,
+not a parallel mechanism bolted alongside it.
+
+## Nothing is a fixed list
+
+No part of this may lean on a bundled table of known indicators. The curated 50
+in `tools.ts` are the fast path's vocabulary, not the app's: `find_series`
+resolves across the whole World Bank catalogue plus OWID, IMF and WHO, and
+`kb.json` alone now carries ~1,500 generated entries. A variable layer built on
+a static name↔code map would silently cap the feature at whatever was compiled
+in, and would break the moment a refresh widened the catalogue.
+
+So a binding is created from **what was actually fetched**, whatever it was and
+whichever source it came from. The id is whatever `find_series` returned and
+`fetch_series` accepted, carried verbatim — the same rule the prompt already
+enforces for ids. Nothing enumerates the space of possible variables ahead of
+time, because the space is the union of four live APIs.
 
 ## What a variable is
 
@@ -64,12 +86,52 @@ user.
 **User-renamable.** Auto names are functional, not pretty. Renaming is cheap
 and makes a long session legible.
 
+## How the agent uses them
+
+The agent must be able to *use* a variable, not merely have one described to
+it. Three mechanisms, in order of importance — and the first two add no new
+tool at all.
+
+**1. Every tool that takes `indicator_id` accepts a variable name.** That is
+the whole feature on the agent side. `growth_stats`, `profile_series`,
+`breakdown` and `correlate` already resolve a string against `rows[].indicator`;
+resolution gains one step in front — if the string names a binding, select that
+binding's rows, otherwise fall back to matching by indicator exactly as today.
+Backwards compatible by construction: every existing call keeps working,
+because an id that isn't a binding name behaves as it always did.
+
+This is why the general form matters. `correlate(indicator_a: "NY.GDP.PCAP.CD",
+indicator_b: "EN.ATM.CO2E.PC")` silently correlates across whatever countries
+happen to be in `rows` for each. `correlate(indicator_a: "@g7_gdp",
+indicator_b: "@g7_co2")` correlates two *stated* sets, and the answer says which.
+
+**2. Binding names arrive in tool results.** A successful `fetch_series`
+returns its summary with the name it just bound. The agent learns the name the
+same way it learns row counts — by reading the result of the call it made. No
+lookup tool, no preamble listing the environment, nothing to keep in sync.
+
+**3. `execute_js` gets them in scope.** It already receives `rows` as every
+fetched row. It also gets the bindings, so a script can work with a named
+subset instead of re-filtering `rows` by indicator and country. This is where a
+variable stops being a label and becomes a handle.
+
+Binding happens automatically on fetch and on compute, so the agent never has
+to declare anything to get one. It may rename a binding to something meaningful
+when it plans to refer back to it; that is the only variable-specific verb, and
+it is optional.
+
 ## In the composer
 
-Typing `@` opens a picker over the session's bindings. On selection the token
-becomes a **chip showing the human name, with the id underneath** — the chip is
-what the user reads; the concrete id, countries and year range are what reach
-the agent.
+Typing `@` opens a picker over **the session's live bindings** — what this
+conversation has actually fetched and computed, nothing else. Not a catalogue
+browser: pointing at a series the session has never touched is not a tag
+problem, it is just asking a question, and `find_series` already does that
+across every active source. Keeping the picker to real bindings is what stops
+this from needing a fixed list at all.
+
+On selection the token becomes a **chip showing the human name, with the id
+underneath** — the chip is what the user reads; the concrete id, countries and
+year range are what reach the agent.
 
 The chip is not decoration. It is the guarantee that what the user pointed at
 and what the agent received are the same object — the same discipline as
@@ -131,10 +193,11 @@ a parallel persistence story.
 
 ## Open questions
 
-1. **Does the agent see all bindings, or only referenced ones?** All of them is
-   simpler and lets it notice "you already have this". But the binding list
-   grows with the session and competes for context against the data itself.
-   Leaning toward: names and shapes always, rows only on reference.
+1. ~~Does the agent see all bindings, or only referenced ones?~~ **Resolved by
+   mechanism 2.** Names arrive in the tool results that created them, so the
+   agent knows a binding exists because it made it. Nothing needs to enumerate
+   the environment into context each turn, and there is no list to keep in
+   sync. Rows are pulled only when a binding is actually referenced.
 2. **What happens to a binding when its underlying fetch is superseded?** A
    snapshot-served variable and a live-fetched one for the same series are
    different objects with different provenance. Probably distinct bindings
