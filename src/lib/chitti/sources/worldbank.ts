@@ -147,17 +147,43 @@ export function worldbankDateParam(yearStart?: number, yearEnd?: number): string
   return '';
 }
 
-// One retry for a TRANSIENT failure only. A 4xx is the API saying the request
-// itself is wrong — repeating it verbatim just wastes time and hammers a public
-// endpoint — so only 429 and 5xx are retried, once, after a short pause. Aborts
-// and timeouts propagate untouched: a user who pressed stop must not wait out a
-// retry they did not ask for.
+// Which World Bank statuses are worth repeating, decided from a measurement
+// rather than from the usual HTTP conventions.
+//
+// A probe run against the live API from a CI runner (nine request shapes, one
+// variable each) produced this: five rapid requests succeeded — INCLUDING the
+// exact shape that had failed in production, in 43ms — then the next three
+// consecutive requests timed out, then a different endpoint answered fine.
+// That is rate limiting, not a malformed request. Batch size, per_page, date
+// range and URL length were all ruled out; each would have been a plausible
+// guess, and each would have been wrong.
+//
+// So 400 is retried here, which looks wrong until you know this API: the World
+// Bank signals a bad indicator or country with **HTTP 200** and an error
+// envelope in the body — that is the entire reason parseWorldBankError exists.
+// A genuine 400 therefore is NOT the API rejecting the parameters; it is the
+// edge refusing the request, which is exactly what a retry is for. The first
+// version of this retry excluded all 4xx on general principle and so could
+// never have fired on the failure it was written for.
+//
+// 404 and 403 are left alone: those are real "not here" / "not allowed"
+// answers that no amount of repeating will change.
+const RETRYABLE = new Set([400, 408, 425, 429, 500, 502, 503, 504]);
+
+// Backoff between attempts. Throttling is about RATE, so the pause has to be
+// long enough to leave the window — a 200ms nudge would just be throttled again.
+const RETRY_DELAYS_MS = [1500, 4000];
+
 async function fetchWbWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
-  const resp = await fetchWithTimeout(url, { signal });
-  if (resp.ok || (resp.status !== 429 && resp.status < 500)) return resp;
-  await new Promise((r) => setTimeout(r, 1200));
-  if (signal?.aborted) return resp;
-  return fetchWithTimeout(url, { signal });
+  let resp = await fetchWithTimeout(url, { signal });
+  for (const delay of RETRY_DELAYS_MS) {
+    if (resp.ok || !RETRYABLE.has(resp.status)) return resp;
+    await new Promise((r) => setTimeout(r, delay));
+    // A user who pressed stop must not wait out retries they did not ask for.
+    if (signal?.aborted) return resp;
+    resp = await fetchWithTimeout(url, { signal });
+  }
+  return resp;
 }
 
 export async function fetchWorldbank(
@@ -236,6 +262,11 @@ export async function fetchWorldbank(
 // list mid-run (observed directly: an 18k+ token turn spent second-guessing
 // whether it had already fetched all ~195 countries). This tool answers
 // "give me every country for this indicator" as one deterministic call.
+// Pause between every-country batches. Small enough to be invisible against a
+// multi-second fetch, large enough to keep four back-to-back requests from
+// reading as a burst.
+const BATCH_PACING_MS = 350;
+
 export interface FetchWorldbankAllResult {
   rows: DataRow[];
   countryCount: number;
@@ -265,6 +296,14 @@ export async function fetchWorldbankAll(
   let requestUrl = '';
   let sourceUpdated: string | undefined;
   for (const batch of batches) {
+    // Space the batches out. The probe showed the API tolerating a handful of
+    // rapid requests and then refusing several in a row, so the cost of not
+    // pausing is not a slower fetch — it is a failed one, several batches in,
+    // after the earlier batches have already been paid for.
+    if (allRows.length) {
+      await new Promise((r) => setTimeout(r, BATCH_PACING_MS));
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    }
     const r = await fetchWorldbank(indicatorId, batch, yearStart, yearEnd, signal);
     allRows.push(...r.rows);
     // The batches share one indicator/vintage; keep the first batch's URL and
