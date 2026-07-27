@@ -24,6 +24,10 @@ import {
   type DataRow,
   type LlmFn,
 } from './tools';
+// Not re-exported through ./tools (sources/index.ts deliberately does not carry
+// the mirror), so it is imported from where it lives. Used below to tell a
+// same-origin snapshot request apart from a live API call.
+import { MIRROR_BASE } from './sources/mirror';
 
 describe('finish_explanation tool schema', () => {
   it('is registered with an explanation string parameter', () => {
@@ -524,7 +528,16 @@ describe('worldbank adapter — empty countries + exact indicator code', () => {
     expect(urls.length).toBeGreaterThan(0);
     expect(urls.every((u) => !u.includes('country//'))).toBe(true);
     // The every-country path batches real ISO3 codes into the country segment.
-    expect(urls[0]).toMatch(/country\/[A-Z]{3}/);
+    // Assert that on the LIVE call, not on urls[0]. NY.GDP.PCAP.CD is curated,
+    // so once a snapshot exists the adapter tries the same-origin mirror first
+    // and this stub answers it with a World Bank envelope, which
+    // parseMirrorFile rightly rejects — the mirror returns null and the live
+    // call follows, exactly as "missing is never wrong" intends. Keying on
+    // urls[0] silently encoded "there is no mirror" and broke the first time
+    // one existed.
+    const live = urls.filter((u) => !u.startsWith(MIRROR_BASE));
+    expect(live.length).toBeGreaterThan(0);
+    expect(live[0]).toMatch(/country\/[A-Z]{3}/);
   });
 
   it('resolves an exact WB indicator code to THAT series, not a fuzzy token match', async () => {
@@ -2430,8 +2443,14 @@ describe('citation ledger (driven)', () => {
     );
     const { cb } = capture();
     const out = await newSession(['worldbank']).ask('q', cb);
-    // One real network call, and exactly ONE ledger entry.
-    expect(urls.length).toBe(1);
+    // One real network call, and exactly ONE ledger entry. Count LIVE calls:
+    // SP.DYN.LE00.IN is curated, so once a snapshot exists the adapter tries
+    // the same-origin mirror first, and this stub answers it with a World Bank
+    // envelope that parseMirrorFile rightly rejects, so the request falls
+    // through to the live API. That extra request is the mirror working as
+    // designed; what this test is about is that the second fetch_series is
+    // served from cache and never reaches the network at all.
+    expect(urls.filter((u) => !u.startsWith(MIRROR_BASE)).length).toBe(1);
     expect(out.citations.length).toBe(1);
   });
 
