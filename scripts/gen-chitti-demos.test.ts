@@ -219,3 +219,70 @@ describe('health-spending-vs-child-mortality', () => {
     await expect(recipe('health-spending-vs-child-mortality').build(lib)).rejects.toThrow();
   });
 });
+
+describe('co2-vs-gdp-g7', () => {
+  // This recipe had no offline coverage, which is how it grew into its own row
+  // cap unnoticed: the charted span reached 1990–2024 (35 × 7 × 2 = 490 rows)
+  // against a cap of 480, so ten plotted points lost the row behind them.
+  const G7 = ['USA', 'GBR', 'FRA', 'DEU', 'ITA', 'JPN', 'CAN'];
+  const series = (id: string, years: number[], omit: Record<number, string[]> = {}) => {
+    const rows: DataRow[] = [];
+    for (const iso3 of G7) {
+      for (const year of years) {
+        if (omit[year]?.includes(iso3)) continue;
+        rows.push({ country: iso3, iso3, year, value: 100 + (year - 1990) + G7.indexOf(iso3), indicator: id });
+      }
+    }
+    return rows;
+  };
+  const full = Array.from({ length: 35 }, (_, i) => 1990 + i); // 1990–2024
+
+  it('carries a row for every plotted point', async () => {
+    const { lib } = fakeLib({
+      'owid:co-emissions-per-capita': series('owid:co-emissions-per-capita', full),
+      'NY.GDP.PCAP.KD': series('NY.GDP.PCAP.KD', full),
+    });
+    const out = await recipe('co2-vs-gdp-g7').build(lib);
+    const plotted = out.spec.series[0].data.length + out.spec.series[1].data.length;
+    expect(plotted).toBe(70);            // 35 years x 2 lines
+    expect(out.rows).toHaveLength(490);  // x 7 countries — the count the cap used to clip
+  });
+
+  it('does not demand rows for a year it never plotted', async () => {
+    // 2005 is missing one G7 member in the CO2 series, so that year is dropped
+    // from that line. A range-based expectation would ask for rows behind a
+    // point that was never drawn, and the recipe would fail on healthy data.
+    const { lib } = fakeLib({
+      'owid:co-emissions-per-capita': series('owid:co-emissions-per-capita', full, { 2005: ['JPN'] }),
+      'NY.GDP.PCAP.KD': series('NY.GDP.PCAP.KD', full),
+    });
+    const out = await recipe('co2-vs-gdp-g7').build(lib);
+    expect(out.spec.series[0].data.map(([y]: [number, number]) => y)).not.toContain(2005);
+    expect(out.rows).toHaveLength((34 + 35) * 7);
+  });
+
+  it('refuses when the shared span is too short to say anything', async () => {
+    const short = Array.from({ length: 5 }, (_, i) => 1990 + i);
+    const { lib } = fakeLib({
+      'owid:co-emissions-per-capita': series('owid:co-emissions-per-capita', short),
+      'NY.GDP.PCAP.KD': series('NY.GDP.PCAP.KD', short),
+    });
+    await expect(recipe('co2-vs-gdp-g7').build(lib)).rejects.toThrow(/complete G7 years/);
+  });
+});
+
+describe('evidence tables are never silently clipped', () => {
+  it('fails loudly if a table stops covering its chart', async () => {
+    // The guard itself. expectComplete is what turns a quiet slice into a red
+    // run, so it has to actually throw.
+    const rows = makeRows('SH.DYN.MORT', {
+      broad: [2000, 2022],
+      value: (_iso3, year, i) => (year === 2000 ? 100 - i * 0.1 : 50 - i * 0.1),
+    });
+    const { lib } = fakeLib({ 'SH.DYN.MORT': rows });
+    const out = await recipe('child-mortality-fastest-fall').build(lib);
+    // Ten ranked countries, two endpoints each — exact, not "at most".
+    expect(out.rows).toHaveLength(20);
+    expect(out.spec.series[0].data).toHaveLength(10);
+  });
+});

@@ -31,12 +31,27 @@ import { createServer } from 'vite';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = resolve(ROOT, 'src/data/chitti/demos.json');
 
-// Size budget for the whole file. demos.json is imported statically by
-// lib/demos.ts, so it lands in the app bundle. Evidence rows run ~120 bytes
-// each, so this is roughly 1,100 rows across all demos — generous enough for a
-// complete evidence table per demo, and it compresses hard over the wire
-// (repetitive JSON, ~8x), which is what the page load actually pays.
-const MAX_BYTES = 140_000;
+// Size budget for the whole file, and the ONLY ceiling in this script.
+//
+// demos.json is imported statically by lib/demos.ts, so it lands in the app
+// bundle. The previous budget was 140,000, derived from an assumption that
+// evidence rows run ~120 bytes each. The first run in which all three recipes
+// succeeded measured them at ~230: 876 rows came to 200,975 bytes, and the run
+// failed on a number whose only basis was that wrong estimate.
+//
+// So this is set from the measurement, with room for the sources to broaden
+// (more countries reporting, another year of history). What the page actually
+// pays is the compressed size, and this shape — repetitive JSON, mostly numbers
+// and repeated country names — compresses about tenfold, so ~200 KB raw is on
+// the order of 20 KB over the wire for the one screen a first-time visitor
+// judges the app on.
+//
+// If a future run exceeds this, DO NOT respond by trimming evidence rows. A
+// demo's evidence table is exactly the rows behind its chart; slicing it leaves
+// plotted points a reader cannot check, which is the one thing these demos
+// exist to prove. Drop a whole demo, or narrow what a recipe charts, and raise
+// this only against a fresh measurement.
+const MAX_BYTES = 250_000;
 
 // ── Helpers shared by the recipes ───────────────────────────────────────────
 
@@ -73,11 +88,24 @@ async function fetchSeries(lib, id, countries, yearStart, yearEnd) {
   return { rows, citation, adapter };
 }
 
-// Trim an evidence table down to the rows a demo actually needs, keeping the
-// file inside its budget. Rows are kept whole (never synthesised); this only
-// ever drops.
-function limitRows(rows, max) {
-  return rows.length <= max ? rows : rows.slice(0, max);
+// Every row behind a chart must reach the evidence table, so this asserts the
+// count rather than capping it.
+//
+// The caps this replaces were authored round numbers (200 / 420 / 480), and the
+// G7 recipe quietly grew into its one: the charted span reached 1990–2024, which
+// is 35 years × 7 countries × 2 indicators = 490 rows, and 480 of them were
+// kept. Ten plotted points had no row a reader could check — in the demo whose
+// entire job is to show that every number is checkable, and with nothing in the
+// output to say so. A blunt cap cannot tell "too big" from "complete"; the file
+// budget can, and it fails loudly.
+function expectComplete(label, rows, expected) {
+  if (rows.length !== expected) {
+    throw new Error(
+      `${label}: evidence table has ${rows.length} rows but the chart needs ${expected} — ` +
+        `every plotted point must have a row behind it`
+    );
+  }
+  return rows;
 }
 
 // Describe a correlation's strength in words, from the coefficient itself.
@@ -154,7 +182,9 @@ export const RECIPES = [
           `steepest fall of any country. ${halvedClause}, with ` +
           `${stats[1].country} and ${stats[2].country} close behind.`,
         spec,
-        rows: limitRows(evidence, 200),
+        // Two endpoints per ranked country; growth_stats derives each plotted
+        // % change from exactly those two fetched values.
+        rows: expectComplete('child-mortality', evidence, stats.length * 2),
         citations: [citation],
         sources: [adapter.sourceLabel],
       };
@@ -263,9 +293,12 @@ export const RECIPES = [
         spec,
         // Exactly the paired rows behind the scatter: two per plotted country,
         // at the one year the correlation was computed on.
-        rows: limitRows(
+        // Two rows per plotted country — the spending and mortality values the
+        // point was built from, at the one correlated year.
+        rows: expectComplete(
+          'health-spend',
           all.filter((r) => r.year === year && r.value !== null && keptIso.has(r.iso3)),
-          420
+          points.length * 2
         ),
         citations: [spend.citation, mort.citation],
         sources: [spend.adapter.sourceLabel],
@@ -330,14 +363,26 @@ export const RECIPES = [
           `fell to ${fmt(co2Series._lastIndexed, 0)}. The two lines separate in the mid-2000s and never reconverge — ` +
           `growth and territorial emissions genuinely came apart.`,
         spec,
-        // Both indicators for all seven countries across the charted span — the
-        // raw values behind the indexed lines, since indexing is a transform a
-        // reader should be able to check.
-        rows: limitRows(
-          [...co2.rows, ...gdp.rows].filter(
-            (r) => r.value !== null && r.year >= firstYear && r.year <= lastYear && G7.includes(r.iso3)
-          ),
-          480
+        // The raw values behind the indexed lines — indexing is a transform a
+        // reader should be able to check, so every plotted point needs its
+        // seven country rows.
+        //
+        // Keyed off the PLOTTED YEARS rather than the charted range, because
+        // those are not the same set: a year inside the range where one series
+        // is missing a G7 member is dropped from that line, so a range-based
+        // count would demand rows for a point that was never drawn.
+        rows: expectComplete(
+          'co2-vs-gdp',
+          [
+            [co2.rows, spec.series[0].data],
+            [gdp.rows, spec.series[1].data],
+          ].flatMap(([rows, plotted]) => {
+            const plottedYears = new Set(plotted.map(([y]) => y));
+            return rows.filter(
+              (r) => r.value !== null && G7.includes(r.iso3) && plottedYears.has(r.year)
+            );
+          }),
+          (spec.series[0].data.length + spec.series[1].data.length) * G7.length
         ),
         citations: [co2.citation, gdp.citation],
         sources: [co2.adapter.sourceLabel, gdp.adapter.sourceLabel],
