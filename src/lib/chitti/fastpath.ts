@@ -21,6 +21,7 @@
 import { adapterOfId } from './sources/index';
 import { findSeriesWithReceipt } from './sources/index';
 import { scoreSeries } from './scoring';
+import { searchKb, KB_MIN_SCORE } from './kb';
 import { extractCountryMentions } from './planner';
 import { buildCitation } from './dashboards-agent';
 import { growthStats, type ChartSpec, type Citation, type DataRow } from './tools';
@@ -282,21 +283,42 @@ export async function runFastPath(
     ts: Date.now(),
   };
   push(findEv);
-  const { hits, receipt } = await findSeriesWithReceipt(plan.indicatorQuery, opts.sources, opts.signal);
-  findEv.receipt = receipt;
-  if (!hits.length) {
-    settle(findEv, 'error', 'no matching series');
-    return { ok: false, reason: 'no-match' };
+
+  // ── Knowledge base first ────────────────────────────────────────────────
+  // The KB is consulted BEFORE the flat catalogue search, not as its fallback.
+  // Fallback ordering was wrong for a reason worth recording: flat scoring is
+  // not merely weaker, it is sometimes confidently WRONG — "how long people
+  // live" returns the child-mortality series at a score that clears the bar, so
+  // a KB kept in reserve never gets a say on the query it would have fixed.
+  // Where the KB has authored vocabulary it is the better answer; where it does
+  // not, the flat search still reaches catalogues far larger than the shortlist.
+  // It also costs no request, so a KB hit skips a network round trip entirely.
+  let hit: SeriesHit | null = null;
+  let via = '';
+  const kbHit = searchKb(plan.indicatorQuery, opts.sources)[0];
+  if (kbHit && kbHit.score >= KB_MIN_SCORE) {
+    hit = { id: kbHit.seriesId, name: kbHit.name, source: kbHit.source };
+    // The route is the explanation a similarity score cannot give — show it.
+    via = ' · via ' + kbHit.path.slice(1).join(' › ');
   }
-  const hit = hits[0];
-  // Commit only to a confident match. `scoreSeries` is the same scorer that
-  // ranked the hits, so this is a threshold on the ranking we already trust.
-  const score = scoreSeries(plan.indicatorQuery, hit.id, hit.name);
-  if (score < MIN_MATCH_SCORE) {
-    settle(findEv, 'error', `best match too weak (${hit.name})`);
-    return { ok: false, reason: 'weak-match', best: hit };
+
+  if (!hit) {
+    const { hits, receipt } = await findSeriesWithReceipt(plan.indicatorQuery, opts.sources, opts.signal);
+    findEv.receipt = receipt;
+    if (!hits.length) {
+      settle(findEv, 'error', 'no matching series');
+      return { ok: false, reason: 'no-match' };
+    }
+    const best = hits[0];
+    // Commit only to a confident match. `scoreSeries` is the same scorer that
+    // ranked the hits, so this is a threshold on the ranking we already trust.
+    if (scoreSeries(plan.indicatorQuery, best.id, best.name) < MIN_MATCH_SCORE) {
+      settle(findEv, 'error', `best match too weak (${best.name})`);
+      return { ok: false, reason: 'weak-match', best };
+    }
+    hit = best;
   }
-  settle(findEv, 'ok', `${hit.name} (${hit.id})`);
+  settle(findEv, 'ok', `${hit.name} (${hit.id})${via}`);
 
   // 2. Fetch it, through the id's own adapter — the same router path a live
   //    run takes.
