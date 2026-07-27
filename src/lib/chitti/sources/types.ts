@@ -76,6 +76,12 @@ export interface FetchSeriesResult {
   rows: DataRow[];
   requestUrl: string;
   sourceUpdated?: string;
+  // Set ONLY when the rows came from the same-origin snapshot rather than a
+  // live call (see sources/mirror.ts) — the ISO timestamp of when the snapshot
+  // was taken. It rides through to the citation and is rendered there, because
+  // a snapshot presented as a live fetch would be a lie about provenance. Live
+  // fetches leave it undefined, so "absent" always means "fetched just now".
+  mirroredAt?: string;
   truncatedFrom?: number; // WB specific-country over-60-cap
   countryCount?: number;  // WB every-country
   batchCount?: number;    // WB every-country

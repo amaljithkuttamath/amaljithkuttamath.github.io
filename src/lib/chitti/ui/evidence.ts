@@ -6,6 +6,7 @@
 import type { TurnBlock } from './state';
 import { INDICATOR_MAP } from './state';
 import type { DataRow, Citation } from '../tools';
+import { citationsHeadline } from '../tools';
 import type { AgentOutput, TraceEvent } from '../agent';
 import { matchRowToPoint } from '../chart-link';
 import { verificationCueText, verificationStampLabel } from '../a11y';
@@ -198,13 +199,18 @@ export function renderCitations(tb: TurnBlock, citations: Citation[]) {
       '<span class="ch-cite-facets">' +
       `<span class="ch-cite-facet">${esc(where)}</span>` +
       `<span class="ch-cite-facet">${esc(fmtRange(c.yearRange))}</span>` +
-      `<span class="ch-cite-facet">fetched ${esc(fmtFetchedAt(c.fetchedAt))}</span>` +
+      // A mirrored row shows WHEN THE SNAPSHOT WAS TAKEN, not when Chitti read
+      // its own file — the latter is a fact about us, not about the data, and
+      // showing it under the word "fetched" would read as a live call.
+      (c.mirroredAt
+        ? `<span class="ch-cite-facet ch-cite-snapshot">snapshot ${esc(fmtFetchedAt(c.mirroredAt))}</span>`
+        : `<span class="ch-cite-facet">fetched ${esc(fmtFetchedAt(c.fetchedAt))}</span>`) +
       vintage +
       '</span>' +
       '</li>'
     );
   });
   tb.citeEl.innerHTML =
-    '<div class="ch-cite-head">References — every number fetched live &amp; cited</div>' +
+    `<div class="ch-cite-head">${esc(citationsHeadline(citations))}</div>` +
     '<ol class="ch-cite-list">' + rows.join('') + '</ol>';
 }

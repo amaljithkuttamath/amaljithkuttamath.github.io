@@ -8,6 +8,7 @@ import { ApiRejection, INDICATORS, listCountries } from '../tools';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
 import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';
+import { fetchFromMirror } from './mirror';
 
 const WB = 'https://api.worldbank.org/v2';
 
@@ -186,23 +187,31 @@ async function fetchWbWithRetry(url: string, signal?: AbortSignal): Promise<Resp
   return resp;
 }
 
-export async function fetchWorldbank(
+// Pause between requests that belong to one logical pull — the every-country
+// batches and the pages within a batch. Small enough to be invisible against a
+// multi-second fetch, large enough to keep back-to-back requests from reading
+// as a burst. Declared here because both the page walk and the batch loop use it.
+const BATCH_PACING_MS = 350;
+
+// Rows per request. The World Bank paginates, and this is the page size we ask
+// for; anything beyond it arrives on further pages, which is why the page loop
+// below exists.
+const PER_PAGE = 2000;
+
+// A ceiling on the page walk. At PER_PAGE this is 200,000 rows — far past any
+// legitimate single-indicator pull (60 countries × 65 years is 3,900) — so it
+// can only fire on a malformed `pages` header, and then it stops rather than
+// looping forever.
+const MAX_PAGES = 100;
+
+// Fetch one page and turn it into rows, or throw with the diagnosis. Split out
+// so the page loop below has exactly one place that talks to the API and one
+// place that interprets a body.
+async function fetchWbPage(
+  url: string,
   indicatorId: string,
-  countryIds: string[],
-  yearStart?: number,
-  yearEnd?: number,
   signal?: AbortSignal
-): Promise<FetchWorldbankResult> {
-  const cleanIds = countryIds.map((c) => c.trim().toUpperCase()).filter(Boolean);
-  const truncatedFrom = cleanIds.length > 60 ? cleanIds.length : undefined;
-  const codes = cleanIds.slice(0, 60).join(';');
-  // Semicolons must stay literal in the path segment; only the indicator id
-  // needs escaping (WB ids are dot-delimited alnum, so this is a no-op in
-  // practice, but keeps us safe). The date fragment is built defensively so an
-  // open range ("since 1990") never leaks NaN/undefined into the URL.
-  const url =
-    `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
-    `?format=json${worldbankDateParam(yearStart, yearEnd)}&per_page=2000`;
+): Promise<{ rows: DataRow[]; pages: number; lastupdated?: string }> {
   const resp = await fetchWbWithRetry(url, signal);
   if (!resp.ok) {
     // Include the URL and whatever the API said. A bare "HTTP 400" is
@@ -239,9 +248,9 @@ export async function fetchWorldbank(
   // data[0] is the WB response header; it carries `lastupdated` — the series'
   // real data vintage. Capture it when present (string, e.g. "2024-12-16");
   // omit otherwise. This is disclosed as `sourceUpdated`, never as fetchedAt.
-  const lastupdated = (data[0] && typeof data[0].lastupdated === 'string')
-    ? (data[0].lastupdated as string)
-    : undefined;
+  const header = data[0] as { lastupdated?: unknown; pages?: unknown };
+  const lastupdated = typeof header?.lastupdated === 'string' ? header.lastupdated : undefined;
+  const pages = Number(header?.pages);
   const rows: DataRow[] = (data[1] as any[]).map((r) => ({
     country: r.country?.value ?? r.countryiso3code,
     iso3: r.countryiso3code,
@@ -249,9 +258,49 @@ export async function fetchWorldbank(
     value: r.value === null || r.value === undefined ? null : Number(r.value),
     indicator: indicatorId,
   }));
+  return { rows, pages: Number.isFinite(pages) && pages > 0 ? pages : 1, lastupdated };
+}
+
+export async function fetchWorldbank(
+  indicatorId: string,
+  countryIds: string[],
+  yearStart?: number,
+  yearEnd?: number,
+  signal?: AbortSignal
+): Promise<FetchWorldbankResult> {
+  const cleanIds = countryIds.map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const truncatedFrom = cleanIds.length > 60 ? cleanIds.length : undefined;
+  const codes = cleanIds.slice(0, 60).join(';');
+  // Semicolons must stay literal in the path segment; only the indicator id
+  // needs escaping (WB ids are dot-delimited alnum, so this is a no-op in
+  // practice, but keeps us safe). The date fragment is built defensively so an
+  // open range ("since 1990") never leaks NaN/undefined into the URL.
+  const url =
+    `${WB}/country/${codes}/indicator/${encodeURIComponent(indicatorId)}` +
+    `?format=json${worldbankDateParam(yearStart, yearEnd)}&per_page=${PER_PAGE}`;
+
+  // THE PAGE WALK, and why it is not optional. This function used to read
+  // `data[1]` of page one and stop, never looking at the `pages` header. A
+  // 60-country batch over the full 1960–2024 range is 3,900 rows, so nearly
+  // half of it was dropped — and because the API orders rows by country, what
+  // vanished was whole countries from the end of the alphabet, silently. Every
+  // downstream statistic would have been computed over a truncated world with
+  // nothing to show that anything was missing. The demos happened to stay under
+  // the limit; a user asking for all years did not.
+  const first = await fetchWbPage(url, indicatorId, signal);
+  const rows = first.rows;
+  const pages = Math.min(first.pages, MAX_PAGES);
+  for (let page = 2; page <= pages; page++) {
+    // Paced like the every-country batches, and for the same measured reason:
+    // this API tolerates a few rapid requests and then refuses several in a row.
+    await new Promise((r) => setTimeout(r, BATCH_PACING_MS));
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const next = await fetchWbPage(`${url}&page=${page}`, indicatorId, signal);
+    rows.push(...next.rows);
+  }
   // Sort by country then year ascending for stable downstream use.
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
-  return { rows, truncatedFrom, requestUrl: url, sourceUpdated: lastupdated };
+  return { rows, truncatedFrom, requestUrl: url, sourceUpdated: first.lastupdated };
 }
 
 // fetch_worldbank_all: every real country for one indicator, batched and
@@ -262,10 +311,6 @@ export async function fetchWorldbank(
 // list mid-run (observed directly: an 18k+ token turn spent second-guessing
 // whether it had already fetched all ~195 countries). This tool answers
 // "give me every country for this indicator" as one deterministic call.
-// Pause between every-country batches. Small enough to be invisible against a
-// multi-second fetch, large enough to keep four back-to-back requests from
-// reading as a burst.
-const BATCH_PACING_MS = 350;
 
 export interface FetchWorldbankAllResult {
   rows: DataRow[];
@@ -341,6 +386,12 @@ export const worldbankAdapter: SourceAdapter = {
   detailSuffix: (r) => (r.truncatedFrom ? ` (truncated from ${r.truncatedFrom})` : ''),
   indicatorLabel: (nid) => nid,
   async fetchSeries(id, countries, ys, ye, signal): Promise<FetchSeriesResult> {
+    // The same-origin snapshot first, when it covers this series and window.
+    // It returns null for every "not here" case, so this can only make an
+    // answer faster — never different, and never a refusal the live path would
+    // not also give. See sources/mirror.ts for why the no-key path needs it.
+    const mirrored = await fetchFromMirror(id, countries, ys, ye, signal);
+    if (mirrored) return mirrored;
     // An empty array means "every country", same as `undefined` — matching
     // OWID/IMF/WHO. Routing `[]` down the specific-country path built a
     // malformed `/country//indicator/<id>` URL (double slash) that the WB API

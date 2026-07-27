@@ -1,0 +1,5 @@
+{
+  "_comment": "GENERATED FILE — do not hand-edit. Lists which World Bank indicators have a same-origin snapshot under public/apps/chitti/mirror/. Only this index is bundled; the data files themselves are fetched at runtime. An empty indicators object simply means every fetch goes to the live API, which is the correct fallback in all cases. Regenerate with: npm run mirror:refresh (see scripts/gen-chitti-mirror.mjs).",
+  "generated": null,
+  "indicators": {}
+}

@@ -80,12 +80,21 @@ function limitRows(rows, max) {
   return rows.length <= max ? rows : rows.slice(0, max);
 }
 
+// Describe a correlation's strength in words, from the coefficient itself.
+// Banded so the prose can never contradict the number it sits next to — the
+// hazard this replaces was a hand-written "strongly negative" that would have
+// stayed on the page whatever the fetch returned.
+function strengthOf(r) {
+  const a = Math.abs(r);
+  return a >= 0.7 ? 'strong' : a >= 0.5 ? 'moderate' : a >= 0.3 ? 'modest' : 'weak';
+}
+
 // ── The recipes ─────────────────────────────────────────────────────────────
 // Each returns the full demo. They are ordered by what they demonstrate:
 // computation across every country, a correlation, and a cross-database join —
 // the three things a visitor cannot get from a one-click chart site.
 
-const RECIPES = [
+export const RECIPES = [
   {
     id: 'child-mortality-fastest-fall',
     question: 'Which countries cut child mortality the fastest since 2000?',
@@ -97,8 +106,12 @@ const RECIPES = [
       const { rows, citation, adapter } = await fetchSeries(lib, 'SH.DYN.MORT', [], 2000, undefined);
       // Aggregates (regions, income groups) are real World Bank rows but they
       // are not countries; a "which countries" answer must not rank them.
-      const isoCountries = new Set(lib.COUNTRIES.map((c) => c.id));
-      const stats = growthStats(rows.filter((r) => isoCountries.has(r.iso3)))
+      // NOTE the filter that belongs here is `isRealCountry`, NOT membership in
+      // COUNTRIES: that table carries all 295 World Bank entities, 78 of which
+      // are aggregates, so an id check admits exactly what it looks like it
+      // excludes. Ranking "Sub-Saharan Africa" alongside Rwanda would have been
+      // an invented finding in a demo whose whole job is to be checkable.
+      const stats = growthStats(rows.filter((r) => lib.isRealCountry(r.iso3)))
         .filter((s) => s.pctChange !== null && s.firstValue > 0)
         .sort((a, b) => a.pctChange - b.pctChange) // most negative = steepest fall
         .slice(0, 10);
@@ -125,11 +138,20 @@ const RECIPES = [
       const evidence = rows.filter(
         (r) => r.value !== null && endpoints.get(r.iso3)?.includes(r.year)
       );
+      // Counted, not claimed. The sentence this replaces asserted "all ten more
+      // than halved their rate" in fixed text, which is a finding about the
+      // fetched data stated without checking it — the same failure as the
+      // correlation's hand-written "strongly negative".
+      const halved = stats.filter((s) => s.pctChange <= -50).length;
+      const halvedClause =
+        halved === stats.length
+          ? `All ten leaders more than halved their rate`
+          : `${halved} of the ten more than halved their rate`;
       return {
         answer:
           `${top.country} cut under-5 mortality ${fmt(Math.abs(top.pctChange))}% between ${top.firstYear} and ` +
           `${top.lastYear} — from ${fmt(top.firstValue)} to ${fmt(top.lastValue)} deaths per 1,000 live births — the ` +
-          `steepest fall of any country. All ten leaders more than halved their rate, with ` +
+          `steepest fall of any country. ${halvedClause}, with ` +
           `${stats[1].country} and ${stats[2].country} close behind.`,
         spec,
         rows: limitRows(evidence, 200),
@@ -142,33 +164,81 @@ const RECIPES = [
   {
     id: 'health-spending-vs-child-mortality',
     question: 'Does higher health spending buy lower child mortality?',
-    blurb: 'A correlation across ~180 countries, one point each — computed live.',
+    blurb: 'A correlation across every reporting country, one point each — computed live.',
     async build(lib) {
       const { correlate } = lib;
-      // Two series, most recent decade, then correlated at their latest shared
-      // year — the same two-fetch-then-correlate shape the agent runs.
-      const spend = await fetchSeries(lib, 'SH.XPD.CHEX.PC.CD', [], 2015, undefined);
-      const mort = await fetchSeries(lib, 'SH.DYN.MORT', [], 2015, undefined);
-      const isoCountries = new Set(lib.COUNTRIES.map((c) => c.id));
-      const all = [...spend.rows, ...mort.rows].filter((r) => isoCountries.has(r.iso3));
-      const corr = correlate(all, 'SH.XPD.CHEX.PC.CD', 'SH.DYN.MORT');
-      if (corr.r === null || corr.n < 50) {
-        throw new Error(`health-spend correlation unusable (r=${corr.r}, n=${corr.n})`);
+      const SPEND = 'SH.XPD.CHEX.PC.CD';
+      const MORT = 'SH.DYN.MORT';
+      // Two series, most recent decade, then correlated at one year — the same
+      // two-fetch-then-correlate shape the agent runs.
+      const spend = await fetchSeries(lib, SPEND, [], 2015, undefined);
+      const mort = await fetchSeries(lib, MORT, [], 2015, undefined);
+      const all = [...spend.rows, ...mort.rows].filter((r) => lib.isRealCountry(r.iso3));
+
+      // Pick the year on evidence rather than taking whatever overlaps last.
+      // The first live run of this recipe correlated on the latest shared year
+      // and got r=-0.35 over n=22 — health spending's final year had barely
+      // filed. `pairCoverage` is the same trap `latestUsableYear` exists to
+      // catch, applied to the pair; it is unit tested in eda.test.ts against a
+      // reconstruction of this exact failure.
+      const cov = lib.pairCoverage(all, SPEND, MORT);
+      // A breakage guard, not a quality bar: both of these are flagship WDI
+      // series reported by ~190 countries, so a joint universe in double digits
+      // means a fetch came back wrong and the demo must not be built on it.
+      // What counts as "enough" for the correlation itself is decided by the
+      // coverage rule, from whatever the sources actually report — the floor
+      // this replaces was an authored n>=50 that had no basis in the data and
+      // failed the first live run it ever saw.
+      if (cov.universe < 100) {
+        throw new Error(
+          `only ${cov.universe} countries report both series at all — the fetch is not intact, refusing to correlate`
+        );
       }
-      const year = corr.year;
+      const year = cov.latestWellPaired;
+      if (year === null) {
+        const best = [...cov.byYear].sort((a, b) => b.n - a.n)[0] ?? { year: '—', n: 0 };
+        throw new Error(
+          `no year has ${Math.ceil(cov.universe * lib.JOINT_COVERAGE)} of the ${cov.universe} paired countries ` +
+            `reporting (best is ${best.year} with ${best.n})`
+        );
+      }
+      const corr = correlate(all, SPEND, MORT, year);
+      if (corr.r === null) throw new Error(`correlation undefined at ${year} (n=${corr.n})`);
+      // Reported back to the runner rather than printed here, so a future CI
+      // log says which year the numbers came from and how well covered it was
+      // — the two facts the failed run left the reader to guess at.
+      const note = `year ${year}, ${corr.n}/${cov.universe} paired countries, r=${corr.r.toFixed(3)}`;
+
+      // The same Pearson, over log10 spending. Whether the relationship is
+      // curved is a claim about the data, so it gets computed rather than
+      // asserted: if mortality really does collapse over the first few hundred
+      // dollars and then flatten, a log x-axis fits better than a linear one.
+      // A transform of fetched values, never a substitute for them — the
+      // evidence table below still carries the raw rows.
+      const LOG_SPEND = 'log10:' + SPEND;
+      const logRows = all
+        .filter((r) => r.indicator === SPEND && r.value !== null && r.value > 0)
+        .map((r) => ({ ...r, indicator: LOG_SPEND, value: Math.log10(r.value) }));
+      const logCorr = correlate([...logRows, ...all.filter((r) => r.indicator === MORT)], LOG_SPEND, MORT, year);
+      const curved = logCorr.r !== null && Math.abs(logCorr.r) > Math.abs(corr.r) + 0.05;
+
       const spendAt = new Map(
         spend.rows.filter((r) => r.year === year && r.value !== null).map((r) => [r.iso3, r])
       );
       const points = [];
       const keptIso = new Set();
       for (const r of mort.rows) {
-        if (r.year !== year || r.value === null) continue;
+        if (r.year !== year || r.value === null || !lib.isRealCountry(r.iso3)) continue;
         const s = spendAt.get(r.iso3);
         if (!s) continue;
         points.push([Number(s.value.toFixed(1)), Number(r.value.toFixed(1))]);
         keptIso.add(r.iso3);
       }
-      if (points.length < 50) throw new Error('health-spend scatter: too few paired countries');
+      // The scatter and the coefficient must be the same set of countries, or
+      // the chart is not a picture of the number beside it.
+      if (points.length !== corr.n) {
+        throw new Error(`scatter has ${points.length} points but the correlation used ${corr.n}`);
+      }
       const spec = {
         type: 'scatter',
         title: `Health spending vs under-5 mortality, ${year}`,
@@ -177,10 +247,19 @@ const RECIPES = [
         series: [{ name: `Countries (${year})`, data: points }],
       };
       return {
+        // Every clause here is derived from a computed number — the strength
+        // word from |r|, the shape claim from the log-scale fit. The version
+        // this replaces asserted "strongly negative" in fixed text, which would
+        // have printed unchanged over an r of -0.35.
         answer:
-          `Across ${corr.n} countries in ${year} the correlation is ${corr.r.toFixed(2)} — strongly negative, but the ` +
-          `shape matters more than the coefficient: mortality collapses over the first few hundred dollars of spending ` +
-          `per person and then flattens, so the countries with the most to gain are the ones spending least.`,
+          `Across ${corr.n} countries in ${year} the correlation between health spending per person and under-5 ` +
+          `mortality is ${corr.r.toFixed(2)} — ${strengthOf(corr.r)} and negative. ` +
+          (curved
+            ? `On a log spending scale it strengthens to ${logCorr.r.toFixed(2)}, which is the shape talking: mortality ` +
+              `falls steeply over the first few hundred dollars per person and then flattens, so the countries with the ` +
+              `most to gain are the ones spending least.`
+            : `A log spending scale does not strengthen it (${logCorr.r === null ? 'undefined' : logCorr.r.toFixed(2)}), ` +
+              `so across this range the association is close to linear in dollars rather than concentrated at the bottom.`),
         spec,
         // Exactly the paired rows behind the scatter: two per plotted country,
         // at the one year the correlation was computed on.
@@ -190,6 +269,7 @@ const RECIPES = [
         ),
         citations: [spend.citation, mort.citation],
         sources: [spend.adapter.sourceLabel],
+        note,
       };
     },
   },
@@ -280,19 +360,27 @@ async function main() {
   try {
     // Load the real app modules through Vite so TS + JSON imports resolve
     // exactly as they do in the browser bundle.
-    const [tools, sources, dashAgent, countries, share, demos] = await Promise.all([
+    const [tools, sources, dashAgent, countries, share, demos, eda] = await Promise.all([
       server.ssrLoadModule('/src/lib/chitti/tools.ts'),
       server.ssrLoadModule('/src/lib/chitti/sources/index.ts'),
       server.ssrLoadModule('/src/lib/chitti/dashboards-agent.ts'),
       server.ssrLoadModule('/src/lib/chitti/countries.ts'),
       server.ssrLoadModule('/src/lib/chitti/share.ts'),
       server.ssrLoadModule('/src/lib/chitti/demos.ts'),
+      server.ssrLoadModule('/src/lib/chitti/eda.ts'),
     ]);
     const lib = {
       ...tools,
       adapterOfId: sources.adapterOfId,
       buildCitation: dashAgent.buildCitation,
       resolveCountryList: countries.resolveCountryList,
+      // The app's own aggregate test and joint-coverage rule, rather than
+      // second copies written here. Both are unit tested, and using them means
+      // a demo and a live profile agree on what counts as a country and on
+      // which year a two-series comparison may be computed at.
+      isRealCountry: eda.isRealCountry,
+      pairCoverage: eda.pairCoverage,
+      JOINT_COVERAGE: eda.JOINT_COVERAGE,
     };
 
     const built = [];
@@ -323,7 +411,9 @@ async function main() {
       // what the browser will render.
       if (!demos.cleanDemo(demo)) throw new Error(`${recipe.id} failed cleanDemo validation`);
       built.push(demo);
-      console.log(`ok (${out.rows.length} rows, ${out.citations.length} citation(s))`);
+      console.log(
+        `ok (${out.rows.length} rows, ${out.citations.length} citation(s)${out.note ? `; ${out.note}` : ''})`
+      );
     }
 
     const file = {
@@ -349,8 +439,17 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('\ndemo generation FAILED — demos.json left untouched.');
-  console.error(err);
-  process.exit(1);
-});
+// Only generate when run as a script. Importing this file hands back RECIPES
+// alone — which is what gen-chitti-demos.test.ts does, so each recipe's
+// analysis can be driven offline against a synthetic World Bank shape. The
+// recipes reach the network exclusively through `lib.adapterOfId`, so a fake
+// lib exercises the real logic end to end without a fetch. That test is the
+// only pre-flight this script has: the runner is the first place the live
+// version ever runs, and a failure there costs a whole workflow round-trip.
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('\ndemo generation FAILED — demos.json left untouched.');
+    console.error(err);
+    process.exit(1);
+  });
+}

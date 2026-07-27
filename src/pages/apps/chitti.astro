@@ -2456,6 +2456,14 @@ const PRESETS = [
   :global(.ch-cite-vintage) {
     color: color-mix(in srgb, var(--signal) 80%, var(--fg-muted));
   }
+  /* "snapshot <date>" replaces "fetched <date>" when the rows came from the
+     same-origin capture rather than a live call. It must not look like a
+     decoration: it is the disclosure that the numbers are as-of a date, so it
+     carries the same weight as the vintage rather than fading into the row. */
+  :global(.ch-cite-snapshot) {
+    color: color-mix(in srgb, var(--signal) 55%, var(--fg-muted));
+    font-variant-numeric: tabular-nums;
+  }
   :global(.ch-cite a) { color: var(--fg-muted); text-decoration: underline; text-underline-offset: 2px; }
   :global(.ch-cite a:hover) { color: var(--fg); }
 

@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   quantile, describe as describeStats, profileSeries, breakdown,
   formatProfile, formatBreakdown, breakdownChartData, isRealCountry,
+  pairCoverage, JOINT_COVERAGE,
 } from './eda';
+import { correlate } from './tools';
 import type { DataRow } from './tools';
 
 const row = (iso3: string, country: string, year: number, value: number | null): DataRow =>
@@ -175,5 +177,98 @@ describe('the text handed to the model', () => {
 
   it('always reports missingness, so patchy data cannot pass as complete', () => {
     expect(formatProfile(profileSeries(rows)!)).toMatch(/Missing: \d+%/);
+  });
+});
+
+describe('pairCoverage', () => {
+  // 20 real countries, both indicators, every year 2015–2020 — except that in
+  // 2021 only three of them have filed the spending series yet. That last year
+  // is the shape World Bank data actually has, and the one `correlate`'s
+  // default would pick.
+  const ISO = ['IND', 'CHN', 'BRA', 'USA', 'CAN', 'NGA', 'ETH', 'BGD', 'PAK', 'MEX',
+               'ZAF', 'KEN', 'EGY', 'IDN', 'PHL', 'VNM', 'THA', 'TUR', 'POL', 'ESP'];
+  const pair = (indicator: string, iso3: string, year: number, value: number): DataRow =>
+    ({ country: iso3, iso3, year, value, indicator });
+
+  const rows: DataRow[] = [];
+  for (const iso3 of ISO) {
+    for (let y = 2015; y <= 2020; y++) {
+      rows.push(pair('SPEND', iso3, y, 100 + ISO.indexOf(iso3) * 10));
+      rows.push(pair('MORT', iso3, y, 90 - ISO.indexOf(iso3) * 2));
+    }
+  }
+  // The partial final year: mortality filed broadly, spending barely at all.
+  for (const iso3 of ISO) rows.push(pair('MORT', iso3, 2021, 40));
+  for (const iso3 of ISO.slice(0, 3)) rows.push(pair('SPEND', iso3, 2021, 999));
+
+  it('counts only countries reporting both, per year', () => {
+    const c = pairCoverage(rows, 'SPEND', 'MORT');
+    expect(c.universe).toBe(20);
+    expect(c.byYear.find((y) => y.year === 2020)!.n).toBe(20);
+    expect(c.byYear.find((y) => y.year === 2021)!.n).toBe(3);
+  });
+
+  it('skips the partial final year that correlate would have chosen', () => {
+    // The regression this exists for. `correlate`'s default lands on 2021 and
+    // reports an r drawn from three countries; the coverage rule lands on 2020.
+    expect(correlate(rows, 'SPEND', 'MORT').year).toBe(2021);
+    expect(correlate(rows, 'SPEND', 'MORT').n).toBe(3);
+    const year = pairCoverage(rows, 'SPEND', 'MORT').latestWellPaired;
+    expect(year).toBe(2020);
+    expect(correlate(rows, 'SPEND', 'MORT', year!).n).toBe(20);
+  });
+
+  it('excludes aggregates from both the universe and the per-year counts', () => {
+    const withAgg = [...rows, pair('SPEND', 'WLD', 2020, 1), pair('MORT', 'WLD', 2020, 1)];
+    const c = pairCoverage(withAgg, 'SPEND', 'MORT');
+    expect(c.universe).toBe(20);
+    expect(c.byYear.find((y) => y.year === 2020)!.n).toBe(20);
+  });
+
+  it('ignores a country that reports only one of the two', () => {
+    const half = [...rows, pair('SPEND', 'FRA', 2020, 500)];
+    expect(pairCoverage(half, 'SPEND', 'MORT').universe).toBe(20);
+  });
+
+  it('refuses rather than picking a year when none is well reported', () => {
+    // A wide universe smeared thin: all 20 countries report both series at some
+    // point, but never many in the same year — each files in its own year. No
+    // year clears the floor, so there is no honest choice and the caller must be
+    // told so rather than handed the least-bad one.
+    const smeared: DataRow[] = [];
+    ISO.forEach((iso3, i) => {
+      smeared.push(pair('SPEND', iso3, 2000 + i, 100), pair('MORT', iso3, 2000 + i, 50));
+    });
+    const c = pairCoverage(smeared, 'SPEND', 'MORT');
+    expect(c.universe).toBe(20);
+    expect(Math.max(...c.byYear.map((y) => y.n))).toBe(1); // never more than one at a time
+    expect(c.latestWellPaired).toBeNull();
+    // …whereas correlate, left to its default, would happily report on that
+    // single-country year rather than decline.
+    expect(correlate(smeared, 'SPEND', 'MORT').year).toBe(2019);
+  });
+
+  it('is empty, not undefined, when neither indicator is present', () => {
+    const c = pairCoverage(rows, 'NOPE', 'ALSO_NOPE');
+    expect(c.universe).toBe(0);
+    expect(c.byYear).toEqual([]);
+    expect(c.latestWellPaired).toBeNull();
+  });
+
+  it('never reports a yearly count above the universe', () => {
+    const c = pairCoverage(rows, 'SPEND', 'MORT');
+    for (const y of c.byYear) expect(y.n).toBeLessThanOrEqual(c.universe);
+  });
+
+  it('uses the same 60% floor as latestUsableYear', () => {
+    expect(JOINT_COVERAGE).toBe(0.6);
+    // 12 of 20 is exactly the floor and must clear it; 11 must not.
+    const at = (k: number) => {
+      const r = rows.filter((x) => x.year <= 2020);
+      for (const iso3 of ISO.slice(0, k)) r.push(pair('SPEND', iso3, 2022, 1), pair('MORT', iso3, 2022, 1));
+      return pairCoverage(r, 'SPEND', 'MORT').latestWellPaired;
+    };
+    expect(at(12)).toBe(2022);
+    expect(at(11)).toBe(2020);
   });
 });
