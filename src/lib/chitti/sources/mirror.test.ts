@@ -205,11 +205,11 @@ describe('the World Bank adapter prefers the snapshot', () => {
       default: { generated: '2026-07-27T00:00:00.000Z', indicators },
     }));
     globalThis.fetch = fetchImpl as typeof fetch;
-    // Entered through the REGISTRY, not by importing ./worldbank directly.
-    // tools.ts re-exports ./sources, so worldbank.ts sits in a pre-existing
-    // import loop that only resolves when the registry is the entry point —
-    // importing the adapter file first yields a half-initialised module.
-    return (await import('./index')).adapterById('worldbank')!;
+    // Imported DIRECTLY, on purpose. This used to enter through the registry
+    // because the adapter file could not be loaded first — see the standalone
+    // import test below for the bug that forced it and why routing around it
+    // was the wrong call.
+    return (await import('./worldbank')).worldbankAdapter;
   }
 
   it('answers from the snapshot without a request to the API', async () => {
@@ -260,5 +260,44 @@ describe('the World Bank adapter prefers the snapshot', () => {
     const r = await adapter.fetchSeries('SH.DYN.MORT', ['IND'], undefined, undefined);
     expect(hitLive).toBe(true);
     expect(r.rows).toHaveLength(1);
+  });
+});
+
+describe('every source module can be the entry point', () => {
+  // THE REGRESSION. tools.ts is a facade that re-exports ./sources, and the
+  // adapters used to import COUNTRIES/INDICATORS/ApiRejection back from it,
+  // closing the loop  adapter -> tools -> sources/index -> adapter. Because
+  // sources/index builds SOURCES at module scope, whichever module the loop was
+  // entered through decided whether that array saw a real adapter or undefined.
+  //
+  // Entering via tools.ts happened to work, so the app and the whole suite were
+  // green. Entering via an adapter file threw
+  // "Cannot read properties of undefined (reading 'usesSharedCatalog')".
+  //
+  // It surfaced first in this very file, and was worked around by importing
+  // through the registry instead of fixing it — after which the snapshot
+  // generator, whose entry point IS sources/worldbank.ts, failed on the runner
+  // with exactly that error. The shared reference tables now live in ../core,
+  // which imports nothing from the app, so there is no loop to enter wrongly.
+  const MODULES = ['./worldbank', './owid', './imf', './who', './mirror', './index'];
+
+  it.each(MODULES)('loads %s first without a half-initialised registry', async (mod) => {
+    vi.resetModules();
+    const m = await import(/* @vite-ignore */ mod);
+    expect(m).toBeTruthy();
+    // Loading the registry AFTER the adapter must still give four live adapters.
+    const { SOURCES } = await import('./index');
+    expect(SOURCES.map((s) => s.id)).toEqual(['worldbank', 'owid', 'imf', 'who']);
+    expect(SOURCES.every((s) => typeof s.usesSharedCatalog === 'boolean')).toBe(true);
+  });
+
+  it('keeps ../core free of any import back into the app', async () => {
+    // The property that makes the fix hold: core.ts may read data files and
+    // nothing else. An import from ./tools or ./sources here would rebuild the
+    // loop and this test is the only thing that would notice.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../core.ts', import.meta.url), 'utf8');
+    const imports = [...src.matchAll(/^import[^;]*from\s+'([^']+)'/gm)].map((m) => m[1]);
+    expect(imports.every((i) => i.includes('/data/'))).toBe(true);
   });
 });

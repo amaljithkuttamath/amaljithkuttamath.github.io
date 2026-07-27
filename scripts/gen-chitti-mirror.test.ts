@@ -4,7 +4,12 @@
 // a .ts reader), which is exactly the arrangement where a layout drifts and
 // every value silently shifts by a year. Only a round trip catches that.
 import { describe, it, expect } from 'vitest';
-import { toMirrorColumns, observedRange } from './gen-chitti-mirror.mjs';
+// The generator is plain .mjs, so its return types are untyped here.
+type Columns = Record<string, (number | null)[]>;
+import { toMirrorColumns as toMirrorColumnsRaw, observedRange } from './gen-chitti-mirror.mjs';
+const toMirrorColumns = toMirrorColumnsRaw as (
+  rows: DataRow[], yearStart: number, yearEnd: number
+) => Columns;
 import { parseMirrorFile, rowsFromMirror } from '../src/lib/chitti/sources/mirror';
 import type { DataRow } from '../src/lib/chitti/tools';
 

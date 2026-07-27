@@ -43,9 +43,11 @@ npm run mirror:refresh  # recapture the same-origin World Bank data snapshot (ne
 
 Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
 
-- **Data / source layer** — `sources/*` (World Bank, OWID, IMF, WHO adapters
-  behind one `SourceAdapter` interface), `scoring.ts`, `csv.ts`, `schemas.ts`,
-  `tools.ts` (facade + core types/citations).
+- **Data / source layer** — `core.ts` (the bottom: bundled reference tables,
+  `DataRow`/`ChartSpec`, `listCountries`, `ApiRejection` — imports nothing from
+  the app), `sources/*` (World Bank, OWID, IMF, WHO adapters behind one
+  `SourceAdapter` interface), `scoring.ts`, `csv.ts`, `schemas.ts`, `tools.ts`
+  (facade + citations).
 - **Agent layer** — `session.ts` (the loop: `ask`/`dispatch`/`routeFetch`/
   `runSubAgent`), `providers.ts` (the BYOK LLM client + retry/fallback),
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
@@ -149,6 +151,18 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   whole countries off the end of the alphabet. A 60-country batch across
   1960–2024 is 3,900 rows. If you touch that function, keep the page walk and
   its pacing.
+- **Adapters import from `core.ts`, never from `tools.ts`.** `tools.ts` is a
+  facade that re-exports `./sources`, so an adapter importing values back from
+  it closes the loop `adapter → tools → sources/index → adapter`. Because
+  `sources/index` builds `SOURCES` at module scope, the module you enter the
+  loop through decides whether that array holds a real adapter or `undefined` —
+  entering via `tools.ts` worked, so the app and the whole suite stayed green
+  while entering via an adapter file threw `Cannot read properties of undefined
+  (reading 'usesSharedCatalog')`. That is not hypothetical: it broke a test,
+  was worked around there instead of fixed, and then broke the snapshot
+  workflow on the runner, whose generator loads `sources/worldbank.ts` as its
+  entry point. `mirror.test.ts` now imports each source module first, in turn,
+  as the regression guard.
 - **Don't reintroduce cycles** in the module layering, and keep cross-module
   reassignable state on the exported `run` object in `ui/state.ts`.
 

@@ -2,59 +2,26 @@
 // function; the agent loop dispatches to them by name. All network access
 // is a direct browser fetch to the World Bank Open Data API (CORS: *).
 
-import countriesData from '../../data/worldbank/countries.json';
-import indicatorsData from '../../data/worldbank/indicators.json';
 
-export interface Country {
-  id: string; // ISO3
-  iso2: string;
-  name: string;
-  region: string;
-  income: string;
-}
+// The reference tables, core types, listCountries and ApiRejection now live in
+// ./core — the bottom of the layer, importing nothing from the app. They are
+// re-exported here so `import { COUNTRIES, DataRow, ApiRejection } from
+// './tools'` keeps working; the source adapters import them from ./core
+// directly, which is what keeps sources/ out of an import loop with this facade.
+import type { DataRow } from './core';
 
-export interface Indicator {
-  id: string;
-  name: string;
-  topic: string;
-}
-
-export interface DataRow {
-  country: string; // display name
-  iso3: string;
-  year: number;
-  value: number | null;
-  // Which indicator/dataset this row belongs to. Plain World Bank id
-  // (e.g. "SH.DYN.MORT"), or namespaced "owid:<slug>" / "imf:<id>".
-  // Lets execute_js and the analysis helpers separate rows when the
-  // session holds data from more than one fetch.
-  indicator?: string;
-}
-
-// Chart spec the agent builds and the renderer consumes.
-export interface ChartSpec {
-  type: 'line' | 'bar' | 'scatter' | 'grouped-bar';
-  title: string;
-  x_axis?: string;
-  y_axis?: string;
-  series: { name: string; data: [number | string, number][] }[];
-}
-
-export const COUNTRIES = countriesData as Country[];
-
-// Flatten the topic-keyed indicators file into a single searchable list.
-export const INDICATORS: Indicator[] = (() => {
-  const out: Indicator[] = [];
-  const raw = indicatorsData as Record<string, [string, string][]>;
-  for (const topic of Object.keys(raw)) {
-    for (const [id, name] of raw[topic]) {
-      out.push({ id, name, topic });
-    }
-  }
-  return out;
-})();
-
-export const TOPICS = Object.keys(indicatorsData as Record<string, unknown>);
+export {
+  COUNTRIES,
+  INDICATORS,
+  TOPICS,
+  listCountries,
+  ApiRejection,
+  type Country,
+  type Indicator,
+  type DataRow,
+  type ChartSpec,
+  type CountryFilter,
+} from './core';
 
 // ── Virtual filesystem ──────────────────────────────────────────────────
 // The VFS + its FileMeta provenance marker now live in ./vfs. Re-exported so
@@ -88,28 +55,8 @@ export { fetchWho, parseWhoIndicators } from './sources/who';
 // keeps working unchanged.
 export { explainMatch, scoreSeries, type MatchExplanation } from './scoring';
 
-export type CountryFilter = 'all' | 'oecd' | string;
 
 // A small OECD membership list (ISO3), enough for common comparisons.
-const OECD = new Set([
-  'AUS','AUT','BEL','CAN','CHL','COL','CRI','CZE','DNK','EST','FIN','FRA','DEU','GRC','HUN','ISL',
-  'IRL','ISR','ITA','JPN','KOR','LVA','LTU','LUX','MEX','NLD','NZL','NOR','POL','PRT','SVK','SVN',
-  'ESP','SWE','CHE','TUR','GBR','USA',
-]);
-
-export function listCountries(filter?: CountryFilter): Country[] {
-  if (!filter || filter === 'all') {
-    // Exclude aggregates by default so "list countries" means real countries.
-    return COUNTRIES.filter((c) => c.region !== 'Aggregates');
-  }
-  if (filter === 'oecd') return COUNTRIES.filter((c) => OECD.has(c.id));
-  const f = filter.toLowerCase();
-  // Match against region name (real countries) or aggregate name.
-  return COUNTRIES.filter(
-    (c) => c.region.toLowerCase().includes(f) || c.name.toLowerCase().includes(f)
-  );
-}
-
 // fetch_worldbank: the actual API call. Multi-country uses ';' separator
 // (the WB API rejects comma-separated ISO3 lists). Cap at ~60 countries
 // per call, matching the API's practical multi-country limit. Truncation
@@ -117,34 +64,6 @@ export function listCountries(filter?: CountryFilter): Country[] {
 // model has no other way to know its country_ids list was cut, and would
 // otherwise report findings over an incomplete country set with no signal
 // anything was missing.
-// A STRUCTURED rejection from a data API: the request reached the API and it
-// refused the given indicator/slug/code (a 200-with-error-body from the World
-// Bank; a 404 from OWID/IMF/WHO). This is DISTINCT from a network/CORS failure
-// (a plain Error), which never got an answer. The router (agent.ts routeFetch)
-// translates an ApiRejection into a specific, model-recoverable steer ("call
-// find_series"); a plain Error keeps its existing graceful-fallback wording, so
-// genuine network failures are left alone and only structured rejections steer.
-export class ApiRejection extends Error {
-  readonly source: 'worldbank' | 'owid' | 'imf' | 'who';
-  readonly indicatorId: string;
-  readonly status?: number;
-  // True when the id/parameter itself is what the API rejected (the World Bank
-  // "provided parameter value is not valid" shape; an OWID/IMF/WHO not-found).
-  readonly invalidParameter: boolean;
-  constructor(
-    source: ApiRejection['source'],
-    indicatorId: string,
-    opts: { message?: string; status?: number; invalidParameter?: boolean } = {}
-  ) {
-    super(opts.message || `${source} rejected "${indicatorId}"`);
-    this.name = 'ApiRejection';
-    this.source = source;
-    this.indicatorId = indicatorId;
-    this.status = opts.status;
-    this.invalidParameter = opts.invalidParameter ?? true;
-  }
-}
-
 // The CSV read/write helpers now live in ./csv. Imported for internal use by
 // the OWID fetcher below, and re-exported (rowsToCSV) at the module's CSV
 // section so `import { rowsToCSV } from './tools'` keeps working.

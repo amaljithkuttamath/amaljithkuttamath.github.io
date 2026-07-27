@@ -1,8 +1,8 @@
 // sources/imf.ts — the IMF DataMapper adapter. Holds the curated IMF code
 // catalog, the DataMapper JSON fetcher, and the live-catalog parser + fetch +
 // search, moved verbatim from tools.ts. Names/behavior unchanged.
-import type { DataRow } from '../tools';
-import { ApiRejection, COUNTRIES } from '../tools';
+import type { DataRow } from '../core';
+import { ApiRejection, COUNTRIES } from '../core';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
 import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';

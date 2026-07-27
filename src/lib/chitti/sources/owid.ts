@@ -1,8 +1,8 @@
 // sources/owid.ts — the Our World in Data adapter. Holds the OWID curated
 // grapher-slug catalog, the grapher-CSV fetcher, the live-catalog parser +
 // fetch + search, all moved verbatim from tools.ts. Names/behavior unchanged.
-import type { DataRow } from '../tools';
-import { ApiRejection } from '../tools';
+import type { DataRow } from '../core';
+import { ApiRejection } from '../core';
 import { parseCsvLine } from '../csv';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';

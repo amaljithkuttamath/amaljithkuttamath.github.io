@@ -8,7 +8,7 @@
 // types (plus the shared Dataset/SeriesHit/SearchReceipt/SourceDef shapes that
 // used to live in tools.ts), so the adapter files and index can import from it
 // without a cycle.
-import type { DataRow } from '../tools';
+import type { DataRow } from '../core';
 
 export interface Dataset {
   id: string; // namespaced: "owid:<slug>", "imf:<code>", or "who:<IndicatorCode>"

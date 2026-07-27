@@ -3,8 +3,8 @@
 // builder, the 200-with-error-body rejection parser, and the primary indicator
 // search (curated indicators.json + the live WB /indicator search API). All
 // moved verbatim from tools.ts; only imports/exports were adjusted.
-import type { DataRow, Indicator } from '../tools';
-import { ApiRejection, INDICATORS, listCountries } from '../tools';
+import type { DataRow, Indicator } from '../core';
+import { ApiRejection, INDICATORS, listCountries } from '../core';
 import { scoreSeries } from '../scoring';
 import type { SeriesHit, SourceAdapter, FetchSeriesResult } from './types';
 import { fetchWithTimeout, SEARCH_TIMEOUT_MS } from './net';

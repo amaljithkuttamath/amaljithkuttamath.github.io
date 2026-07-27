@@ -27,7 +27,7 @@
 // World Bank indicators are actually measured to (it survives the round trip
 // for every statistic the app computes) and it halves the file; the rounding is
 // recorded in each file's `precision` field rather than left implicit.
-import type { DataRow } from '../tools';
+import type { DataRow } from '../core';
 // The countries table is imported from the DATA FILE, not from ../tools, and
 // that is deliberate. tools.ts re-exports ./sources, so a value import from it
 // here would close the loop mirror → tools → sources/index → worldbank →
