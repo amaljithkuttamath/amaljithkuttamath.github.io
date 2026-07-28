@@ -2255,6 +2255,57 @@ describe('router validation + recovery (driven)', () => {
     expect(evs[1].detail).toBe('rejected again — stop retrying (unverified id)');
   });
 
+  it('after a WB rejection, blocks a different unverified guess but still permits a curated id', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    const seen = driveCapture([
+      modelTurn([
+        tc('fetch_series', { id: '["BADIND_A"]', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'a'),
+      ]),
+      modelTurn([
+        tc('fetch_series', { id: '["BADIND_B"]', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'b'),
+      ]),
+      modelTurn([
+        tc('fetch_series', { id: '["SH.DYN.MORT"]', countries: ['IND'], year_start: 2020, year_end: 2020 }, 'good'),
+      ]),
+      modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]),
+    ]);
+    const { cb, trace } = capture();
+    const out = await newSession(['worldbank']).ask('q', cb);
+
+    expect(urls.filter((u) => u.includes('BADIND')).length).toBe(1);
+    expect(urls.some((u) => u.includes('BADIND_B'))).toBe(false);
+    expect(seen.b).toMatch(/find_series/);
+    expect(urls.some((u) => u.includes('SH.DYN.MORT'))).toBe(true);
+    expect(out.rows.length).toBe(1);
+
+    const evs = trace().filter((e) => e.tool === 'fetch_series');
+    expect(evs.map((e) => e.status)).toEqual(['error', 'error', 'ok']);
+    expect(evs[2].detail).not.toContain('unverified id');
+  });
+
+  it('rejects a JSON-encoded multi-id call locally instead of sending it to World Bank', async () => {
+    const { fn, urls } = wbFetch();
+    vi.stubGlobal('fetch', fn);
+    const seen = driveCapture([
+      modelTurn([
+        tc(
+          'fetch_series',
+          { id: '["BADIND_A","SH.DYN.MORT"]', countries: ['IND'], year_start: 2020, year_end: 2020 },
+          'multi'
+        ),
+      ]),
+      modelTurn([tc('finish_explanation', { explanation: 'done' }, 'fe')]),
+    ]);
+    const { cb, trace } = capture();
+    await newSession(['worldbank']).ask('q', cb);
+
+    expect(urls.some((u) => u.includes('BADIND_A') || u.includes('SH.DYN.MORT'))).toBe(false);
+    expect(seen.multi).toMatch(/one id per call/i);
+    const ev = trace().find((e) => e.tool === 'fetch_series');
+    expect(ev?.detail).toBe('multiple ids');
+  });
+
   it('stops hammering a source the browser cannot reach, and steers to another database', async () => {
     // The incident this guards: the IMF DataMapper API is not reliably CORS-open
     // to browsers. A CORS block is a plain transport error, not a structured
@@ -3109,6 +3160,10 @@ describe('resolveFetchArgs — fetch argument-key synonyms', () => {
   it('yields an empty id when no id-like key is present (so routeFetch can steer, not loop)', () => {
     expect(resolveFetchArgs({ countries: ['IND'] }).id).toBe('');
     expect(resolveFetchArgs({}).id).toBe('');
+  });
+
+  it('unwraps the live failure shape: a single id encoded as a JSON array string', () => {
+    expect(resolveFetchArgs({ id: '["SH.DYN.MORT"]' }).id).toBe('SH.DYN.MORT');
   });
 });
 

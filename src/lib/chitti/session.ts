@@ -298,6 +298,14 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
   // tool-call budget re-fetching one bad id.
   const failedFetches = new Map<string, number>();
 
+  // Once an open-id source rejects an unverified id, require the model to use a
+  // curated id or one returned by find_series. Otherwise changing the guessed
+  // string would reset failedFetches and buy another network request each time.
+  // Keep the rejected ids too, so an exact retry gets the existing hard STOP
+  // steer without hitting the API a second time.
+  const sourcesRequiringVerifiedIds = new Set<string>();
+  const rejectedUnverifiedIds = new Set<string>();
+
   // Loop safety for TRANSPORT failures, keyed by SOURCE rather than by fetch key.
   // A structured rejection (above) is about one id, so it is counted per id. A
   // CORS block or a dead host is about the whole source: every id under it will
@@ -615,6 +623,20 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           'or any recent find_series result. Call find_series to get a valid id, then fetch_series with it.'
         );
       }
+      if (unverifiedWbId && sourcesRequiringVerifiedIds.has(source)) {
+        const rejectedIdKey = `${source}:${idLc}`;
+        if (rejectedUnverifiedIds.has(rejectedIdKey)) {
+          throw new FetchSteer(
+            buildRejectionSteer(source, id, 2),
+            'rejected again — stop retrying (unverified id)'
+          );
+        }
+        throw new FetchSteer(
+          `ERROR: ${adapter.sourceLabel} already rejected an unverified ${adapter.idLabel} this session. ` +
+            `Do NOT guess another id. Call find_series and pass one returned id verbatim. A curated id is also safe to use.`,
+          'unverified id blocked after rejection'
+        );
+      }
 
       // ── Country policy: DROP unresolvable tokens; never send junk to the API ─
       // Resolve loose country inputs ("UK", "Korea", "euro area") to WB
@@ -706,6 +728,10 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         if (err instanceof ApiRejection) {
           const attempt = (failedFetches.get(key) ?? 0) + 1;
           failedFetches.set(key, attempt);
+          if (unverifiedWbId) {
+            sourcesRequiringVerifiedIds.add(source);
+            rejectedUnverifiedIds.add(`${source}:${idLc}`);
+          }
           throw new FetchSteer(
             buildRejectionSteer(source, id, attempt),
             (attempt >= 2 ? 'rejected again — stop retrying' : 'API rejected id') +
@@ -838,7 +864,14 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // emits — without it a call keyed `indicator` left `id` undefined,
             // routed an EMPTY id into World Bank's open id-space, and looped on
             // "API rejected id" forever.
-            const { id, countries, ys, ye } = resolveFetchArgs(a);
+            const { id, multipleIds, countries, ys, ye } = resolveFetchArgs(a);
+            if (multipleIds) {
+              ev.detail = 'multiple ids';
+              result =
+                `ERROR: fetch_series accepts one id per call, but received ${multipleIds.length}. ` +
+                `Call fetch_series once for each id: ${multipleIds.map((candidate) => `"${candidate}"`).join(', ')}.`;
+              break;
+            }
             result = await routeFetch(ev, id, countries, ys, ye, sourceIds);
             break;
           }
@@ -1791,9 +1824,13 @@ function numOrUndef(v: unknown): number | undefined {
 // `series` / `code` and the range as `start_year`/`end_year` (OpenAI-style). A
 // mismatch left `id` undefined → an empty id routed into World Bank's open
 // id-space → an endless "API rejected id" loop. Accept the synonyms so the
-// intended call runs. A single country string is wrapped to a one-element array.
+// intended call runs. Weak models also sometimes JSON-encode a one-item id list
+// even though the schema requires one string. Unwrap that shape before routing
+// so a valid code such as SH.DYN.MORT is not sent as `["SH.DYN.MORT"]`.
+// A single country string is wrapped to a one-element array.
 export function resolveFetchArgs(a: Record<string, unknown>): {
   id: string;
+  multipleIds?: string[];
   countries: string[] | undefined;
   ys: number | undefined;
   ye: number | undefined;
@@ -1804,13 +1841,30 @@ export function resolveFetchArgs(a: Record<string, unknown>): {
   };
   const rawId = first('id', 'indicator', 'indicator_id', 'series', 'series_id', 'code', 'dataset_id', 'slug');
   const rawCountries = first('countries', 'country', 'country_ids', 'countryIds', 'iso3', 'countries_iso3');
+  let id = String(rawId ?? '').trim();
+  let parsedIds: string[] | undefined;
+  if (Array.isArray(rawId)) {
+    parsedIds = rawId.map((candidate) => String(candidate ?? '').trim()).filter(Boolean);
+  } else if (id.startsWith('[') && id.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(id);
+      if (Array.isArray(parsed)) {
+        parsedIds = parsed.map((candidate) => String(candidate ?? '').trim()).filter(Boolean);
+      }
+    } catch {
+      // Not valid JSON, so leave the original value for the normal id guard.
+    }
+  }
+  const multipleIds = parsedIds && parsedIds.length > 1 ? parsedIds : undefined;
+  if (parsedIds?.length === 1) id = parsedIds[0];
   const countries = Array.isArray(rawCountries)
     ? (rawCountries as unknown[]).map((c) => String(c))
     : typeof rawCountries === 'string' && rawCountries.trim()
       ? [rawCountries]
       : undefined;
   return {
-    id: String(rawId ?? '').trim(),
+    id,
+    ...(multipleIds ? { multipleIds } : {}),
     countries,
     ys: numOrUndef(first('year_start', 'start_year', 'startYear', 'from', 'start')),
     ye: numOrUndef(first('year_end', 'end_year', 'endYear', 'to', 'end')),
@@ -1951,4 +2005,3 @@ function summarizeArgs(tool: string, a: Record<string, unknown>): string {
       return '';
   }
 }
-
