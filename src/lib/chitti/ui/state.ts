@@ -93,6 +93,14 @@ export const dashViewBody = $('ch-dashview-body');
 export const dashViewStatus = $('ch-dashview-status');
 export const dashImportFile = $('ch-dash-import-file') as HTMLInputElement;
 
+// ── Evals sidebar elements ────────────────────────────────────────────
+// Null-checked by every reader, like the demos elements: these modules are
+// reused by test harnesses and by pages that ship no evals markup.
+export const evalsNavBtn = $('ch-evals-nav') as HTMLButtonElement | null;
+export const evalsPanel = $('ch-evals') as HTMLElement | null;
+export const evalsBody = $('ch-evals-body') as HTMLElement | null;
+export const evalsBackdrop = $('ch-evals-backdrop') as HTMLElement | null;
+
 // Curated indicator id → friendly name, for citations.
 export const INDICATOR_MAP: Record<string, string> = JSON.parse(
   ($('ch-indicator-map') as HTMLScriptElement).textContent || '{}'

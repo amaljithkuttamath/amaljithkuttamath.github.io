@@ -58,7 +58,7 @@
   } from '../a11y';
   import { $, q, formatTs, formatTokens, formatBytes, fileExt, cssVar, escapeHtml, prefersReducedMotion, esc, inlineMd, mdToHtml, fmtShareDate, fmtRange, fmtFetchedAt, fmtDate } from './dom';
   import { buildOption } from './chart-option';
-  import { run, SESSION_KEY, SESSION_PROVIDER, providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty, keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta, byokMore, byokSettings, consoleEl, askForm, qIn, chips, composerForm, composerQ, askBtn, newConvoBtn, threadEl, turnTemplate, sourcesBox, sourcesHint, sourcesCount, sourcesSearch, sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, dashNavBtn, dashNavCount, pinDialog, pinBackdrop, pinCloseBtn, pinListEl, pinNewForm, pinNameInput, pinStatusEl, dashView, dashViewBack, dashViewTitle, dashViewBody, dashViewStatus, dashImportFile, INDICATOR_MAP, liveChartTurns, liveDashCharts, allTurns, dashStore } from './state';
+  import { run, SESSION_KEY, SESSION_PROVIDER, providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty, keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta, byokMore, byokSettings, consoleEl, askForm, qIn, chips, composerForm, composerQ, askBtn, newConvoBtn, threadEl, turnTemplate, sourcesBox, sourcesHint, sourcesCount, sourcesSearch, sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, dashNavBtn, dashNavCount, pinDialog, pinBackdrop, pinCloseBtn, pinListEl, pinNewForm, pinNameInput, pinStatusEl, dashView, dashViewBack, dashViewTitle, dashViewBody, dashViewStatus, dashImportFile, evalsNavBtn, evalsPanel, evalsBackdrop, INDICATOR_MAP, liveChartTurns, liveDashCharts, allTurns, dashStore } from './state';
   import type { TurnBlock } from './state';
   import { renderTrace, renderFiles } from './trace';
   import { createTurnBlock, setStatus, renderQuestion } from './turns';
@@ -78,6 +78,7 @@
   } from './config';
   import { resetNewQuestionChip, handleNewConvoClick, maybeDisarmOnClick, handleAskSubmit } from './composer';
   import { renderDemos } from './demos-view';
+  import { toggleEvals, closeEvals, handleEvalsClick, handleEvalsKeydown } from './evals-view';
   import { installDebugSeam } from './debug-seam';
 
 
@@ -294,6 +295,14 @@
   });
 
   updateDashNavCount();
+
+  // ── Evals sidebar ──────────────────────────────────────────────────────
+  // One delegated click listener on the panel: its body is re-rendered on every
+  // result, so per-button listeners would be re-attached (or lost) constantly.
+  evalsNavBtn?.addEventListener('click', () => toggleEvals());
+  evalsPanel?.addEventListener('click', handleEvalsClick);
+  evalsPanel?.addEventListener('keydown', handleEvalsKeydown);
+  evalsBackdrop?.addEventListener('click', () => closeEvals());
 
 
   // ── Run ────────────────────────────────────────────────────────────────

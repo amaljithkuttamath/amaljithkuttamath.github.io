@@ -19,6 +19,8 @@ import { renderChart } from './charts';
 import { renderTable, renderCitations, renderFinding, renderVerification, renderRunningTotal } from './evidence';
 import { syncDashboardsAfterTurn } from './dashboards-view';
 import { renderChartUnavailable } from './restore';
+import { parseEvalCommand } from '../evals';
+import { openEvals, runEvals, setEvalMode } from './evals-view';
 
 // ── "+ new question" (non-destructive two-step reset) ────────────────────
 // The reset is genuinely destructive: it wipes the whole thread AND unlocks
@@ -268,6 +270,21 @@ export async function handleAskSubmit(e: SubmitEvent) {
   if (run.running) return;
   const question = qIn.value.trim() || (qIn.placeholder || '').trim();
   if (!question) return;
+
+  // "/evals" — the one command the composer answers itself. Checked first
+  // because it is not a question and must not start a turn, cost a key or
+  // touch the thread. parseEvalCommand only matches a slash-prefixed form and
+  // returns null for anything it does not recognise, so a real question can
+  // never be swallowed here (evals.ts).
+  const cmd = parseEvalCommand(question);
+  if (cmd) {
+    qIn.value = '';
+    composerQ.value = '';
+    setEvalMode(cmd.mode);
+    openEvals();
+    if (cmd.run) void runEvals();
+    return;
+  }
 
   // Before anything else — including the key gate. A question the deterministic
   // pipeline can answer costs no key, no model call and no money, so it must

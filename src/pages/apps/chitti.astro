@@ -80,6 +80,12 @@ const PRESETS = [
           <span>Dashboards</span>
           <span class="ch-dash-nav-count" id="ch-dash-nav-count" hidden></span>
         </button>
+        <!-- Evals entry point: opens the eval sidebar. Also reachable from the
+             composer with "/evals" — same panel, same run. -->
+        <button type="button" class="ch-dash-nav" id="ch-evals-nav" aria-label="Open evals" aria-expanded="false" aria-controls="ch-evals">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+          <span>Evals</span>
+        </button>
       </div>
       <p class="ch-subtitle">Real answers about the world, charted and cited.</p>
     </header>
@@ -453,6 +459,22 @@ const PRESETS = [
       <input type="file" id="ch-dash-import-file" accept="application/json,.json" hidden />
       <div class="ch-dashview-body" id="ch-dashview-body"></div>
     </section>
+
+    <!-- ── Evals sidebar ────────────────────────────────────────────────────
+         A right-hand drawer, not a turn: an eval run is not an answer, and
+         rendering eleven of them into the thread would bury the user's actual
+         conversation. Everything inside #ch-evals-body is built by
+         ui/evals-view.ts, so its styles need :global(). The backdrop only
+         darkens on narrow screens, where the drawer covers the page. -->
+    <div class="ch-evals-backdrop" id="ch-evals-backdrop" hidden></div>
+    <aside class="ch-evals" id="ch-evals" hidden aria-labelledby="ch-evals-title">
+      <div class="ch-evals-head">
+        <h2 class="ch-evals-title" id="ch-evals-title">Evals</h2>
+        <span class="ch-evals-sub">does a question still get the right answer?</span>
+        <button type="button" class="ch-evals-close" id="ch-evals-close" aria-label="Close evals">✕</button>
+      </div>
+      <div class="ch-evals-body" id="ch-evals-body"></div>
+    </aside>
 
   </div>
 
@@ -2887,5 +2909,158 @@ const PRESETS = [
     :global(.ch-dash-tile-chart) { height: 260px; }
     :global(.ch-dash-tile-head) { flex-direction: column; }
     .ch-pin-new-row { flex-direction: column; }
+  }
+
+  /* ── Evals sidebar ──────────────────────────────────────────────────────
+     A drawer pinned to the right edge, above the app but below the modal
+     dialogs (z-index 30 is the dashboards overlay; this sits at 28 so opening
+     a dashboard still covers it). Everything under .ch-evals-body is built in
+     JS, so those rules need :global() — the same arrangement the dashboards
+     view uses. */
+  .ch-evals {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    z-index: 28;
+    width: min(420px, 100vw);
+    display: flex;
+    flex-direction: column;
+    background: color-mix(in srgb, var(--fg) 4%, var(--bg));
+    border-left: 1px solid var(--fg-faint);
+    box-shadow: -8px 0 24px color-mix(in srgb, var(--fg) 8%, transparent);
+    overflow: hidden;
+  }
+  /* `display: flex` outranks the UA's `[hidden] { display: none }`, so without
+     this the CLOSED drawer stays laid out — invisible, but still on top of the
+     right-hand third of the app, swallowing every click that lands there
+     (including the button that opens it). Any rule that sets `display` on a
+     hidden-attribute element needs this line. */
+  .ch-evals[hidden] { display: none; }
+  /* Desktop has NO backdrop at all. The drawer squeezes the app rather than
+     covering it, so the app stays live behind it — and a full-screen
+     transparent backdrop would silently eat every click on the page it just
+     made room for. It only exists (and only darkens) on narrow screens, where
+     the drawer really is modal. Escape and the ✕ close it in both cases. */
+  .ch-evals-backdrop { display: none; }
+  /* On a wide screen the drawer SQUEEZES the app rather than covering it: the
+     header's own buttons (Dashboards, Evals) live in the top-right corner the
+     drawer would otherwise sit on top of, and a panel that hides the control
+     that opened it is a trap. The page column is centred inside the body, so
+     padding the body shifts it left by exactly the drawer's width. Below 900px
+     the drawer is full-width and modal, so there is nothing to squeeze. */
+  @media (min-width: 901px) {
+    :global(body.ch-evals-open) { padding-right: min(420px, 100vw); }
+  }
+  .ch-evals-head {
+    display: flex; align-items: baseline; gap: var(--space-sm);
+    padding: var(--space-md) var(--space-md) var(--space-sm);
+    border-bottom: 1px solid var(--fg-faint);
+  }
+  .ch-evals-title { font-size: var(--text-subsection, 1.05rem); font-weight: 600; margin: 0; color: var(--fg); }
+  .ch-evals-sub { font-family: var(--font-mono); font-size: var(--text-tag); color: var(--ch-meta); flex: 1; }
+  .ch-evals-close {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--ch-meta); font-size: var(--text-tag); padding: 2px 6px; border-radius: var(--radius-full);
+  }
+  .ch-evals-close:hover { color: var(--fg); background: var(--bg-hover); }
+  .ch-evals-body {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: var(--space-md) var(--space-md) calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Controls */
+  :global(.ch-evals-controls) { display: flex; flex-direction: column; gap: 8px; margin-bottom: var(--space-md); }
+  :global(.ch-evals-modes) { display: flex; gap: 6px; }
+  :global(.ch-evals-mode) {
+    flex: 1; text-align: left; cursor: pointer;
+    font-family: var(--font-mono); font-size: var(--text-tag);
+    color: var(--ch-meta); background: transparent;
+    border: 1px solid var(--fg-faint); border-radius: 8px; padding: 7px 9px;
+  }
+  :global(.ch-evals-mode.is-on) { color: var(--fg); border-color: color-mix(in srgb, var(--signal) 60%, transparent); background: color-mix(in srgb, var(--signal) 8%, transparent); }
+  :global(.ch-evals-mode:disabled) { cursor: not-allowed; opacity: 0.55; }
+  :global(.ch-evals-mode-sub) { display: block; font-size: 0.72rem; color: var(--ch-meta); margin-top: 2px; }
+  :global(.ch-evals-actions) { display: flex; align-items: center; gap: 10px; }
+  :global(.ch-evals-run) {
+    font-family: var(--font-mono); font-size: var(--text-tag); cursor: pointer;
+    color: var(--bg); background: var(--fg); border: none;
+    border-radius: var(--radius-full); padding: 6px 16px;
+  }
+  :global(.ch-evals-run:hover) { opacity: 0.9; }
+  :global(.ch-evals-status) { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ch-meta); flex: 1; }
+  :global(.ch-evals-status.is-ok) { color: color-mix(in srgb, var(--success) 78%, var(--fg)); }
+  :global(.ch-evals-status.is-error) { color: var(--ch-danger); }
+
+  /* Sections */
+  :global(.ch-evals-sec) { margin-bottom: var(--space-lg); }
+  :global(.ch-evals-h) {
+    font-family: var(--font-mono); font-size: var(--text-tag); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg); margin: 0 0 4px;
+  }
+  :global(.ch-evals-count) { color: var(--ch-meta); text-transform: none; letter-spacing: 0; }
+  :global(.ch-evals-lead), :global(.ch-evals-empty) { font-size: 0.78rem; color: var(--ch-meta); margin: 0 0 10px; line-height: 1.45; }
+
+  /* Funnel */
+  :global(.ch-evals-funnel) { display: flex; flex-direction: column; gap: 9px; }
+  :global(.ch-evals-frow) { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--font-mono); font-size: 0.72rem; }
+  :global(.ch-evals-fname) { color: var(--fg); }
+  :global(.ch-evals-fcount) { color: var(--ch-meta); }
+  :global(.ch-evals-flost) { color: var(--ch-danger); }
+  :global(.ch-evals-fbar) { height: 7px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--fg) 8%, transparent); overflow: hidden; margin-top: 3px; }
+  :global(.ch-evals-ffill) { display: block; height: 100%; background: color-mix(in srgb, var(--success) 72%, var(--fg-faint)); }
+  :global(.ch-evals-fhint) { font-size: 0.7rem; color: var(--ch-meta); margin: 3px 0 0; }
+  :global(.ch-evals-refusals) { font-size: 0.76rem; color: var(--ch-meta); margin: 12px 0 0; line-height: 1.45; }
+
+  /* Cases */
+  :global(.ch-evals-cases) { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  :global(.ch-evals-case) { border: 1px solid var(--fg-faint); border-radius: 8px; padding: 8px 9px; }
+  :global(.ch-evals-case.is-fail) { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  :global(.ch-evals-case.is-pass) { border-color: color-mix(in srgb, var(--success) 35%, transparent); }
+  :global(.ch-evals-case.is-pending) { opacity: 0.6; }
+  :global(.ch-evals-case-head) { display: flex; gap: 7px; align-items: baseline; }
+  :global(.ch-evals-case-route) {
+    font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--ch-meta); border: 1px solid var(--fg-faint); border-radius: var(--radius-full); padding: 0 5px;
+  }
+  :global(.ch-evals-case-q) { flex: 1; font-size: 0.79rem; color: var(--fg); line-height: 1.35; }
+  :global(.ch-evals-case-verdict) { font-family: var(--font-mono); font-size: 0.68rem; color: var(--ch-meta); }
+  :global(.ch-evals-case.is-pass .ch-evals-case-verdict) { color: color-mix(in srgb, var(--success) 78%, var(--fg)); }
+  :global(.ch-evals-case.is-fail .ch-evals-case-verdict) { color: var(--ch-danger); }
+  :global(.ch-evals-pips) { display: flex; gap: 3px; margin-top: 6px; }
+  :global(.ch-evals-pip) { width: 14px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--fg) 12%, transparent); }
+  :global(.ch-evals-pip.is-pass) { background: color-mix(in srgb, var(--success) 75%, transparent); }
+  :global(.ch-evals-pip.is-fail) { background: color-mix(in srgb, var(--danger) 70%, transparent); }
+  :global(.ch-evals-case-note) { font-family: var(--font-mono); font-size: 0.7rem; color: var(--ch-meta); margin: 6px 0 0; line-height: 1.4; }
+  :global(.ch-evals-case-note.is-fail) { color: var(--ch-danger); }
+  :global(.ch-evals-case-why) { font-size: 0.73rem; color: var(--ch-meta); margin: 4px 0 0; line-height: 1.45; }
+
+  /* History */
+  :global(.ch-evals-hlist) { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  :global(.ch-evals-hrun) { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--ch-meta); }
+  :global(.ch-evals-hdate) { width: 92px; flex: none; }
+  :global(.ch-evals-hbar) { flex: 1; height: 5px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--fg) 8%, transparent); overflow: hidden; }
+  :global(.ch-evals-hfill) { display: block; height: 100%; background: color-mix(in srgb, var(--success) 70%, var(--fg-faint)); }
+  :global(.ch-evals-hnum) { width: 34px; flex: none; text-align: right; color: var(--fg); }
+  :global(.ch-evals-hmode) { width: 74px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :global(.ch-evals-hcost) { width: 56px; flex: none; text-align: right; }
+  :global(.ch-evals-exports) { display: flex; gap: 6px; flex-wrap: wrap; }
+  :global(.ch-evals-x) {
+    font-family: var(--font-mono); font-size: 0.7rem; cursor: pointer;
+    color: var(--ch-meta); background: transparent;
+    border: 1px solid var(--fg-faint); border-radius: var(--radius-full); padding: 4px 10px;
+  }
+  :global(.ch-evals-x:hover:not(:disabled)) { color: var(--fg); background: var(--bg-hover); }
+  :global(.ch-evals-x:disabled) { opacity: 0.45; cursor: not-allowed; }
+  :global(.ch-evals-x.is-danger:hover:not(:disabled)) { color: var(--ch-danger); }
+  :global(.ch-evals-foot) { font-size: 0.72rem; color: var(--ch-meta); line-height: 1.45; margin: 0; border-top: 1px solid var(--fg-faint); padding-top: 10px; }
+
+  @media (max-width: 900px) {
+    .ch-evals { width: 100vw; }
+    /* Full-width drawer: now it really is covering the page, so the backdrop
+       earns its existence and its darkening. */
+    .ch-evals-backdrop:not([hidden]) {
+      display: block;
+      position: fixed; inset: 0; z-index: 27;
+      background: color-mix(in srgb, var(--bg) 70%, transparent);
+    }
   }
 </style>

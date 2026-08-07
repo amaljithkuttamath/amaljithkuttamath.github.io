@@ -53,6 +53,8 @@ the 472 tests pass unmodified. See the **UI layer** section below.
 | `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`ui/actions.ts`). |
 | `abort.ts` | `AbortedError` — the user-cancel sentinel (loop + refresh pipeline). |
 | `dashboards-agent.ts` | Agent-side dashboard glue: `resolveTileRef`, the session-less refresh pipeline (`refreshDashboard`/`refreshTile`/`refetchCitation`), `buildCitation`, `indicatorName`, `defaultDashboardTitle`. |
+| `evals.ts` | The in-app eval suite: cases, the six-stage grader (`gradeCase`), the funnel (`funnel`/`summarize`), the `localStorage` history, the Markdown export, and `parseEvalCommand` (the composer's `/evals`). Pure — imports no runtime value from the app. |
+| `evals-run.ts` | The eval runner: `makeDirectRunner` (the real fast path), `runEvalCase`/`runEvalSuite`, and `observe`. Both runners are injected, so the agent never enters this module and the runner is testable offline. |
 | `session.ts` | **The session core**: `createSession` + its per-turn closures (`ask`/`agentPass`/`dispatch`/`routeFetch`/`runSubAgent`/`makeLlm`/`runPlan`/`runVerify`), session state, session types (`ChittiSession`/`SessionOptions`/`AgentCallbacks`/`AgentOutput`), `runAgent`, `buildRejectionSteer`. |
 | `agent.ts` | **Facade** — re-exports `./session` + every split-out module. |
 
@@ -81,6 +83,7 @@ run in the browser only; the lib layers above are shared with the test suite.
 | `ui/restore.ts` | Restore-on-load: `#share=` answer and `#dash=` dashboard fragments + their invalid-link error states, driving the app's own render path. |
 | `ui/composer.ts` | The run flow: `handleAskSubmit` (turn creation → `session.ask` streaming → stop control → terminal-state rendering) and the "+ new question" two-step reset. Owns the `newQuestion*` state. |
 | `ui/debug-seam.ts` | `installDebugSeam()` — the `?chittidebug` `__chittiDebug` test seam (render/dashboard/stop hooks). Render helpers only; screenshot harnesses depend on it. |
+| `ui/evals-view.ts` | The Evals sidebar: run controls, the live funnel, per-case stage pips, run history, Copy Markdown / Export JSON. Owns its private state (`mode`/`controller`/`live`/`history`); the agent runner it builds creates a FRESH session per case. |
 | `ui/boot.ts` | **The bootstrap**: imports the modules, registers every top-level DOM event listener (config sheet, provider/model, sources, dash nav, composer, new-question), runs the init sequence (`maybeRestoreFromFragment`, `updateDashNavCount`, `installDebugSeam`), in the same order the monolith did. No render/agent logic of its own. |
 
 ## UI layering (bottom → top), and no cycles
@@ -89,8 +92,9 @@ run in the browser only; the lib layers above are shared with the test suite.
 state.ts (els + TurnBlock + run + registries)   dom.ts   chart-option.ts
   trace · actions · charts · config · evidence
     turns · dashboards-view
-      restore · composer
-        debug-seam
+      restore · evals-view
+        composer
+          debug-seam
           boot.ts   (wiring + init only)
 ```
 
@@ -152,8 +156,8 @@ JSON data · providers · countries · codec
                                           from tools ONLY inside functions)
         sources/index         (registry + generic search/routing)
           tools.ts            (facade + remaining core types/consts/helpers)
-    receipts · prompts · planner · verifier · spec · abort
-      dashboards-agent
+    receipts · prompts · planner · verifier · spec · abort · evals
+      dashboards-agent · evals-run
         session.ts            (createSession + closures)
           agent.ts            (facade)
 ```

@@ -163,6 +163,21 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   workflow on the runner, whose generator loads `sources/worldbank.ts` as its
   entry point. `mirror.test.ts` now imports each source module first, in turn,
   as the regression guard.
+- **The eval suite asserts behaviour, never a number.** `evals.ts` holds the
+  in-app suite (run from the header's Evals button or `/evals run` in the
+  composer); it drives real questions through the real pipeline and grades each
+  one across six stages — routed → resolved → fetched → charted → cited →
+  correct — so a failure names the layer that broke rather than just the case.
+  A case may assert which series answers a question, which countries come back,
+  and a row floor; **never a value**, for the same reason the demos file is
+  generated and not authored. Expected ids are a LIST, because more than one
+  source can legitimately hold a series. Roughly a third of the cases are
+  questions the fast path must REFUSE — an over-fire is a failure, not a win —
+  and "not run" (an agent case with no key) is never counted as a pass. Run it
+  before and after touching retrieval (`kb.ts`, `scoring.ts`, a KB refresh), the
+  fast path's gates, `normalizeSpec`, or a source adapter, and paste the copied
+  Markdown into the PR. It needs the network and a key, so it is **not** a CI
+  gate. Full design: `docs/superpowers/specs/2026-08-07-chitti-evals-funnel.md`.
 - **The layering is asserted, not just described.** `layering.test.ts` walks the
   real import graph and fails on any runtime cycle (type-only imports are erased
   and don't count). It exists because "kept acyclic" was written in two docs
