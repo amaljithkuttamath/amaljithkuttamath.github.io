@@ -1,0 +1,353 @@
+---
+import Base from '../../layouts/Base.astro';
+
+// The ten rubric dimensions, transcribed from ai-radar's evals/rubric.md. `computed: true`
+// marks the two that never reach a model — they are the point of the piece, so they carry a
+// visual distinction rather than a footnote.
+const quality = [
+  { dim: 'A1', name: 'signal_density', measures: 'Non-obvious insight per paragraph; no filler.', anchor: '5 = every line earns its space. 1 = restated abstracts.' },
+  { dim: 'A2', name: 'source_integrity', measures: 'Primary sources over aggregators; no broken links.', anchor: 'Capped at 2 by any broken URL. 5 = every claim links to a primary source.', computed: true },
+  { dim: 'A3', name: 'focus_alignment', measures: 'Fits my topics without becoming an echo chamber.', anchor: '5 = strong fit plus one adjacent surprise. 1 = drift.' },
+  { dim: 'A4', name: 'delta_clarity', measures: '"What changed" is a real diff, not a restatement.', anchor: '5 = explicit new/climbing/cooled with reasons. 1 = the same items relisted.' },
+  { dim: 'A5', name: 'coverage', measures: 'Inverse of important stories it missed.', anchor: '0 missed = 5. 4 or more = 1.' },
+];
+
+const experience = [
+  { dim: 'X1', name: 'board_legibility', measures: 'A cold reader finds the top story in under ten seconds.', anchor: '5 = the top row is unambiguously the story of the day.' },
+  { dim: 'X2', name: 'instrument_honesty', measures: 'Machine opinion is labelled as such; observed signals dominate.', anchor: '5 = attribution and real numbers dominate. 1 = a brief presented as fact.' },
+  { dim: 'X3', name: 'freshness', measures: 'Hours between publication and grading.', anchor: 'Under 6h = 5. 6–12 = 4. 12–24 = 3. 24–36 = 2. Over 36 = 1.', computed: true },
+  { dim: 'X4', name: 'failure_surface', measures: 'One dead feed does not take the digest with it.', anchor: '5 = isolated failures, quiet-window fallback works. 1 = one failure cascades.' },
+  { dim: 'X5', name: 'coupling', measures: 'Collect, distill and render stay independently regenerable.', anchor: '5 = strict boundaries. 1 = imports cross them.' },
+];
+
+const REPO = 'https://github.com/amaljithkuttamath/ai-radar';
+---
+
+<Base
+  title="How the radar grades itself"
+  description="A daily AI newsletter that scores its own output against a fixed rubric — and the three rules that decide whether that score means anything."
+>
+  <section class="page-header animate-in">
+    <h1>How the radar grades itself</h1>
+    <p class="subtitle">
+      Every morning something reads yesterday's digest and gives it ten scores out of five.
+      Here is why that number is worth anything — and the month it wasn't.
+    </p>
+  </section>
+
+  <article class="prose animate-in animate-in-delay-1">
+    <p>
+      <a href="/radar">The radar</a> publishes a digest of AI research and releases every day.
+      It is assembled by a model, which means the interesting question is not whether it runs
+      but whether it is any good — and "is it good" is exactly the question the thing producing
+      it cannot answer about itself.
+    </p>
+
+    <p>
+      So a second process grades the first. It reads the day's digest, checks every link,
+      scores ten dimensions against a fixed rubric, and commits the result as JSON alongside
+      the digest it judged. Over time those files are a trend line, and a trend line is the
+      only thing that distinguishes "today was thin" from "this has been getting worse for
+      three weeks."
+    </p>
+
+    <p>
+      Getting a model to emit ten numbers is trivial. Getting ten numbers that mean something
+      is the whole problem, and it comes down to three rules.
+    </p>
+
+    <h2>Rule one: the grader must not share a family with the writer</h2>
+
+    <p>
+      A model evaluating output from its own family self-enhances — it scores that output
+      roughly 10–25% higher than a neutral judge would. Point a model at its own work and it
+      will tell you the work is good.
+    </p>
+
+    <p>
+      What makes this dangerous is not the inflation. It is that the failure is
+      <em>invisible by construction</em>. The scores stay green, the trend line stays flat and
+      healthy, and the digest quietly degrades underneath. The instrument and the subject agree,
+      so there is no disagreement anywhere for you to notice. You would find out from a reader,
+      months late, or never.
+    </p>
+
+    <p>
+      The rule was written down early. It sat in the contract, in bold, as a paragraph a
+      language model was asked to honour. That is not a control — it is a suggestion with good
+      formatting. It is now a fence: the grader resolves its own model family and the writer's,
+      compares them, and refuses to run if they match. It also refuses a model id it does not
+      recognise, rather than assuming an unfamiliar name is safe. A gate that opens when it is
+      confused is not a gate, and a new provider appearing is precisely the moment a stale
+      allowlist would wave a violation through.
+    </p>
+
+    <h2>Rule two: anything checkable gets checked, not judged</h2>
+
+    <p>
+      Two of the ten dimensions never reach the model at all.
+    </p>
+
+    <p>
+      <strong>Freshness (X3)</strong> is arithmetic. It is the number of hours between the
+      digest's publication and the moment it was graded, mapped through fixed anchors. There is
+      no judgement in it, so no model gets to be generous about it. The publication time comes
+      from the git commit, not from any date inside the file — a pipeline that dies mid-write,
+      or writes a stale-but-well-formed digest, leaves its own header looking perfectly current.
+      Git's clock is the one clock the pipeline does not author.
+    </p>
+
+    <p>
+      <strong>Source integrity (A2)</strong> has a hard ceiling. Every link in the digest is
+      requested before the model sees anything; if one is genuinely dead, A2 is capped at 2
+      regardless of what the judge thought of the sourcing. A model cannot observe an HTTP
+      status. Ask it to, and it will produce a plausible one. So the one quality dimension with
+      a falsifiable answer is decided by the answer, not by a reading of it.
+    </p>
+
+    <p>
+      There is a nuance worth stating, because it is the difference between a signal and noise:
+      a link that is <em>unreachable from the grading machine</em> does not cap anything. A
+      proxy, a network policy, a local outage — those are facts about the grader, not the
+      digest, and punishing yesterday's writing for today's connectivity puts pure noise into a
+      trend line you are meant to read over months.
+    </p>
+
+    <div class="rubric animate-in animate-in-delay-2">
+      <div class="rubric-axis">
+        <h3 class="axis-head">Axis A — answer quality</h3>
+        <p class="axis-sub">The digest itself.</p>
+        {quality.map((d) => (
+          <div class={`dim${d.computed ? ' dim-computed' : ''}`}>
+            <div class="dim-head">
+              <span class="mono dim-id">{d.dim}</span>
+              <span class="mono dim-name">{d.name}</span>
+              {d.computed && <span class="dim-badge">not judged</span>}
+            </div>
+            <p class="dim-measures">{d.measures}</p>
+            <p class="dim-anchor">{d.anchor}</p>
+          </div>
+        ))}
+      </div>
+
+      <div class="rubric-axis">
+        <h3 class="axis-head">Axis X — experience &amp; architecture</h3>
+        <p class="axis-sub">How it reaches the reader.</p>
+        {experience.map((d) => (
+          <div class={`dim${d.computed ? ' dim-computed' : ''}`}>
+            <div class="dim-head">
+              <span class="mono dim-id">{d.dim}</span>
+              <span class="mono dim-name">{d.name}</span>
+              {d.computed && <span class="dim-badge">not judged</span>}
+            </div>
+            <p class="dim-measures">{d.measures}</p>
+            <p class="dim-anchor">{d.anchor}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <p class="rubric-note">
+      Each axis averages to an overall; the two averages average again. Every score carries a
+      one-sentence justification that must cite a specific item, URL or line. A score without
+      evidence is treated as a bug, not a score — the number is not the artefact, the paper
+      trail is.
+    </p>
+
+    <h2>Rule three: the critic runs outside the thing it criticises</h2>
+
+    <p>
+      The grader does not run in the pipeline's CI. If it did, a bug bad enough to break the
+      digest could take its critic down in the same breath — and the failure mode that actually
+      worries me is subtler: a change that degrades the output <em>and</em> suppresses the
+      complaint about it. A critic sharing a runtime with its subject can be silenced by its
+      subject.
+    </p>
+
+    <p>
+      So it runs on its own schedule, with its own credential, on a model from a different
+      family, triggered from somewhere else entirely. Time-based, not chained to the pipeline:
+      if the digest never appears, that produces a bad freshness score or an escalation, which
+      is exactly the signal you want. A grader that only runs when the pipeline succeeds can
+      never tell you the pipeline stopped.
+    </p>
+
+    <h2>What it does with a bad score</h2>
+
+    <p>
+      Scores that nobody acts on are decoration. Three conditions open a GitHub issue: any
+      dimension at 2 or below, any genuinely broken URL, or the same dimension sitting at 3 or
+      below for three consecutive days. That last one matters most — it catches the slow
+      decline that no single day would flag, which is the failure a daily eye is worst at
+      seeing.
+    </p>
+
+    <p>
+      Every run also appends an improvement item tied to the lowest-scoring dimension of the
+      day. Tied to it specifically: the item names the dimension and its score, so it cannot
+      drift into a generic wishlist entry. A backlog of "make it better" is a backlog nobody
+      works.
+    </p>
+
+    <h2>The month it did not run</h2>
+
+    <p>
+      On the 13th of July, the grader stopped. I found out twenty-six days later.
+    </p>
+
+    <p>
+      Nothing failed. That is the entire lesson. A scheduled task that silently stops produces
+      no error, no log line, and no alert — from the outside, "ran fine" and "never ran" are the
+      same observation. And because the grader lived outside the repository by design, it
+      appeared in no workflow list, no run history, and no file. There was nothing anywhere that
+      could notice its absence.
+    </p>
+
+    <p>
+      Worse, the pipeline was healthy throughout. Digests published every morning, on time, all
+      through the outage. Every surface I would have glanced at was green. The thing that was
+      broken was the only thing that could have told me anything was wrong.
+    </p>
+
+    <p>
+      Two changes came out of that. The first is a watchdog that checks the <em>artifact</em>
+      rather than the process — how old is the newest eval file? Staleness is the one signal
+      that stays true regardless of why something stopped: task deleted, token expired, silent
+      error, provider outage. It does not need to know the cause to know there is one.
+    </p>
+
+    <p>
+      The second is that the grader now has an implementation in the repository instead of
+      existing only as a prompt inside a scheduled task. The specification was always there —
+      two hundred lines of it, every rule written as a warning because something had got it
+      wrong once. But a specification with no implementation has no tests, no version history,
+      and no runs to be absent from. The execution still happens outside, which was the correct
+      decision and is unchanged. What moved inside is the part that could be looked at.
+    </p>
+
+    <hr />
+
+    <p class="closing">
+      The uncomfortable version of all this: I built a system to tell me whether my automated
+      newsletter was any good, and then did not notice for most of a month that it had stopped
+      telling me. The rubric was fine. The dimensions were fine. What was missing was any way to
+      distinguish a good report from no report — which, it turns out, is the same class of
+      problem the rubric exists to solve, one level up.
+    </p>
+
+    <p class="source-note">
+      Everything here is in <a href={REPO}>amaljithkuttamath/ai-radar</a> — the
+      <a href={`${REPO}/blob/main/evals/rubric.md`}>rubric</a>,
+      the <a href={`${REPO}/tree/main/grader`}>grader</a>,
+      the <a href={`${REPO}/tree/main/docs/architecture/adr`}>decision records</a>,
+      and every eval it has ever written.
+    </p>
+  </article>
+</Base>
+
+<style>
+  .rubric {
+    display: grid;
+    gap: var(--space-lg);
+    margin: var(--space-xl) 0;
+  }
+
+  @media (min-width: 720px) {
+    .rubric { grid-template-columns: 1fr 1fr; }
+  }
+
+  .rubric-axis {
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+  }
+
+  .axis-head {
+    font-family: var(--font-serif);
+    font-size: var(--text-subsection);
+    font-weight: 500;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .axis-sub {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin: 0.15rem 0 var(--space-md);
+  }
+
+  .dim {
+    padding: var(--space-sm) 0;
+    border-top: 1px solid var(--fg-faint);
+  }
+
+  /* The two computed dimensions are the argument of the piece, so they are marked in the
+     layout rather than explained in a caption. A left rule reads as "this one is different"
+     without needing a legend. */
+  .dim-computed {
+    border-left: 2px solid var(--accent-color);
+    padding-left: var(--space-md);
+    margin-left: calc(var(--space-md) * -1 + 2px);
+  }
+
+  .dim-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+
+  .dim-id {
+    font-size: var(--text-label);
+    color: var(--accent-color);
+    font-weight: 500;
+  }
+
+  .dim-name {
+    font-size: var(--text-small);
+    color: var(--fg);
+  }
+
+  .dim-badge {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    border: 1px solid var(--fg-faint);
+    border-radius: var(--radius-full);
+    padding: 0.05rem 0.45rem;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .dim-measures {
+    font-size: var(--text-small);
+    margin: 0.3rem 0 0.15rem;
+    line-height: 1.5;
+  }
+
+  .dim-anchor {
+    font-family: var(--font-mono);
+    font-size: var(--text-tag);
+    color: var(--fg-muted);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .prose .rubric-note {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+  }
+
+  .prose .closing {
+    font-family: var(--font-serif);
+    font-size: var(--text-body-lg);
+    line-height: 1.75;
+  }
+
+  .prose .source-note {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin-top: var(--space-lg);
+  }
+</style>
