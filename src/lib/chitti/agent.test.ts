@@ -4684,3 +4684,137 @@ describe('edit_dashboard dispatch (driven through createSession)', () => {
     expect(ev.detail).toBe('no storage');
   });
 });
+
+// ── The memory layer's read seam ─────────────────────────────────────────────
+// memory.ts owns the gates and the block; the session's whole job is to call
+// the injected seam once per turn and prepend what it returns. These pin the
+// wiring — that it fires, that it fires ONCE, and that it can never take a turn
+// down with it.
+describe('memory recall seam (driven through createSession)', () => {
+  const mockComplete = complete as unknown as ReturnType<typeof vi.fn>;
+  beforeEach(() => mockComplete.mockReset());
+
+  const cb = { onTrace: () => {}, onFiles: () => {}, onChart: () => {}, onStatus: () => {} };
+  const BLOCK = 'MEMORY — findings you recorded earlier in this browser. NOT evidence.';
+  const finishTurn = (finding: string) => ({
+    text: '',
+    toolCalls: [{ id: 'f', name: 'finish', arguments: { one_line_finding: finding } }],
+    usage: { input: 10, output: 5 },
+  });
+  const verify = (text: string) => ({ text, toolCalls: [], usage: { input: 5, output: 2 } });
+  const messagesOf = (call: number) =>
+    mockComplete.mock.calls[call][1] as { role: string; content: string }[];
+
+  it('prepends the block as a system note immediately before the question', async () => {
+    mockComplete.mockResolvedValueOnce(finishTurn('A finding.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS: fine.'));
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { recall: () => BLOCK }
+    );
+    await session.ask('life expectancy in India', cb);
+
+    const msgs = messagesOf(0);
+    const qi = msgs.findIndex((m) => m.role === 'user' && m.content === 'life expectancy in India');
+    expect(qi).toBeGreaterThan(0);
+    // Directly before the question, and system-side — the same placement the
+    // plan brief uses, so the rule is read as instruction, not as user input.
+    expect(msgs[qi - 1]).toEqual({ role: 'system', content: BLOCK });
+  });
+
+  it('passes the question to the seam, so recall is scoped to what was asked', async () => {
+    mockComplete.mockResolvedValueOnce(finishTurn('A finding.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    const seen: string[] = [];
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      {
+        recall: (q) => {
+          seen.push(q);
+          return null;
+        },
+      }
+    );
+    await session.ask('a plain question', cb);
+    expect(seen).toEqual(['a plain question']);
+  });
+
+  it('adds nothing at all when memory has nothing to say', async () => {
+    // A miss must cost zero tokens, or the layer taxes every question to help
+    // a few. memory.ts returns null on a miss; the session must not render it.
+    mockComplete.mockResolvedValueOnce(finishTurn('A finding.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { recall: () => null }
+    );
+    await session.ask('a question', cb);
+    expect(messagesOf(0).some((m) => m.content.includes('MEMORY'))).toBe(false);
+  });
+
+  it('does NOT re-push the block on a verifier-fail retry', async () => {
+    // Same bug the question-dedup guard exists for: the retry re-enters
+    // agentPass, and a block pushed again would accumulate in the shared
+    // history for the rest of the run.
+    mockComplete.mockResolvedValueOnce(finishTurn('First attempt.'));
+    mockComplete.mockResolvedValueOnce(verify('FAIL: chart type mismatched.'));
+    mockComplete.mockResolvedValueOnce(finishTurn('Second attempt.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS: fixed.'));
+
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      { recall: () => BLOCK }
+    );
+    await session.ask('Only question', cb);
+
+    const retry = messagesOf(2); // 0=first pass, 1=verify-fail, 2=retry pass
+    expect(retry.filter((m) => m.content === BLOCK)).toHaveLength(1);
+  });
+
+  it('recalls again on the NEXT turn, with that turn’s own question', async () => {
+    mockComplete.mockResolvedValueOnce(finishTurn('One.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    mockComplete.mockResolvedValueOnce(finishTurn('Two.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    const seen: string[] = [];
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      {
+        recall: (q) => {
+          seen.push(q);
+          return `MEMORY for: ${q}`;
+        },
+      }
+    );
+    await session.ask('first question', cb);
+    await session.ask('second question', cb);
+    expect(seen).toEqual(['first question', 'second question']);
+  });
+
+  it('survives a seam that throws — memory never fails a turn', async () => {
+    // The real seam reaches localStorage, which throws outright in some
+    // privacy modes. Losing memory is acceptable; losing the answer is not.
+    mockComplete.mockResolvedValueOnce(finishTurn('A finding.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    const session = createSession(
+      { provider: 'openrouter', model: 'test-model', apiKey: 'x' },
+      {
+        recall: () => {
+          throw new Error('localStorage is blocked');
+        },
+      }
+    );
+    const out = await session.ask('a question', cb);
+    expect(out.aborted).toBe(false);
+    expect(out.finding).toBe('A finding.');
+  });
+
+  it('behaves exactly as before when no seam is injected', async () => {
+    mockComplete.mockResolvedValueOnce(finishTurn('A finding.'));
+    mockComplete.mockResolvedValueOnce(verify('PASS'));
+    const session = createSession({ provider: 'openrouter', model: 'test-model', apiKey: 'x' });
+    await session.ask('a question', cb);
+    expect(messagesOf(0).some((m) => m.role === 'system' && m.content.includes('MEMORY'))).toBe(false);
+  });
+});

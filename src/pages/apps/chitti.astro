@@ -384,6 +384,30 @@ const PRESETS = [
               </p>
             </div>
           </div>
+
+          <!-- Memory: what Chitti recorded about earlier questions, kept in
+               this browser only. On by default — a memory you have to find and
+               switch on records nothing for the session where it would first
+               have helped — and clearable in one click. Recalled findings are
+               never charted, cited, or counted as evidence: the answer is
+               always re-fetched, and memory only says what changed. -->
+          <div class="ch-byok-row ch-mem-row">
+            <div class="ch-mem" id="ch-mem">
+              <label class="ch-save">
+                <input type="checkbox" id="ch-mem-toggle" checked />
+                <span>Remember findings between visits</span>
+              </label>
+              <p class="ch-mem-hint" id="ch-mem-hint">
+                Stored in this browser only, never sent anywhere and never included in a
+                share link. A remembered number is a note about a past answer, not data:
+                Chitti re-fetches before answering and tells you what moved.
+              </p>
+              <div class="ch-mem-actions">
+                <span class="ch-mem-count" id="ch-mem-count"></span>
+                <button type="button" class="ch-mem-clear" id="ch-mem-clear">Clear memory</button>
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </div>
@@ -1421,6 +1445,33 @@ const PRESETS = [
   .ch-save input { accent-color: var(--signal); }
 
   .ch-rlm-row { display: block; }
+  .ch-mem-row { display: block; }
+  .ch-mem { display: flex; flex-direction: column; gap: 6px; }
+  .ch-mem-hint {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+  .ch-mem-actions { display: flex; align-items: center; gap: 10px; }
+  .ch-mem-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+  }
+  .ch-mem-clear {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-muted);
+    background: none;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+  .ch-mem-clear:hover { color: var(--fg); border-color: var(--fg-muted); }
+
   .ch-rlm { display: flex; flex-direction: column; gap: 6px; }
   .ch-rlm.is-locked { opacity: 0.55; }
   .ch-rlm.is-locked .ch-save { cursor: not-allowed; }
@@ -1929,6 +1980,86 @@ const PRESETS = [
      receipt system's established emphasis colour, so the plan borrows it here
      for the same "this is the machinery showing its work" cue). The insight is
      Newsreader italic — human, a claim; the checklist is mono — the machinery. */
+  /* ── The memory card (memory.ts) ───────────────────────────────────────
+     Sits above the receipt, styled as a quieter sibling of the plan card:
+     what Chitti already recorded is context for reading the answer, never the
+     answer. The conflict block is the one part allowed to be loud — an
+     unresolved disagreement between two sources is the thing the user most
+     needs to see, and it deliberately offers no resolution. */
+  :global(.ch-memory) {
+    margin: 2px 0 8px;
+    padding: 9px 11px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--fg-faint);
+    border-left: 2px solid color-mix(in srgb, var(--fg-muted) 45%, transparent);
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  :global(.ch-memory-header) {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  :global(.ch-memory-label) {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+  :global(.ch-memory-note) {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    color: var(--fg-faint);
+  }
+  :global(.ch-memory-item) { display: flex; flex-direction: column; gap: 2px; }
+  :global(.ch-memory-when),
+  :global(.ch-memory-scope),
+  :global(.ch-memory-dropped) {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg-muted);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-memory-q) {
+    margin: 0;
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg);
+  }
+  :global(.ch-memory-dropped) { color: var(--fg-faint); }
+  :global(.ch-memory-conflict) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 9px;
+    border: 1px solid color-mix(in srgb, var(--warn, #b45309) 45%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  :global(.ch-memory-conflict-head) {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--warn, #b45309);
+  }
+  :global(.ch-memory-conflict-side),
+  :global(.ch-memory-conflict-why) {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    line-height: 1.5;
+    color: var(--fg-muted);
+    overflow-wrap: anywhere;
+  }
+  :global(.ch-memory-conflict-why) { color: var(--fg-faint); }
+
   :global(.ch-plan) {
     margin: 2px 0 8px;
     padding: 9px 11px;

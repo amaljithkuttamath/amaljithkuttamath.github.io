@@ -24,6 +24,7 @@ export function createTurnBlock(): TurnBlock {
     panelLabel: q(root, '.ch-panel-label'),
     railModelEl: q(root, '.ch-rail-model'),
     traceEl: q(root, '.ch-trace'),
+    memoryEl: null,
     renderFlag: q(root, '.ch-render-flag'),
     railTotal: q(root, '.ch-rail-total'),
     canvasEl: q(root, '.ch-canvas'),

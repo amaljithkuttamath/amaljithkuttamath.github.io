@@ -7,11 +7,100 @@ import type { TraceEvent, InsightBrief, PlanStep } from '../agent';
 import { matchStepToEvent } from '../agent';
 import { verificationStampLabel, verifierConfidenceLabel } from '../a11y';
 import { fileExt, formatTokens, formatTs } from './dom';
+import type { RecallResult } from '../memory';
 
 export const PLAN_OFF_PLAN_TOOLS = new Set([
   'find_series', 'fetch_series', 'fetch_worldbank', 'fetch_worldbank_all',
   'fetch_owid', 'fetch_imf', 'execute_js', 'growth_stats', 'correlate', 'delegate_source',
 ]);
+
+// ── The memory card ──────────────────────────────────────────────────────────
+// What Chitti recorded in an EARLIER session about this question, shown above
+// the receipt so the user sees it before the answer arrives. It is a receipt,
+// not a result: every number here is labelled "recorded <date>", and the answer
+// below it is always freshly fetched.
+//
+// The card also shows what memory REFUSED to do — an unresolved conflict with
+// both sides and no winner, a note dropped as out of scope — because a memory
+// layer that only ever shows its hits is indistinguishable from one that
+// guesses. A miss renders nothing at all.
+export function buildMemoryCard(result: RecallResult): HTMLElement | null {
+  if (!result || (!result.notes.length && !result.conflicts.length && !result.dropped.length))
+    return null;
+
+  const card = document.createElement('div');
+  card.className = 'ch-memory';
+
+  const header = document.createElement('div');
+  header.className = 'ch-memory-header';
+  const label = document.createElement('span');
+  label.className = 'ch-memory-label';
+  label.textContent = 'memory';
+  header.appendChild(label);
+  const note = document.createElement('span');
+  note.className = 'ch-memory-note';
+  note.textContent = 'recalled from this browser — never used as data';
+  header.appendChild(note);
+  card.appendChild(header);
+
+  const line = (cls: string, text: string) => {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    return p;
+  };
+  const isoDate = (s: string) => String(s ?? '').slice(0, 10);
+
+  for (const r of result.notes) {
+    const item = document.createElement('div');
+    item.className = 'ch-memory-item';
+    const when =
+      r.code === 'MEM_STALE'
+        ? `${isoDate(r.note.createdAt)} · stale, ${Math.round(r.ageDays)} days old`
+        : isoDate(r.note.createdAt);
+    item.appendChild(line('ch-memory-when', when));
+    item.appendChild(line('ch-memory-q', r.note.question));
+    const scope = r.note.citations
+      .slice(0, 2)
+      .map((c) => {
+        const countries = c.countries.length ? c.countries.join(', ') : 'all countries';
+        const yr =
+          c.yearRange && (c.yearRange.start != null || c.yearRange.end != null)
+            ? `${c.yearRange.start ?? '…'}–${c.yearRange.end ?? '…'}`
+            : 'all years';
+        return `${c.indicatorId} · ${countries} · ${yr} · ${c.sourceLabel}`;
+      })
+      .join(' — ');
+    if (scope) item.appendChild(line('ch-memory-scope', scope));
+    card.appendChild(item);
+  }
+
+  // An unresolved conflict is the load-bearing state: both sides, both sources,
+  // no resolution offered anywhere in this markup.
+  for (const c of result.conflicts) {
+    const box = document.createElement('div');
+    box.className = 'ch-memory-conflict';
+    box.appendChild(line('ch-memory-conflict-head', `unresolved conflict — ${c.nid} · ${c.iso3} · ${c.year}`));
+    for (const s of c.sides)
+      box.appendChild(line('ch-memory-conflict-side', `${s.sourceLabel} recorded ${s.value} on ${isoDate(s.recordedAt)}`));
+    box.appendChild(
+      line(
+        'ch-memory-conflict-why',
+        'Neither supersedes the other. Chitti reports both and picks neither.'
+      )
+    );
+    card.appendChild(box);
+  }
+
+  // Dropped notes never reach the model — but hiding them here would read as
+  // "Chitti forgot", when in fact it declined to answer from something that
+  // does not cover the question.
+  for (const d of result.dropped)
+    card.appendChild(line('ch-memory-dropped', `out of scope: "${d.note.question}" — ${d.reason}`));
+
+  return card;
+}
+
 export function buildPlanCard(plan: InsightBrief, events: TraceEvent[], tokens?: number): HTMLElement {
   const card = document.createElement('div');
   card.className = 'ch-plan';
@@ -260,6 +349,10 @@ export function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
     )
   );
   tb.traceEl.innerHTML = '';
+  // The memory card is built once per turn by the composer and re-attached
+  // here, at the top: renderTrace rebuilds traceEl on every trace AND file
+  // event, so anything appended from outside would be wiped on the next one.
+  if (tb.memoryEl) tb.traceEl.appendChild(tb.memoryEl);
   // Index of the LAST verify event: a failing verify that is followed by
   // another verify is a pre-retry attempt ("not verified — retrying"); only
   // the final verify event renders the full could-not-verify / unavailable

@@ -3,18 +3,19 @@
 // state; boot keeps the actual event-listener registrations (order unchanged)
 // and points them at these handlers. unlockSources comes from config.ts.
 import { run, allTurns, liveChartTurns, consoleEl, threadEl, newConvoBtn, composerQ,
-         qIn, keyIn, byokSum, modelSel, askBtn, sourcesSearch, askForm } from './state';
+         qIn, keyIn, byokSum, modelSel, askBtn, sourcesSearch, askForm, memStore } from './state';
 import { unlockSources, openByok, selectedSources, updateSourcesCount, currentProvider,
-         rlmEnabled, lockSources } from './config';
+         rlmEnabled, lockSources, syncMemoryPanel } from './config';
 import { createSession } from '../agent';
 import { parseFastPath, runFastPath, type FastPathResult } from '../fastpath';
 import { rowsToCSV } from '../tools';
+import { buildRecallBlock, recallFor, rememberTurn, type RecallResult } from '../memory';
 import { exportTurnTrace } from '../tracing';
 import type { ProviderConfig } from '../providers';
 import type { AgentOutput } from '../agent';
 import { prefersReducedMotion } from './dom';
 import { createTurnBlock, renderQuestion, setStatus } from './turns';
-import { renderTrace, renderFiles } from './trace';
+import { renderTrace, renderFiles, buildMemoryCard } from './trace';
 import { renderChart } from './charts';
 import { renderTable, renderCitations, renderFinding, renderVerification, renderRunningTotal } from './evidence';
 import { syncDashboardsAfterTurn } from './dashboards-view';
@@ -102,6 +103,14 @@ export function maybeDisarmOnClick(e: MouseEvent) {
 // for something else the user types afterwards.
 let escalateQuestion: string | null = null;
 
+// The memory recall for the turn currently being submitted (memory.ts).
+// Computed ONCE at submit, then read by two consumers: the card rendered above
+// the receipt, and the session's recall seam. Computing it twice — once for the
+// screen and once for the prompt — is how the two start disagreeing about what
+// was recalled, and a memory layer whose card and prompt differ is worse than
+// none. Private module state, the same pattern newQuestion*/escalateQuestion use.
+let pendingRecall: RecallResult | null = null;
+
 // A hung source API must not leave the composer disabled with no way out, and
 // the fast path's whole promise is that it is quick — so it gets a hard ceiling
 // and falls through to the agent if it can't beat it.
@@ -162,6 +171,22 @@ async function renderDirectAnswer(question: string, res: FastPathResult) {
   tb.shareBtn.style.display = '';
   tb.mdBtn.style.display = '';
   if (tb.lastSpec) tb.pinBtn.style.display = '';
+  // A fast-path answer is the most grounded thing this app produces — real
+  // rows, real citations, and no model anywhere in the chain that could have
+  // invented one. Excluding it would make memory systematically blind to the
+  // key-free path, which is the path a first-time visitor actually takes.
+  // There is no verifier verdict because no model ran, so the note records
+  // `null` rather than claiming a pass nothing asserted.
+  rememberTurn(memStore, {
+    question,
+    finding: res.summary,
+    rows: res.rows,
+    citations: res.citations,
+    verification: null,
+    createdAt: new Date().toISOString(),
+  });
+  syncMemoryPanel();
+
   setStatus(tb, 'ok', 'Done · free · no key used');
   tb.panelDot.className = 'ch-panel-dot';
   tb.panelLabel.textContent = `${res.trace.length} steps · no model call`;
@@ -357,12 +382,27 @@ export async function handleAskSubmit(e: SubmitEvent) {
   const modelLabel = modelSel.selectedOptions[0]?.textContent?.trim() || cfg.model;
   tb.railModelEl.textContent = `${modelLabel} / ${cfg.provider}`;
 
+  // Recall BEFORE the run so the card is on screen while the agent works — what
+  // Chitti already knew is context for reading the answer, not a footnote to
+  // it. The card renders through renderTrace (which owns traceEl and rebuilds
+  // it on every event), so it is stashed on the turn rather than appended here.
+  pendingRecall = recallFor(memStore, question, new Date());
+  tb.memoryEl = pendingRecall ? buildMemoryCard(pendingRecall) : null;
+  if (tb.memoryEl) renderTrace(tb, tb.trace);
+
   try {
     // Bind the chosen databases to the session on first ask; the selection
     // is locked for the rest of the conversation. "+ new conversation" clears
     // `session` and unlocks the picker.
     if (!run.session) {
-      run.session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
+      run.session = createSession(cfg, {
+        sources: selectedSources(),
+        rlm: rlmEnabled(),
+        // The memory layer's read seam. memory.ts owns every gate; all the
+        // session does is prepend whatever this returns, and it returns null
+        // whenever memory has nothing to say.
+        recall: () => (pendingRecall ? buildRecallBlock(pendingRecall) : null),
+      });
       lockSources();
     }
     const out = await run.session!.ask(question, {
@@ -492,6 +532,25 @@ export async function handleAskSubmit(e: SubmitEvent) {
     // cleanest hook: the view and the agent share storage, so a post-turn
     // reload is the single source-of-truth sync point — no event bus needed.
     syncDashboardsAfterTurn();
+
+    // The memory layer's write seam. Deliberately here rather than beside the
+    // success branch: a stopped or failed turn that still fetched real data
+    // produced real citations, and those are worth remembering. rememberTurn
+    // decides what qualifies — no citations, no note — and never throws, so a
+    // full localStorage can't take the composer's cleanup down with it.
+    if (turnOut)
+      rememberTurn(memStore, {
+        question,
+        finding: turnOut.finding,
+        rows: turnOut.rows,
+        citations: turnOut.citations,
+        verification: turnOut.verification,
+        createdAt: new Date().toISOString(),
+      });
+    // The count in the config sheet is read from storage, so it goes stale the
+    // moment a turn records. Recomputing is cheap; keeping it in sync by hand
+    // is what drifts.
+    syncMemoryPanel();
 
     // Optional LangSmith tracing — fire-and-forget, no-op unless enabled at
     // build time. Runs on EVERY terminal path (success, error, aborted) so a

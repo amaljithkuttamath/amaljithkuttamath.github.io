@@ -58,7 +58,7 @@
   } from '../a11y';
   import { $, q, formatTs, formatTokens, formatBytes, fileExt, cssVar, escapeHtml, prefersReducedMotion, esc, inlineMd, mdToHtml, fmtShareDate, fmtRange, fmtFetchedAt, fmtDate } from './dom';
   import { buildOption } from './chart-option';
-  import { run, SESSION_KEY, SESSION_PROVIDER, providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty, keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta, byokMore, byokSettings, consoleEl, askForm, qIn, chips, composerForm, composerQ, askBtn, newConvoBtn, threadEl, turnTemplate, sourcesBox, sourcesHint, sourcesCount, sourcesSearch, sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, dashNavBtn, dashNavCount, pinDialog, pinBackdrop, pinCloseBtn, pinListEl, pinNewForm, pinNameInput, pinStatusEl, dashView, dashViewBack, dashViewTitle, dashViewBody, dashViewStatus, dashImportFile, INDICATOR_MAP, liveChartTurns, liveDashCharts, allTurns, dashStore } from './state';
+  import { run, SESSION_KEY, SESSION_PROVIDER, providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty, keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta, byokMore, byokSettings, consoleEl, askForm, qIn, chips, composerForm, composerQ, askBtn, newConvoBtn, threadEl, turnTemplate, sourcesBox, sourcesHint, sourcesCount, sourcesSearch, sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, dashNavBtn, dashNavCount, pinDialog, pinBackdrop, pinCloseBtn, pinListEl, pinNewForm, pinNameInput, pinStatusEl, dashView, dashViewBack, dashViewTitle, dashViewBody, dashViewStatus, dashImportFile, INDICATOR_MAP, liveChartTurns, liveDashCharts, allTurns, dashStore, memToggle, memClearBtn } from './state';
   import type { TurnBlock } from './state';
   import { renderTrace, renderFiles } from './trace';
   import { createTurnBlock, setStatus, renderQuestion } from './turns';
@@ -75,6 +75,7 @@
     setSettingsOpen, syncSheetToKeyboard, openByok, currentProvider, populateModels,
     onProviderChange, updateByokState, applyModelFilter, syncSession, selectedSources,
     setSource, updateSourcesCount, rlmEnabled, lockSources, unlockSources, sourcesLocked, vv,
+    syncMemoryPanel, handleMemoryToggle, handleMemoryClear,
   } from './config';
   import { resetNewQuestionChip, handleNewConvoClick, maybeDisarmOnClick, handleAskSubmit } from './composer';
   import { renderDemos } from './demos-view';
@@ -87,6 +88,11 @@
     vv.addEventListener('resize', syncSheetToKeyboard);
     vv.addEventListener('scroll', syncSheetToKeyboard);
   }
+
+  // Memory panel (memory.ts). Not part of the source/RLM lock: memory is read
+  // fresh each turn, so a change takes effect on the next question.
+  memToggle?.addEventListener('change', handleMemoryToggle);
+  memClearBtn?.addEventListener('click', handleMemoryClear);
 
   byokSum.addEventListener('click', () => openByok(byokPanel.hidden));
   // Explicit close paths that work everywhere, including iOS where
@@ -294,6 +300,7 @@
   });
 
   updateDashNavCount();
+  syncMemoryPanel();
 
 
   // ── Run ────────────────────────────────────────────────────────────────

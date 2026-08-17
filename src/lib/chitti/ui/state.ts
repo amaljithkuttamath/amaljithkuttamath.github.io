@@ -76,6 +76,13 @@ export const rlmBox = $('ch-rlm');
 export const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
 export const rlmHint = $('ch-rlm-hint');
 
+// ── Memory panel elements (memory.ts) ─────────────────────────────────
+// Null-tolerant like the demos elements: any page reusing these modules
+// without the memory markup must still boot.
+export const memToggle = $('ch-mem-toggle') as HTMLInputElement | null;
+export const memCount = $('ch-mem-count') as HTMLElement | null;
+export const memClearBtn = $('ch-mem-clear') as HTMLButtonElement | null;
+
 // ── Dashboards view elements ──────────────────────────────────────────
 export const dashNavBtn = $('ch-dash-nav') as HTMLButtonElement;
 export const dashNavCount = $('ch-dash-nav-count');
@@ -110,6 +117,10 @@ export interface TurnBlock {
   panelLabel: HTMLElement;
   railModelEl: HTMLElement;
   traceEl: HTMLElement;
+  // The memory card for this turn (memory.ts recall), built once by the
+  // composer and re-attached by renderTrace on every rebuild. null when memory
+  // had nothing to say — the common case.
+  memoryEl: HTMLElement | null;
   renderFlag: HTMLElement;
   railTotal: HTMLElement;
   canvasEl: HTMLElement;
@@ -161,6 +172,20 @@ export const liveDashCharts: { el: HTMLElement; spec: ChartSpec; inst: any }[] =
 // Separate from liveChartTurns (which only tracks turns with a live
 // chart) so the new-conversation reset can dispose every chart at once.
 export const allTurns: TurnBlock[] = [];
+
+// localStorage handle for the memory layer (memory.ts). The same origin and the
+// same handle shape as dashStore — kept as its own export so the two namespaces
+// stay legible at every call site, and so clearing memory can never reach a
+// dashboard.
+export const memStore: StorageLike | null = (() => {
+  try {
+    const s = window.localStorage;
+    s.getItem('__chitti_probe'); // throws in some privacy modes
+    return s as unknown as StorageLike;
+  } catch {
+    return null;
+  }
+})();
 
 // localStorage handle for saved dashboards (null in privacy modes that throw).
 export const dashStore: StorageLike | null = (() => {

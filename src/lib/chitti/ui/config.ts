@@ -8,13 +8,14 @@ import {
   providerSel, modelSel, modelPickList, modelPickSearch, modelPickCount, modelPickEmpty,
   keyIn, saveChk, keyLinks, providerNote, byokPanel, byokSum, byokState, byokCta,
   byokMore, byokSettings, sourcesBox, sourcesHint, sourcesCount, sourcesSearch,
-  sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint,
+  sourcesEmpty, sourceItems, rlmBox, rlmToggle, rlmHint, memStore, memToggle, memCount, memClearBtn,
 } from './state';
 import {
   PROVIDERS, providerMeta, fetchModels, formatPricePerM, RECOMMENDED_OPENROUTER_MODELS,
   type ProviderId, type ModelOption,
 } from '../providers';
 import { $ } from './dom';
+import { clearMemory, listNotes, memoryEnabled, setMemoryEnabled } from '../memory';
 
 // Model + databases live behind a disclosure so the sheet is short on mobile
 // (the keyboard-vs-key-field problem). Key-first: collapsed until there's a
@@ -414,4 +415,48 @@ export function unlockSources() {
   rlmBox?.classList.remove('is-locked');
   if (rlmToggle) rlmToggle.disabled = false;
   if (rlmHint) rlmHint.textContent = RLM_HINT_DEFAULT;
+}
+
+// ── Memory panel (memory.ts) ──────────────────────────────────────────────
+// Unlike the source picker and the judgment-call toggle, memory is NOT locked
+// to a conversation: it is read fresh on every turn, so switching it off takes
+// effect on the next question rather than the next conversation. Nothing about
+// it is bound at createSession time, so there is nothing to lock.
+
+// Reflect the stored count and flag into the panel. Cheap, so it is called on
+// every open rather than kept in sync by hand.
+export function syncMemoryPanel() {
+  if (!memToggle && !memCount) return;
+  const on = memStore ? memoryEnabled(memStore) : false;
+  if (memToggle) {
+    memToggle.checked = on;
+    // A browser that refuses localStorage cannot remember anything, and a live
+    // toggle over a store that will never persist is a lie about what happens.
+    memToggle.disabled = !memStore;
+  }
+  if (memCount) {
+    const n = memStore ? listNotes(memStore).length : 0;
+    memCount.textContent = !memStore
+      ? 'unavailable — this browser blocks local storage'
+      : n === 0
+        ? 'nothing recorded yet'
+        : `${n} finding${n === 1 ? '' : 's'} recorded`;
+  }
+  if (memClearBtn) memClearBtn.disabled = !memStore;
+}
+
+export function handleMemoryToggle() {
+  if (memStore && memToggle) setMemoryEnabled(memStore, memToggle.checked);
+  syncMemoryPanel();
+}
+
+// Forget everything, immediately and without a confirm step. The whole reason
+// recording locally is defensible is that undoing it is one click — putting a
+// dialog in front of "forget what you know about me" is the wrong friction.
+// Nothing is lost that cannot be re-derived by asking again.
+export function handleMemoryClear() {
+  if (!memStore) return;
+  const n = clearMemory(memStore);
+  syncMemoryPanel();
+  if (memCount && n > 0) memCount.textContent = `cleared ${n} finding${n === 1 ? '' : 's'}`;
 }

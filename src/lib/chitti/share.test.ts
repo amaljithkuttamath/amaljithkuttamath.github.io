@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildSharePayload,
+  cleanShareState,
   encodeShareState,
   decodeShareState,
   SHARE_VERSION,
@@ -221,5 +222,39 @@ describe('key is never serialized', () => {
     const back = await decodeShareState(r.payload);
     expect(JSON.stringify(back)).not.toContain(KEY);
     void b64;
+  });
+});
+
+// ── The memory layer must never ride a share link ────────────────────────────
+// memory.ts keeps what Chitti recorded about a person's earlier questions in
+// their own browser. A share link is the one thing in this app that leaves the
+// browser, so the two must not meet: sharing an answer would otherwise publish
+// a private question history alongside it.
+//
+// Nothing wires memory into share state today. This pins that cleanShareState
+// stays a whitelist REBUILD rather than becoming a blacklist, which is what
+// makes "nothing wires it in" a property of the code instead of a habit.
+describe('share state cannot carry memory', () => {
+  it('drops memory fields planted on the state, at every level', () => {
+    const cleaned = cleanShareState({
+      v: SHARE_VERSION,
+      q: 'life expectancy in India',
+      answer: 'It rose.',
+      spec,
+      rows,
+      citations,
+      verification: null,
+      ts: '2026-08-17T00:00:00.000Z',
+      // Every shape memory could plausibly arrive in.
+      memory: [{ question: 'a private earlier question', finding: 'secret' }],
+      recall: { notes: [{ question: 'another private one' }] },
+      notes: ['a third'],
+    } as any);
+    const json = JSON.stringify(cleaned);
+    expect(json).not.toContain('private');
+    expect(json).not.toContain('secret');
+    expect(cleaned && (cleaned as any).memory).toBeUndefined();
+    expect(cleaned && (cleaned as any).recall).toBeUndefined();
+    expect(cleaned && (cleaned as any).notes).toBeUndefined();
   });
 });

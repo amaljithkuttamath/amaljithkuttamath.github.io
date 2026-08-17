@@ -52,7 +52,8 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `runSubAgent`), `providers.ts` (the BYOK LLM client + retry/fallback),
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
   `fastpath.ts` (the no-model direct answer — see below),
-  `agent.ts` (facade re-exporting `session` + the split modules).
+  `agent.ts` (facade re-exporting `session` + the split modules),
+  `memory.ts` (the persistent memory layer — see below).
 - **UI layer** — `ui/*`, all loaded by `src/pages/apps/chitti.astro` via one
   `import './boot'`. `ui/state.ts` owns all shared state; `ui/boot.ts` is the
   composition root.
@@ -86,6 +87,26 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   fast answer is worse than a slower right one, so every gate errs toward
   refusing. `MIN_MATCH_SCORE` is calibrated against the curated catalog (see its
   comment) and deliberately under-fires.
+- **Memory is never evidence.** `memory.ts` records each grounded finding to
+  `localStorage` (`chitti:mem:`) and recalls relevant ones on a later question,
+  across sessions. A recalled number may never be charted, cited, or entered in
+  the evidence table: every answer is re-fetched, and memory contributes only
+  the comparison ("it was 70.4 in June"). Three properties keep that true and
+  all three are tested. **A note is written only when the turn produced
+  citations** — so a fact must resolve to a ledger entry, and a model-invented
+  number is structurally incapable of becoming one; there is no `derived` flag
+  to forget. **The read seam returns a string, not data**, so nothing crossing
+  it could reach the chart or evidence path even by mistake. **A cross-source
+  disagreement is reported, never resolved** — same series, same country, same
+  year, two sources, two values means Chitti shows both and picks neither,
+  because recency cannot arbitrate between two definitions of the same name (a
+  same-source change is a revision, and the newer one is in force). It reaches
+  the agent through **two seams and no tool**: `SessionOptions.recall` pushes a
+  system note before the question in `agentPass`, and `ui/composer.ts` calls
+  `rememberTurn` in its `finally`. A recall miss must return `null` — an empty
+  memory costs zero prompt tokens. Memory never enters a share link; the
+  whitelist in `cleanShareState` is what enforces that, and `share.test.ts`
+  pins it.
 - **The knowledge base has two tiers, and the tuned one wins.** `kb.ts` resolves
   a phrase to a series by navigating a hierarchy rather than scoring a flat list
   — a leaf inherits its ancestors' vocabulary, so "child mortality" reaches an

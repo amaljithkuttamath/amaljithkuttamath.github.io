@@ -241,6 +241,14 @@ export interface SessionOptions {
   // omitted, the tool falls back to a global localStorage if one exists, else
   // refuses cleanly (never throws).
   dashboardStore?: DashboardStorage;
+  // The memory layer's read seam (memory.ts). Called once per turn with the
+  // question; returns the block to prepend, or null when memory has nothing to
+  // say — which is the common case, and why a miss must cost zero tokens.
+  //
+  // Injected rather than imported so the session never touches localStorage
+  // (tests pass a fake, exactly as dashboardStore does) and so the whole layer
+  // stays optional: omit it and Chitti behaves as it always has.
+  recall?: (question: string) => string | null;
 }
 
 export function createSession(cfg: ProviderConfig, opts?: SessionOptions): ChittiSession {
@@ -1383,6 +1391,31 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               (plan.chart_intent ? `\nChart intent: ${plan.chart_intent}` : '') +
               '\n\nExecute against this. Deviate if the data demands it, and say so when you do.',
           });
+        }
+        // ── Memory recall (memory.ts) ───────────────────────────────────
+        // What Chitti recorded in earlier SESSIONS about this question, as a
+        // system note ahead of the question — the same shape and the same
+        // reason as the plan brief above. It leads with the rule that a
+        // recorded number is not evidence, so the model can never read it as
+        // data it already has: memory's only job is to let the answer say what
+        // changed since.
+        //
+        // First pass only. A verifier retry re-enters here with `critique`
+        // set and takes the branch above, so the block is pushed once per turn
+        // — re-pushing it would grow the history with a duplicate on every
+        // retry, exactly the bug the comment at the top of this function
+        // describes for the question itself.
+        //
+        // Wrapped because the seam reaches user storage: a privacy mode that
+        // throws on localStorage must cost the turn nothing.
+        if (opts?.recall) {
+          let recallBlock: string | null = null;
+          try {
+            recallBlock = opts.recall(question);
+          } catch {
+            recallBlock = null; // memory is never load-bearing enough to fail a turn
+          }
+          if (recallBlock) messages.push({ role: 'system', content: recallBlock });
         }
         messages.push({ role: 'user', content: question });
       }

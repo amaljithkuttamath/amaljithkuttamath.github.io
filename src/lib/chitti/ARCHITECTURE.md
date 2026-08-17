@@ -52,6 +52,7 @@ the 472 tests pass unmodified. See the **UI layer** section below.
 | `spec.ts` | `normalizeSpec` — guard a model chart spec into a valid `ChartSpec`. |
 | `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`ui/actions.ts`). |
 | `abort.ts` | `AbortedError` — the user-cancel sentinel (loop + refresh pipeline). |
+| `memory.ts` | The persistent memory layer: `MemoryNote`/`MemoryFact`, the whitelist rebuild, `buildNote`/`factsFromRows`, `recall` + its three gates, `buildRecallBlock`, and the `chitti:mem:` storage wrapper. Pure; persistence over an injected `StorageLike`. Reached through two seams — `SessionOptions.recall` (read) and `rememberTurn` in `ui/composer.ts` (write) — and no tool. See `docs/superpowers/specs/2026-08-17-chitti-memory-layer-design.md`. |
 | `dashboards-agent.ts` | Agent-side dashboard glue: `resolveTileRef`, the session-less refresh pipeline (`refreshDashboard`/`refreshTile`/`refetchCitation`), `buildCitation`, `indicatorName`, `defaultDashboardTitle`. |
 | `session.ts` | **The session core**: `createSession` + its per-turn closures (`ask`/`agentPass`/`dispatch`/`routeFetch`/`runSubAgent`/`makeLlm`/`runPlan`/`runVerify`), session state, session types (`ChittiSession`/`SessionOptions`/`AgentCallbacks`/`AgentOutput`), `runAgent`, `buildRejectionSteer`. |
 | `agent.ts` | **Facade** — re-exports `./session` + every split-out module. |
@@ -71,7 +72,7 @@ run in the browser only; the lib layers above are shared with the test suite.
 | `ui/dom.ts` | Pure DOM/string helpers: `$`/`q`, `esc`/`escapeHtml`/`inlineMd`/`mdToHtml`, `cssVar`, `prefersReducedMotion`, the `format*`/`fmt*` formatters, `fileExt`. No state. |
 | `ui/chart-option.ts` | `buildOption` — the pure `ChartSpec → ECharts option` builder (theme via `cssVar`, formatting via `chart-format`). |
 | `ui/state.ts` | **The one shared-state module**: all DOM element handles, the per-turn `TurnBlock` interface, the live-chart registries (`allTurns`/`liveChartTurns`/`liveDashCharts`), the `dashStore` localStorage handle, `INDICATOR_MAP`, and the run-lifecycle scalars as a shared `run` object (`session`/`running`/`runController`). |
-| `ui/trace.ts` | `renderTrace` + the plan card, verify stamp, nested-receipt cards, panel summary, and inline `write_file` rows (`renderFiles`). |
+| `ui/trace.ts` | `renderTrace` + the plan card, the memory card (`buildMemoryCard`), verify stamp, nested-receipt cards, panel summary, and inline `write_file` rows (`renderFiles`). |
 | `ui/charts.ts` | ECharts lifecycle: `loadECharts` (CDN import cache), `renderChart`, the chart↔table linking glue, and the theme/resize observers (registered on import). |
 | `ui/evidence.ts` | The data table (+ chart↔row hover), citations ledger, confidence-tinted finding, verification cue, running token/cost total. |
 | `ui/actions.ts` | Answer-share permalink build + clipboard (`shareTurn`/`buildShareUrl`/`writeClipboard`/`copyToClipboard`), shared by the turn UI and the dashboards copy paths. |
@@ -152,7 +153,7 @@ JSON data · providers · countries · codec
                                           from tools ONLY inside functions)
         sources/index         (registry + generic search/routing)
           tools.ts            (facade + remaining core types/consts/helpers)
-    receipts · prompts · planner · verifier · spec · abort
+    receipts · prompts · planner · verifier · spec · abort · memory
       dashboards-agent
         session.ts            (createSession + closures)
           agent.ts            (facade)
