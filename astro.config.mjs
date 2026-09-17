@@ -42,6 +42,10 @@ export default defineConfig({
     }),
   ],
   vite: {
-    server: { proxy: langsmithProxy },
+    server: { proxy: {
+      ...langsmithProxy,
+      // Development only; no key or relay is included in the static Pages build.
+      '/api/jev': { target: 'http://127.0.0.1:8765', changeOrigin: true },
+    } },
   },
 });

@@ -1,0 +1,2 @@
+deepagents==0.6.12
+httpx==0.28.1

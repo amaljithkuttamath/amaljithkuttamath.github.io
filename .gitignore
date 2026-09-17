@@ -11,3 +11,5 @@ docs/plans/
 .env
 .env.local
 .env.*.local
+.venv-jev/
+__pycache__/
