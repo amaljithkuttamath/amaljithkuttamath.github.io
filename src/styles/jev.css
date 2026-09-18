@@ -18,6 +18,15 @@ body:has(.jev) .container { max-width: 1180px; }
 .j-notebook-meta { font: 10px/1.5 var(--font-mono); color: var(--j-muted); }
 .j-notebook-meta code { padding: 0; background: none; }
 .j-notebook-meta a { margin-left: auto; }
+.j-background { border-left: 2px solid var(--fg-faint); padding: 0 0 0 14px; margin: 0 0 20px; }
+.j-background h2 { font: 500 12px var(--font-sans); margin: 0 0 7px; }
+.j-background p { max-width: 880px; font-size: 12px; line-height: 1.8; color: var(--j-muted); margin: 0 0 8px; }
+.j-background strong { font-weight: 500; color: var(--fg); }
+.j-background summary { cursor: pointer; font-size: 11px; color: var(--j-green); }
+.j-background a { font-size: 11px; }
+.j-background-types { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; margin: 16px 0; }
+.j-background-types dt { font: 11px var(--font-mono); margin-bottom: 7px; }
+.j-background-types dd { margin: 0; font-size: 11px; line-height: 1.8; color: var(--j-muted); }
 .j-tabs { display: flex; align-items: center; gap: 24px; border-block: 1px solid var(--fg-faint); }
 .j-tabs button { background: none; color: var(--j-muted); border: 0; border-bottom: 2px solid transparent; padding: 13px 0; font-size: 12px; }
 .j-tabs button span { font: 10px var(--font-mono); margin-right: 7px; }
@@ -167,6 +176,7 @@ body:has(.jev) .container { max-width: 1180px; }
   .jl-examples { gap: 8px; }
   .jl-examples label { flex-basis: 100%; }
   .j-prompt-grid,.j-desk,.j-method-grid { grid-template-columns: 1fr; }
+  .j-background-types { grid-template-columns: 1fr; gap: 14px; }
   .j-prompt-input,.j-prompt-output,.j-trace-pane,.j-inspector { padding: 15px; }
   .j-prompt-output,.j-inspector { border-left: 0; border-top: 1px solid var(--fg-faint); }
   .j-composer-bottom,.j-footnote,.j-provenance { flex-direction: column; gap: 12px; }
