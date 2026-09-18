@@ -25,10 +25,10 @@ npm run check
 
 ## Deploy after account access and secret-storage authorization
 
-This project does not yet identify a signed-in Cloudflare account or a deployed URL.
+Deployed API origin: `https://jev-public-classification.jev-public-classification.workers.dev`. The repository variable `PUBLIC_JEV_API_URL` points the Pages build at this service.
 
 ```sh
-npx wrangler login
+npx wrangler login --device --scopes account:read user:read workers_scripts:write --use-keyring
 npm run deploy
 npx wrangler secret put TYPESAFE_API_KEY
 ```
@@ -37,4 +37,4 @@ Enter the key at the private secret prompt, never as a CLI argument. A deploymen
 
 Set GitHub repository Actions **variable** `PUBLIC_JEV_API_URL` to the exact HTTPS origin printed by Wrangler (no path). Redeploy GitHub Pages. This non-secret URL is the only backend configuration exposed in the frontend. The existing GitHub Actions secret does not automatically become a Worker secret.
 
-Verify a custom input from the published page, with `LIVE RESULT` and an updated result. Keep the branch unmerged until the public service can be deployed and this connection can be verified.
+Verify a custom input from the published page, with `LIVE RESULT` and an updated result. Before publishing subsequent frontend changes, verify the service remains reachable. Device authorization avoids the short-lived localhost callback used by the default login flow.
