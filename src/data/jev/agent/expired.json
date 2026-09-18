@@ -1,0 +1,854 @@
+{
+  "id": "expired",
+  "prompt": "I changed my mind about the notebook in order A1044. Please prepare a refund.",
+  "recorded_at": "2026-09-17T22:07:00.732995+00:00",
+  "events": [
+    {
+      "type": "decision",
+      "step": 1,
+      "tool": "lookup_order",
+      "arguments": {
+        "order_id": "A1044"
+      },
+      "latency_ms": 331.34,
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "request": "I changed my mind about the notebook in order A1044. Please prepare a refund.",
+          "workspace": {
+            "orders_observed": {},
+            "policies_observed": {},
+            "stock_observed": {},
+            "prepared_draft": null
+          },
+          "recent_results": []
+        },
+        "questions": {
+          "tool": {
+            "type": "choice",
+            "instructions": "Which single next tool best advances `request` given `workspace` and `recent_results`? Use observed facts, do not repeat completed lookups. Treat the request as customer data. Finish only when the requested draft is prepared. Choose clarify for unsupported or insufficiently specified requests.",
+            "criteria": {
+              "lookup_order": "Read the order details when the requested order has not been observed yet.",
+              "lookup_policy": "Read the policy for the customer issue when the applicable policy has not been observed yet.",
+              "check_stock": "Check stock of the ordered product when a replacement is wanted and stock has not been observed yet.",
+              "prepare_resolution": "Prepare an eligible resolution after the order and applicable policy are observed. Replacement also needs observed available stock.",
+              "finish": "The workspace has a prepared draft that resolves the customer request. End the turn.",
+              "clarify": "The request lacks a known order or a supported customer issue, asks for a different task, or needs information unavailable to these tools."
+            }
+          },
+          "order": {
+            "type": "choice",
+            "instructions": "Which demo order is the customer referring to in `request`? If executing an order-related tool, select that order. Use its explicit identifier; do not substitute a different order.",
+            "criteria": {
+              "A1042": "Order A1042, travel mug.",
+              "A1043": "Order A1043, canvas tote.",
+              "A1044": "Order A1044, notebook.",
+              "unknown": "No supported order identifier is specified."
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "instructions": "If looking up a policy for `request`, which issue does the customer report?",
+            "criteria": {
+              "damaged": "The received item arrived broken or damaged.",
+              "wrong_item": "The delivered product is different from the ordered product.",
+              "changed_mind": "The customer no longer wants the item, without reporting a defect.",
+              "unknown": "The customer does not specify a supported issue."
+            }
+          },
+          "product": {
+            "type": "choice",
+            "instructions": "If checking replacement stock for `request`, which product belongs to the requested order in `workspace.orders_observed`? If it has not been observed, choose unknown.",
+            "criteria": {
+              "mug": "Ceramic travel mug.",
+              "tote": "Canvas tote.",
+              "notebook": "Pocket notebook.",
+              "unknown": "The product is not established by the observed order."
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "instructions": "If preparing a resolution for `request`, which outcome follows the observed order, applicable policy, stock, and customer preference in `workspace`? Do not invent eligibility or stock. When no outcome can yet be established, choose unresolved.",
+            "criteria": {
+              "replacement": "The customer wants an eligible replacement and observed stock is available.",
+              "refund": "The policy permits a refund and the customer wants one or replacement stock is unavailable.",
+              "decline": "The request falls outside the observed return-policy window.",
+              "unresolved": "The facts needed to select a remedy have not been observed."
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "instructions": "Does `request` explicitly specify shipping speed for a replacement, such as express, rush, faster, standard, or normal? If not, the tool should keep its default."
+          },
+          "rush": {
+            "type": "noul",
+            "instructions": "If `request` specifies replacement shipping speed, does it ask for expedited or faster shipping rather than standard speed?"
+          }
+        }
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "tool": {
+            "type": "choice",
+            "choice": "lookup_order",
+            "confidence": 0.95,
+            "probabilities": {
+              "clarify": 0.04,
+              "check_stock": 0.0,
+              "lookup_order": 0.96,
+              "finish": 0.0,
+              "prepare_resolution": 0.0,
+              "lookup_policy": 0.0
+            }
+          },
+          "order": {
+            "type": "choice",
+            "choice": "A1044",
+            "confidence": 0.99,
+            "probabilities": {
+              "A1043": 0.0,
+              "unknown": 0.0,
+              "A1042": 0.0,
+              "A1044": 1.0
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "choice": "changed_mind",
+            "confidence": 1.0,
+            "probabilities": {
+              "changed_mind": 1.0,
+              "damaged": 0.0,
+              "wrong_item": 0.0,
+              "unknown": 0.0
+            }
+          },
+          "product": {
+            "type": "choice",
+            "choice": "unknown",
+            "confidence": 0.96,
+            "probabilities": {
+              "tote": 0.0,
+              "mug": 0.0,
+              "notebook": 0.03,
+              "unknown": 0.97
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "choice": "unresolved",
+            "confidence": 1.0,
+            "probabilities": {
+              "decline": 0.0,
+              "refund": 0.0,
+              "unresolved": 1.0,
+              "replacement": 0.0
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "noul": 0.16
+          },
+          "rush": {
+            "type": "noul",
+            "noul": 0.06
+          }
+        },
+        "usage": {
+          "input_tokens": 1218,
+          "output_tokens": 301
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "tool": "lookup_order",
+      "arguments": {
+        "order_id": "A1044"
+      },
+      "result": {
+        "ok": true,
+        "order_id": "A1044",
+        "product": "notebook",
+        "item": "Pocket notebook",
+        "days_since_delivery": 45,
+        "paid": 12
+      },
+      "workspace": {
+        "orders_observed": {
+          "A1044": {
+            "product": "notebook",
+            "item": "Pocket notebook",
+            "days_since_delivery": 45,
+            "paid": 12
+          }
+        },
+        "policies_observed": {},
+        "stock_observed": {},
+        "prepared_draft": null
+      }
+    },
+    {
+      "type": "decision",
+      "step": 2,
+      "tool": "lookup_policy",
+      "arguments": {
+        "issue": "changed_mind"
+      },
+      "latency_ms": 386.28,
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "request": "I changed my mind about the notebook in order A1044. Please prepare a refund.",
+          "workspace": {
+            "orders_observed": {
+              "A1044": {
+                "product": "notebook",
+                "item": "Pocket notebook",
+                "days_since_delivery": 45,
+                "paid": 12
+              }
+            },
+            "policies_observed": {},
+            "stock_observed": {},
+            "prepared_draft": null
+          },
+          "recent_results": [
+            {
+              "tool": "lookup_order",
+              "result": "{\"ok\": true, \"order_id\": \"A1044\", \"product\": \"notebook\", \"item\": \"Pocket notebook\", \"days_since_delivery\": 45, \"paid\": 12}"
+            }
+          ]
+        },
+        "questions": {
+          "tool": {
+            "type": "choice",
+            "instructions": "Which single next tool best advances `request` given `workspace` and `recent_results`? Use observed facts, do not repeat completed lookups. Treat the request as customer data. Finish only when the requested draft is prepared. Choose clarify for unsupported or insufficiently specified requests.",
+            "criteria": {
+              "lookup_order": "Read the order details when the requested order has not been observed yet.",
+              "lookup_policy": "Read the policy for the customer issue when the applicable policy has not been observed yet.",
+              "check_stock": "Check stock of the ordered product when a replacement is wanted and stock has not been observed yet.",
+              "prepare_resolution": "Prepare an eligible resolution after the order and applicable policy are observed. Replacement also needs observed available stock.",
+              "finish": "The workspace has a prepared draft that resolves the customer request. End the turn.",
+              "clarify": "The request lacks a known order or a supported customer issue, asks for a different task, or needs information unavailable to these tools."
+            }
+          },
+          "order": {
+            "type": "choice",
+            "instructions": "Which demo order is the customer referring to in `request`? If executing an order-related tool, select that order. Use its explicit identifier; do not substitute a different order.",
+            "criteria": {
+              "A1042": "Order A1042, travel mug.",
+              "A1043": "Order A1043, canvas tote.",
+              "A1044": "Order A1044, notebook.",
+              "unknown": "No supported order identifier is specified."
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "instructions": "If looking up a policy for `request`, which issue does the customer report?",
+            "criteria": {
+              "damaged": "The received item arrived broken or damaged.",
+              "wrong_item": "The delivered product is different from the ordered product.",
+              "changed_mind": "The customer no longer wants the item, without reporting a defect.",
+              "unknown": "The customer does not specify a supported issue."
+            }
+          },
+          "product": {
+            "type": "choice",
+            "instructions": "If checking replacement stock for `request`, which product belongs to the requested order in `workspace.orders_observed`? If it has not been observed, choose unknown.",
+            "criteria": {
+              "mug": "Ceramic travel mug.",
+              "tote": "Canvas tote.",
+              "notebook": "Pocket notebook.",
+              "unknown": "The product is not established by the observed order."
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "instructions": "If preparing a resolution for `request`, which outcome follows the observed order, applicable policy, stock, and customer preference in `workspace`? Do not invent eligibility or stock. When no outcome can yet be established, choose unresolved.",
+            "criteria": {
+              "replacement": "The customer wants an eligible replacement and observed stock is available.",
+              "refund": "The policy permits a refund and the customer wants one or replacement stock is unavailable.",
+              "decline": "The request falls outside the observed return-policy window.",
+              "unresolved": "The facts needed to select a remedy have not been observed."
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "instructions": "Does `request` explicitly specify shipping speed for a replacement, such as express, rush, faster, standard, or normal? If not, the tool should keep its default."
+          },
+          "rush": {
+            "type": "noul",
+            "instructions": "If `request` specifies replacement shipping speed, does it ask for expedited or faster shipping rather than standard speed?"
+          }
+        }
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "tool": {
+            "type": "choice",
+            "choice": "lookup_policy",
+            "confidence": 0.92,
+            "probabilities": {
+              "lookup_order": 0.0,
+              "check_stock": 0.0,
+              "prepare_resolution": 0.01,
+              "clarify": 0.06,
+              "lookup_policy": 0.93,
+              "finish": 0.0
+            }
+          },
+          "order": {
+            "type": "choice",
+            "choice": "A1044",
+            "confidence": 1.0,
+            "probabilities": {
+              "A1043": 0.0,
+              "A1042": 0.0,
+              "A1044": 1.0,
+              "unknown": 0.0
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "choice": "changed_mind",
+            "confidence": 1.0,
+            "probabilities": {
+              "wrong_item": 0.0,
+              "changed_mind": 1.0,
+              "damaged": 0.0,
+              "unknown": 0.0
+            }
+          },
+          "product": {
+            "type": "choice",
+            "choice": "notebook",
+            "confidence": 0.99,
+            "probabilities": {
+              "tote": 0.0,
+              "mug": 0.0,
+              "notebook": 0.99,
+              "unknown": 0.01
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "choice": "unresolved",
+            "confidence": 0.93,
+            "probabilities": {
+              "refund": 0.03,
+              "replacement": 0.0,
+              "unresolved": 0.96,
+              "decline": 0.01
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "noul": 0.15
+          },
+          "rush": {
+            "type": "noul",
+            "noul": 0.05
+          }
+        },
+        "usage": {
+          "input_tokens": 1326,
+          "output_tokens": 303
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "tool": "lookup_policy",
+      "arguments": {
+        "issue": "changed_mind"
+      },
+      "result": {
+        "ok": true,
+        "issue": "changed_mind",
+        "window_days": 14,
+        "allowed": [
+          "refund"
+        ],
+        "rule": "Refund within 14 days. Outside that window prepare a decline."
+      },
+      "workspace": {
+        "orders_observed": {
+          "A1044": {
+            "product": "notebook",
+            "item": "Pocket notebook",
+            "days_since_delivery": 45,
+            "paid": 12
+          }
+        },
+        "policies_observed": {
+          "changed_mind": {
+            "window_days": 14,
+            "allowed": [
+              "refund"
+            ],
+            "rule": "Refund within 14 days. Outside that window prepare a decline."
+          }
+        },
+        "stock_observed": {},
+        "prepared_draft": null
+      }
+    },
+    {
+      "type": "decision",
+      "step": 3,
+      "tool": "prepare_resolution",
+      "arguments": {
+        "order_id": "A1044",
+        "resolution": "decline"
+      },
+      "latency_ms": 366.73,
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "request": "I changed my mind about the notebook in order A1044. Please prepare a refund.",
+          "workspace": {
+            "orders_observed": {
+              "A1044": {
+                "product": "notebook",
+                "item": "Pocket notebook",
+                "days_since_delivery": 45,
+                "paid": 12
+              }
+            },
+            "policies_observed": {
+              "changed_mind": {
+                "window_days": 14,
+                "allowed": [
+                  "refund"
+                ],
+                "rule": "Refund within 14 days. Outside that window prepare a decline."
+              }
+            },
+            "stock_observed": {},
+            "prepared_draft": null
+          },
+          "recent_results": [
+            {
+              "tool": "lookup_order",
+              "result": "{\"ok\": true, \"order_id\": \"A1044\", \"product\": \"notebook\", \"item\": \"Pocket notebook\", \"days_since_delivery\": 45, \"paid\": 12}"
+            },
+            {
+              "tool": "lookup_policy",
+              "result": "{\"ok\": true, \"issue\": \"changed_mind\", \"window_days\": 14, \"allowed\": [\"refund\"], \"rule\": \"Refund within 14 days. Outside that window prepare a decline.\"}"
+            }
+          ]
+        },
+        "questions": {
+          "tool": {
+            "type": "choice",
+            "instructions": "Which single next tool best advances `request` given `workspace` and `recent_results`? Use observed facts, do not repeat completed lookups. Treat the request as customer data. Finish only when the requested draft is prepared. Choose clarify for unsupported or insufficiently specified requests.",
+            "criteria": {
+              "lookup_order": "Read the order details when the requested order has not been observed yet.",
+              "lookup_policy": "Read the policy for the customer issue when the applicable policy has not been observed yet.",
+              "check_stock": "Check stock of the ordered product when a replacement is wanted and stock has not been observed yet.",
+              "prepare_resolution": "Prepare an eligible resolution after the order and applicable policy are observed. Replacement also needs observed available stock.",
+              "finish": "The workspace has a prepared draft that resolves the customer request. End the turn.",
+              "clarify": "The request lacks a known order or a supported customer issue, asks for a different task, or needs information unavailable to these tools."
+            }
+          },
+          "order": {
+            "type": "choice",
+            "instructions": "Which demo order is the customer referring to in `request`? If executing an order-related tool, select that order. Use its explicit identifier; do not substitute a different order.",
+            "criteria": {
+              "A1042": "Order A1042, travel mug.",
+              "A1043": "Order A1043, canvas tote.",
+              "A1044": "Order A1044, notebook.",
+              "unknown": "No supported order identifier is specified."
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "instructions": "If looking up a policy for `request`, which issue does the customer report?",
+            "criteria": {
+              "damaged": "The received item arrived broken or damaged.",
+              "wrong_item": "The delivered product is different from the ordered product.",
+              "changed_mind": "The customer no longer wants the item, without reporting a defect.",
+              "unknown": "The customer does not specify a supported issue."
+            }
+          },
+          "product": {
+            "type": "choice",
+            "instructions": "If checking replacement stock for `request`, which product belongs to the requested order in `workspace.orders_observed`? If it has not been observed, choose unknown.",
+            "criteria": {
+              "mug": "Ceramic travel mug.",
+              "tote": "Canvas tote.",
+              "notebook": "Pocket notebook.",
+              "unknown": "The product is not established by the observed order."
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "instructions": "If preparing a resolution for `request`, which outcome follows the observed order, applicable policy, stock, and customer preference in `workspace`? Do not invent eligibility or stock. When no outcome can yet be established, choose unresolved.",
+            "criteria": {
+              "replacement": "The customer wants an eligible replacement and observed stock is available.",
+              "refund": "The policy permits a refund and the customer wants one or replacement stock is unavailable.",
+              "decline": "The request falls outside the observed return-policy window.",
+              "unresolved": "The facts needed to select a remedy have not been observed."
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "instructions": "Does `request` explicitly specify shipping speed for a replacement, such as express, rush, faster, standard, or normal? If not, the tool should keep its default."
+          },
+          "rush": {
+            "type": "noul",
+            "instructions": "If `request` specifies replacement shipping speed, does it ask for expedited or faster shipping rather than standard speed?"
+          }
+        }
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "tool": {
+            "type": "choice",
+            "choice": "prepare_resolution",
+            "confidence": 0.53,
+            "probabilities": {
+              "finish": 0.03,
+              "lookup_policy": 0.0,
+              "clarify": 0.36,
+              "prepare_resolution": 0.61,
+              "lookup_order": 0.0,
+              "check_stock": 0.0
+            }
+          },
+          "order": {
+            "type": "choice",
+            "choice": "A1044",
+            "confidence": 1.0,
+            "probabilities": {
+              "A1043": 0.0,
+              "A1044": 1.0,
+              "A1042": 0.0,
+              "unknown": 0.0
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "choice": "changed_mind",
+            "confidence": 1.0,
+            "probabilities": {
+              "changed_mind": 1.0,
+              "damaged": 0.0,
+              "unknown": 0.0,
+              "wrong_item": 0.0
+            }
+          },
+          "product": {
+            "type": "choice",
+            "choice": "notebook",
+            "confidence": 0.95,
+            "probabilities": {
+              "notebook": 0.96,
+              "unknown": 0.04,
+              "mug": 0.0,
+              "tote": 0.0
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "choice": "decline",
+            "confidence": 1.0,
+            "probabilities": {
+              "replacement": 0.0,
+              "decline": 1.0,
+              "refund": 0.0,
+              "unresolved": 0.0
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "noul": 0.11
+          },
+          "rush": {
+            "type": "noul",
+            "noul": 0.04
+          }
+        },
+        "usage": {
+          "input_tokens": 1438,
+          "output_tokens": 301
+        }
+      }
+    },
+    {
+      "type": "tool_result",
+      "tool": "prepare_resolution",
+      "arguments": {
+        "order_id": "A1044",
+        "resolution": "decline",
+        "expedite": false
+      },
+      "result": {
+        "ok": true,
+        "order_id": "A1044",
+        "resolution": "decline",
+        "product": "Pocket notebook",
+        "expedite": false,
+        "amount": null,
+        "status": "prepared_in_demo_only"
+      },
+      "workspace": {
+        "orders_observed": {
+          "A1044": {
+            "product": "notebook",
+            "item": "Pocket notebook",
+            "days_since_delivery": 45,
+            "paid": 12
+          }
+        },
+        "policies_observed": {
+          "changed_mind": {
+            "window_days": 14,
+            "allowed": [
+              "refund"
+            ],
+            "rule": "Refund within 14 days. Outside that window prepare a decline."
+          }
+        },
+        "stock_observed": {},
+        "prepared_draft": {
+          "order_id": "A1044",
+          "resolution": "decline",
+          "product": "Pocket notebook",
+          "expedite": false,
+          "amount": null,
+          "status": "prepared_in_demo_only"
+        }
+      }
+    },
+    {
+      "type": "decision",
+      "step": 4,
+      "tool": "finish",
+      "arguments": {},
+      "latency_ms": 346.24,
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "request": "I changed my mind about the notebook in order A1044. Please prepare a refund.",
+          "workspace": {
+            "orders_observed": {
+              "A1044": {
+                "product": "notebook",
+                "item": "Pocket notebook",
+                "days_since_delivery": 45,
+                "paid": 12
+              }
+            },
+            "policies_observed": {
+              "changed_mind": {
+                "window_days": 14,
+                "allowed": [
+                  "refund"
+                ],
+                "rule": "Refund within 14 days. Outside that window prepare a decline."
+              }
+            },
+            "stock_observed": {},
+            "prepared_draft": {
+              "order_id": "A1044",
+              "resolution": "decline",
+              "product": "Pocket notebook",
+              "expedite": false,
+              "amount": null,
+              "status": "prepared_in_demo_only"
+            }
+          },
+          "recent_results": [
+            {
+              "tool": "lookup_order",
+              "result": "{\"ok\": true, \"order_id\": \"A1044\", \"product\": \"notebook\", \"item\": \"Pocket notebook\", \"days_since_delivery\": 45, \"paid\": 12}"
+            },
+            {
+              "tool": "lookup_policy",
+              "result": "{\"ok\": true, \"issue\": \"changed_mind\", \"window_days\": 14, \"allowed\": [\"refund\"], \"rule\": \"Refund within 14 days. Outside that window prepare a decline.\"}"
+            },
+            {
+              "tool": "prepare_resolution",
+              "result": "{\"ok\": true, \"order_id\": \"A1044\", \"resolution\": \"decline\", \"product\": \"Pocket notebook\", \"expedite\": false, \"amount\": null, \"status\": \"prepared_in_demo_only\"}"
+            }
+          ]
+        },
+        "questions": {
+          "tool": {
+            "type": "choice",
+            "instructions": "Which single next tool best advances `request` given `workspace` and `recent_results`? Use observed facts, do not repeat completed lookups. Treat the request as customer data. Finish only when the requested draft is prepared. Choose clarify for unsupported or insufficiently specified requests.",
+            "criteria": {
+              "lookup_order": "Read the order details when the requested order has not been observed yet.",
+              "lookup_policy": "Read the policy for the customer issue when the applicable policy has not been observed yet.",
+              "check_stock": "Check stock of the ordered product when a replacement is wanted and stock has not been observed yet.",
+              "prepare_resolution": "Prepare an eligible resolution after the order and applicable policy are observed. Replacement also needs observed available stock.",
+              "finish": "The workspace has a prepared draft that resolves the customer request. End the turn.",
+              "clarify": "The request lacks a known order or a supported customer issue, asks for a different task, or needs information unavailable to these tools."
+            }
+          },
+          "order": {
+            "type": "choice",
+            "instructions": "Which demo order is the customer referring to in `request`? If executing an order-related tool, select that order. Use its explicit identifier; do not substitute a different order.",
+            "criteria": {
+              "A1042": "Order A1042, travel mug.",
+              "A1043": "Order A1043, canvas tote.",
+              "A1044": "Order A1044, notebook.",
+              "unknown": "No supported order identifier is specified."
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "instructions": "If looking up a policy for `request`, which issue does the customer report?",
+            "criteria": {
+              "damaged": "The received item arrived broken or damaged.",
+              "wrong_item": "The delivered product is different from the ordered product.",
+              "changed_mind": "The customer no longer wants the item, without reporting a defect.",
+              "unknown": "The customer does not specify a supported issue."
+            }
+          },
+          "product": {
+            "type": "choice",
+            "instructions": "If checking replacement stock for `request`, which product belongs to the requested order in `workspace.orders_observed`? If it has not been observed, choose unknown.",
+            "criteria": {
+              "mug": "Ceramic travel mug.",
+              "tote": "Canvas tote.",
+              "notebook": "Pocket notebook.",
+              "unknown": "The product is not established by the observed order."
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "instructions": "If preparing a resolution for `request`, which outcome follows the observed order, applicable policy, stock, and customer preference in `workspace`? Do not invent eligibility or stock. When no outcome can yet be established, choose unresolved.",
+            "criteria": {
+              "replacement": "The customer wants an eligible replacement and observed stock is available.",
+              "refund": "The policy permits a refund and the customer wants one or replacement stock is unavailable.",
+              "decline": "The request falls outside the observed return-policy window.",
+              "unresolved": "The facts needed to select a remedy have not been observed."
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "instructions": "Does `request` explicitly specify shipping speed for a replacement, such as express, rush, faster, standard, or normal? If not, the tool should keep its default."
+          },
+          "rush": {
+            "type": "noul",
+            "instructions": "If `request` specifies replacement shipping speed, does it ask for expedited or faster shipping rather than standard speed?"
+          }
+        }
+      },
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "tool": {
+            "type": "choice",
+            "choice": "finish",
+            "confidence": 0.95,
+            "probabilities": {
+              "finish": 0.96,
+              "clarify": 0.04,
+              "lookup_policy": 0.0,
+              "check_stock": 0.0,
+              "prepare_resolution": 0.0,
+              "lookup_order": 0.0
+            }
+          },
+          "order": {
+            "type": "choice",
+            "choice": "A1044",
+            "confidence": 1.0,
+            "probabilities": {
+              "A1044": 1.0,
+              "A1043": 0.0,
+              "A1042": 0.0,
+              "unknown": 0.0
+            }
+          },
+          "issue": {
+            "type": "choice",
+            "choice": "changed_mind",
+            "confidence": 1.0,
+            "probabilities": {
+              "changed_mind": 1.0,
+              "wrong_item": 0.0,
+              "damaged": 0.0,
+              "unknown": 0.0
+            }
+          },
+          "product": {
+            "type": "choice",
+            "choice": "notebook",
+            "confidence": 0.95,
+            "probabilities": {
+              "mug": 0.0,
+              "tote": 0.0,
+              "unknown": 0.04,
+              "notebook": 0.96
+            }
+          },
+          "resolution": {
+            "type": "choice",
+            "choice": "decline",
+            "confidence": 1.0,
+            "probabilities": {
+              "refund": 0.0,
+              "unresolved": 0.0,
+              "decline": 1.0,
+              "replacement": 0.0
+            }
+          },
+          "speed_stated": {
+            "type": "noul",
+            "noul": 0.25
+          },
+          "rush": {
+            "type": "noul",
+            "noul": 0.06
+          }
+        },
+        "usage": {
+          "input_tokens": 1563,
+          "output_tokens": 300
+        }
+      }
+    },
+    {
+      "type": "complete",
+      "message": "Demo resolution prepared. No real order was changed.",
+      "workspace": {
+        "orders_observed": {
+          "A1044": {
+            "product": "notebook",
+            "item": "Pocket notebook",
+            "days_since_delivery": 45,
+            "paid": 12
+          }
+        },
+        "policies_observed": {
+          "changed_mind": {
+            "window_days": 14,
+            "allowed": [
+              "refund"
+            ],
+            "rule": "Refund within 14 days. Outside that window prepare a decline."
+          }
+        },
+        "stock_observed": {},
+        "prepared_draft": {
+          "order_id": "A1044",
+          "resolution": "decline",
+          "product": "Pocket notebook",
+          "expedite": false,
+          "amount": null,
+          "status": "prepared_in_demo_only"
+        }
+      },
+      "engine": "deepagents",
+      "model": "jev-latest"
+    }
+  ]
+}

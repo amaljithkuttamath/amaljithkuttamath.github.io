@@ -1,0 +1,33 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Jev Lab · Amaljith Kuttamath" description="Watch Jev choose tools and arguments inside a real Deep Agents loop. Explore recorded traces, policy checks, recovery, and editable typed prompts.">
+<div class="jev">
+  <header class="j-hero">
+    <div><a class="j-back" href="/apps">← All apps</a><p class="j-eyebrow">JEV LAB <span>/</span> SMALL DECISIONS, REAL TOOL CALLS</p><h1>A little judgment.<br /><em>A whole chain of action.</em></h1><p class="j-lead">Watch Jev turn a request into tool calls, learn from the results,<br class="j-desktop" /> and decide what happens next. Built with Deep Agents.</p></div>
+    <aside class="j-how"><span class="j-kicker">THE AGENT LOOP</span><div><span>Observe</span><i>→</i><b>Jev</b><i>→</i><span>Use a tool</span></div><p>Typed decisions from Jev.<br />Execution and feedback from Deep Agents.</p><a href="https://docs.typesafe.ai/cookbooks/function_calling" target="_blank" rel="noopener noreferrer">Based on the function-calling cookbook ↗</a></aside>
+  </header>
+  <div class="j-tabs" role="group" aria-label="Showcase mode"><button data-mode="agent" aria-pressed="true"><span>01</span> Agent desk</button><button data-mode="prompts" aria-pressed="false"><span>02</span> Prompt explorer</button><span class="j-mode-note">REAL API OUTPUTS · VISIBLE LIMITS</span></div>
+
+  <section id="j-agent" aria-label="Agent desk">
+    <div class="j-scenario-row"><span class="j-kicker">TRY A SCENARIO</span><div class="j-scenarios" role="group" aria-label="Agent scenarios"><button data-scenario="replacement" aria-pressed="true">Damaged item <span>↗</span></button><button data-scenario="out-of-stock" aria-pressed="false">Out of stock <span>↗</span></button><button data-scenario="expired" aria-pressed="false">Outside the policy <span>↗</span></button></div></div>
+    <div class="j-composer"><label for="j-prompt">THE CUSTOMER REQUEST</label><textarea id="j-prompt" rows="2" maxlength="1500" spellcheck="false"></textarea><div class="j-composer-bottom"><p><span class="j-workspace-dot"></span> Demo workspace · no real orders are changed</p><div><button id="j-load" class="j-secondary">Load recorded run</button><button id="j-run" class="j-primary" disabled>Run live agent <span>↗</span></button><button id="j-stop" class="j-secondary" hidden>Stop</button></div></div><p id="j-runtime" class="j-runtime" role="status"></p></div>
+    <div class="j-desk">
+      <section class="j-trace-pane" aria-labelledby="j-trace-heading"><div class="j-section-head"><h2 id="j-trace-heading">The decision trail</h2><span id="j-source" class="j-badge">RECORDED RUN</span></div><p id="j-trace-meta" class="j-meta"></p><div id="j-trace" class="j-trace"></div><p id="j-run-status" class="j-run-status" role="status" aria-live="polite"></p></section>
+      <aside class="j-inspector" aria-label="Inspect a decision"><div class="j-section-head"><h2>Inside the decision</h2><span class="j-kicker" id="j-step-number"></span></div><div id="j-decision"></div><details class="j-raw"><summary>Exact request &amp; response <span>＋</span></summary><pre id="j-raw-decision"></pre></details><div id="j-workspace" class="j-workspace"></div></aside>
+    </div>
+    <div class="j-footnote"><strong>What you’re watching</strong><p>Jev selects a tool and closed-set arguments in one request. Deep Agents executes the selected Python function, then passes its result back. Code enforces the demo’s policy. Expand a step to inspect its probabilities and returned data.</p></div>
+  </section>
+
+  <section id="j-prompts" aria-label="Prompt explorer" hidden>
+    <div class="j-prompt-select"><label for="j-example">EXPLORE A RECORDED QUESTION SET</label><select id="j-example"><option value="sarcasm">Sentiment · sarcastic praise</option><option value="quoted_opinion">Sentiment · quoted criticism</option><option value="code_guard">Code · reversed guard</option><option value="code_valid">Code · correct guard</option><option value="code_guard-refined">Code · refined repair question</option><option value="code_valid-refined">Code · refined correct guard</option><option value="browser_next">Action · subscription active</option><option value="browser_done">Action · cancellation complete</option></select></div>
+    <div class="j-prompt-grid"><div class="j-prompt-input"><label for="j-state">State</label><textarea id="j-state" rows="9" spellcheck="false"></textarea><details class="j-question-edit"><summary>Edit the questions <span>＋</span></summary><label class="j-sr" for="j-questions">Questions JSON</label><textarea id="j-questions" rows="16" spellcheck="false"></textarea></details><div class="j-export"><button id="j-copy" class="j-primary">Copy request ↗</button><button id="j-restore" class="j-secondary">Restore</button><a href="https://console.typesafe.ai/decode" target="_blank" rel="noopener noreferrer">Playground ↗</a></div><p id="j-edit-status" role="status" class="j-runtime"></p></div><div class="j-prompt-output"><span class="j-badge">RECORDED ANSWERS</span><div id="j-answers"></div><p id="j-prompt-note" class="j-prompt-note"></p></div></div>
+  </section>
+
+  <section class="j-primitives" aria-label="Jev primitives"><div><span class="j-kicker">CHOICE</span><h3>Pick a possibility.</h3><p>Tools and enum arguments become choices. The full distribution stays visible.</p></div><div><span class="j-kicker">NOUL</span><h3>How likely is “yes”?</h3><p>Flags and optional-argument presence use yes probabilities. Not intensity scores.</p></div><div><span class="j-kicker">SCORE</span><h3>Give judgment a scale.</h3><p>Ordered rubrics measure degree. Explore one in the sentiment examples.</p></div></section>
+  <div class="j-provenance"><p><strong>Small experiments, honest records.</strong> Recorded with Jev on September 17, 2026. The orders are synthetic; model answers and tool execution traces are real. These examples don’t establish general accuracy. On GitHub Pages, runs are recorded replays; live mode needs the local agent runtime.</p><a href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/tree/main/agent" target="_blank" rel="noopener noreferrer">Code &amp; setup ↗</a></div>
+  <noscript><p>Enable JavaScript to inspect the interactive traces. The source repository includes every recorded request and result.</p></noscript>
+</div>
+</Base>
+<script>import '../../lib/jev/ui';</script>
+<style is:global>@import '../../styles/jev.css';</style>
