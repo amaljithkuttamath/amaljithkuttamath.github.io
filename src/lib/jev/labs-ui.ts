@@ -41,9 +41,11 @@ function showResult() {
   if (task.id === 'leads') target.append(element('p', 'jl-composite', `Composite: ${leadComposite(result.response.answers).toFixed(1)} / 100 · 50% fit + 30% intent + 20% timing. A rubric score, not a sale probability.`));
   for (const [id, question] of Object.entries(task.questions)) {
     const answer = result.response.answers[id], view = answerView(question, answer);
-    const card = element('article', 'j-answer jl-answer');
-    const head = element('div', 'j-answer-head'); head.append(element('h3', '', pretty(id)), element('span', 'j-type', question.type)); card.append(head);
-    if (id !== task.primary) card.append(element('strong', 'j-answer-value', view.value), element('p', '', view.caption));
+    const card = element('details', 'j-answer jl-answer');
+    card.open = id === task.primary;
+    const head = element('summary', 'j-answer-head');
+    head.append(element('span', 'jl-answer-name', pretty(id)), element('span', 'jl-answer-summary', view.value), element('span', 'j-type', question.type));
+    card.append(head, element('p', '', view.caption));
     const bars = element('div', 'j-bars');
     for (const value of view.bars) {
       const row = element('div', 'j-bar'), heading = element('div', 'j-bar-label'), track = element('div', 'j-bar-track'), fill = element('i');
@@ -88,7 +90,7 @@ function selectTask(id: string) {
     const group = element('div', 'jl-field'), label = element('label', '', field.label);
     const input = field.multiline ? element('textarea') : element('input');
     input.id = `jl-field-${field.id}`; label.htmlFor = input.id; input.maxLength = field.maxLength;
-    if (input instanceof HTMLTextAreaElement) input.rows = field.id === 'text' ? 7 : 4;
+    if (input instanceof HTMLTextAreaElement) input.rows = field.id === 'text' ? 5 : 4;
     input.spellcheck = false; input.addEventListener('input', edited); controls.set(field.id, input); group.append(label, input); fields.append(group);
   }
   loadExample();
@@ -101,9 +103,9 @@ function setRunning(value: boolean) {
   $<HTMLButtonElement>('jl-copy').disabled = value;
   run.disabled = value || !ready; $('jl-stop').hidden = !value;
 }
-for (const [index, lab] of tasks.entries()) {
+for (const lab of tasks) {
   const button = element('button', 'jl-task'); button.type = 'button'; button.dataset.lab = lab.id;
-  button.append(element('span', 'j-kicker', String(index + 1).padStart(2, '0')), element('strong', '', lab.title), element('span', 'jl-task-arrow', '↗'));
+  button.append(element('strong', '', lab.title), element('span', 'jl-task-count', `n=${lab.examples.length}`));
   button.addEventListener('click', () => selectTask(lab.id)); $('jl-tasks').append(button);
 }
 selector.addEventListener('change', loadExample);
@@ -144,7 +146,7 @@ if (apiBase !== null) {
   fetch(`${apiBase}/api/jev/health`, {signal: AbortSignal.timeout(8000)}).then(r => r.ok ? r.json() : null).then(value => {
     ready = value?.ready === true;
     try { request(); run.disabled = !ready || running; } catch { run.disabled = true; }
-    run.textContent = ready ? 'Classify live ↗' : 'Live service unavailable';
+    run.textContent = ready ? 'Classify live' : 'Live service unavailable';
     $('jl-runtime').textContent = ready
       ? import.meta.env.DEV ? 'Live local runtime connected. Your input is sent to TypeSafe when you classify.' : 'Live classification connected. Input is sent to TypeSafe. Limit: 5/minute and 20/day per network address; 200/day across the demo. Resets at midnight UTC.'
       : 'Live classification is temporarily unavailable. Saved examples and request copying still work.';
