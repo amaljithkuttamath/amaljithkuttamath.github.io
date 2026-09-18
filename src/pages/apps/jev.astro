@@ -10,6 +10,20 @@ import cookbooks from '../../data/jev/cookbooks.json';
     <p class="j-lead">I’m testing how typed judgments behave across classification, prompt changes, and tool selection. These are small, inspectable probes. They don’t establish benchmark accuracy.</p>
     <div class="j-notebook-meta"><span>Amaljith Kuttamath</span><span>17–18 Sep 2026</span><code>jev-latest</code><a href="#j-method">Method &amp; limitations ↓</a></div>
   </header>
+  <aside class="j-background" aria-labelledby="j-background-title">
+    <h2 id="j-background-title">Before you try it</h2>
+    <p>Jev is TypeSafe AI’s model for focused, structured judgments. You give it the material to inspect (<strong>state</strong>), a question, and the allowed answers or rubric (<strong>criteria</strong>). For a product review, that could mean selecting a sentiment label, checking for sarcasm, and scoring dissatisfaction in the same request.</p>
+    <details>
+      <summary>Three answer types &amp; how to read this notebook</summary>
+      <dl class="j-background-types">
+        <div><dt>Choice</dt><dd>Selects from labels you define, such as positive, negative, or mixed. Expand the answer to see the probability assigned to each label.</dd></div>
+        <div><dt>Noul</dt><dd>Estimates the probability of yes. A sarcasm value of 70% means a 70% probability of sarcasm, not “70% sarcastic.”</dd></div>
+        <div><dt>Score</dt><dd>Places an answer on an ordered rubric, such as no dissatisfaction through intense frustration. A score measures degree, not probability.</dd></div>
+      </dl>
+      <p>Start with a saved input, change one detail, and select <strong>Classify live</strong>. Compare the outputs and inspect the exact questions. <strong>Recorded</strong> means a saved response; <strong>live</strong> means a new API call. A high probability can still accompany a wrong answer. In the agent traces, Jev chooses a tool; Deep Agents executes it and returns feedback.</p>
+      <a href="https://docs.typesafe.ai/primitives" target="_blank" rel="noopener noreferrer">TypeSafe’s question types ↗</a>
+    </details>
+  </aside>
   <div class="j-tabs" role="group" aria-label="Evaluation view"><button data-mode="labs" aria-pressed="true"><span>01</span> Task probes</button><button data-mode="agent" aria-pressed="false"><span>02</span> Agent traces</button><button data-mode="prompts" aria-pressed="false"><span>03</span> Prompt revisions</button><span class="j-mode-note">EXPLORATORY · NOT A BENCHMARK</span></div>
 
   <section id="j-labs" aria-label="Task probes">
