@@ -33,3 +33,17 @@ The recording command makes paid TypeSafe requests for three demo scenarios. It 
 The eight single-call prompt recordings in `src/data/jev/recordings.json` came from the earlier live prompt trials, including the unsuccessful code repair-location refinement. No source response was edited to improve an answer.
 
 On Node 25, run tests with `NODE_OPTIONS=--no-experimental-webstorage npm test`; CI uses Node 22. This avoids Node 25's added global localStorage changing an existing Chitti test's environment.
+
+## Classification lab
+
+The default page now offers six dedicated tasks: sentiment and sarcasm (including aspect opinions), support triage, content moderation, lead qualification, document routing, and claim/source evidence checking. The shared task definitions live in `src/data/jev/labs.json`; the browser and Python backend use the same questions. Fifteen examples have actual saved responses in `lab-recordings.json`. Editing input hides old answers. The review slider uses the selected-label probability; its threshold is illustrative and does not alter the model output. The lead composite uses declared, normalized rubric weights, not a probability of purchase.
+
+`POST /api/jev/classify` accepts only a named task and its required input fields. It makes one TypeSafe call and validates the response before returning it. It shares the loopback/origin restrictions and single-run limit with the agent endpoint. The UI supports fresh local inference, request copying, and result JSON downloads. Public Pages remains recorded mode; storing the API key in an Actions secret does not create a public runtime or expose it to the static build.
+
+To regenerate the examples (15 paid API requests):
+
+```sh
+.venv-jev/bin/python agent/jev_demo/record_labs.py --credentials /path/to/local.env
+```
+
+The prompts adapt TypeSafe's intent-routing, guardrail, citation-checking, and composite-scoring patterns, linked within each lab. No model-generated prose, automatic moderation actions, real sales decisions, or external document mutations are involved.
