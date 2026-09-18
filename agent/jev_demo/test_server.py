@@ -3,7 +3,8 @@ import json
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
-from server import Handler
+from server import Handler, BUSY
+from unittest.mock import patch
 
 class ServerBoundaryTests(unittest.TestCase):
     @classmethod
@@ -42,5 +43,27 @@ class ServerBoundaryTests(unittest.TestCase):
     def test_bad_input_is_rejected_before_inference(self):
         status, _ = self.request('POST', '/api/jev/run', '{"prompt": 42}', {'X-Jev-Demo': '1'})
         self.assertEqual(status, 400)
+
+    def test_classification_rejects_foreign_origin(self):
+        status, _ = self.request('POST', '/api/jev/classify', '{}', {'Origin':'https://untrusted.example', 'X-Jev-Demo':'1'})
+        self.assertEqual(status, 403)
+
+    def test_classification_rejects_unknown_or_malformed_tasks(self):
+        for task in ('unknown', [], None):
+            status, _ = self.request('POST', '/api/jev/classify', json.dumps({'task':task, 'inputs':{}}), {'X-Jev-Demo':'1'})
+            self.assertEqual(status, 400)
+
+    def test_classification_returns_busy_before_api_call(self):
+        BUSY.acquire()
+        try:
+            status, _ = self.request('POST', '/api/jev/classify', json.dumps({'task':'sentiment','inputs':{'text':'Great app.','target':'app'}}), {'X-Jev-Demo':'1'})
+            self.assertEqual(status, 429)
+        finally: BUSY.release()
+
+    def test_api_failure_does_not_expose_exception_details(self):
+        with patch('server.classify', side_effect=RuntimeError('sensitive-upstream-detail')):
+            status, body = self.request('POST', '/api/jev/classify', json.dumps({'task':'sentiment','inputs':{'text':'Great app.','target':'app'}}), {'X-Jev-Demo':'1'})
+        self.assertEqual(status, 502)
+        self.assertNotIn('sensitive-upstream-detail', json.dumps(body))
 
 if __name__ == '__main__': unittest.main()

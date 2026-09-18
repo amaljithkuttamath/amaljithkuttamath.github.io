@@ -114,7 +114,7 @@ runButton.addEventListener('click', async () => {
 });
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => {
-  const agent = button.dataset.mode === 'agent'; $('j-agent').hidden = !agent; $('j-prompts').hidden = agent;
+  for (const mode of ['labs', 'agent', 'prompts']) $(`j-${mode}`).hidden = mode !== button.dataset.mode;
   document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
 }));
 
