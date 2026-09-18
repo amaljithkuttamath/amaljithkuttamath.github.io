@@ -1,0 +1,22 @@
+import { describe, expect, it, vi } from 'vitest';
+import recordings from '../../src/data/jev/lab-recordings.json';
+import { handle, consumeQuota, LIMITS } from './api';
+const origin = 'https://amaljithkuttamath.github.io';
+const body = {task:'sentiment',inputs:{text:'Great app',target:'app'}};
+function request(value: unknown = body, headers: Record<string,string> = {}) {
+  return new Request('https://jev-api.example/api/jev/classify', {method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-Jev-Demo':'1','CF-Connecting-IP':'192.0.2.1',...headers},body:JSON.stringify(value)});
+}
+function deps() { return {key:'test-only-secret',reserve:vi.fn(async()=>({allowed:true,retryAfter:0})),upstream:vi.fn(async()=>Response.json(recordings[0].response)),now:()=>Date.UTC(2026,8,18)}; }
+describe('public classification boundary',()=>{
+ it('uses fixed questions and never returns the key',async()=>{ const d=deps(); const r=await handle(request(),d); expect(r.status).toBe(200); expect(d.reserve).toHaveBeenCalledOnce(); const [url,options]=d.upstream.mock.calls[0] as unknown as [string,RequestInit]; expect(url).toBe('https://api.typesafe.ai/v1/systemone'); expect(JSON.parse(options.body as string).questions.sentiment.type).toBe('choice'); expect(await r.text()).not.toContain(d.key); expect(r.headers.get('Access-Control-Allow-Origin')).toBe(origin); });
+ it.each([{...body,questions:{}},{...body,inputs:{...body.inputs,extra:'bad'}},{task:'toString',inputs:{}},{...body,inputs:{text:42,target:'app'}},{...body,inputs:{text:'x'.repeat(4001),target:'app'}}])('rejects malformed or overridden requests',async(value)=>{const d=deps();expect((await handle(request(value),d)).status).toBe(400);expect(d.upstream).not.toHaveBeenCalled();expect(d.reserve).not.toHaveBeenCalled();});
+ it('rejects foreign origins and missing client identity',async()=>{const d=deps();expect((await handle(request(body,{Origin:'https://other.example'}),d)).status).toBe(403);expect((await handle(request(body,{'CF-Connecting-IP':''}),d)).status).toBe(403);expect(d.upstream).not.toHaveBeenCalled();});
+ it('handles preflight without spending quota',async()=>{const d=deps();const r=await handle(new Request('https://jev-api.example/api/jev/classify',{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type,x-jev-demo'}}),d);expect(r.status).toBe(204);expect(d.reserve).not.toHaveBeenCalled();});
+ it('fails closed when key, quota service, or budget is unavailable',async()=>{const d=deps();d.key='';expect((await handle(request(),d)).status).toBe(503);d.key='test';d.reserve.mockRejectedValueOnce(new Error('private detail'));expect((await handle(request(),d)).status).toBe(503);d.reserve.mockResolvedValueOnce({allowed:false,retryAfter:40});const r=await handle(request(),d);expect(r.status).toBe(429);expect(r.headers.get('Retry-After')).toBe('40');expect(d.upstream).not.toHaveBeenCalled();});
+ it('redacts provider errors and rejects invalid output',async()=>{const d=deps();d.upstream.mockResolvedValueOnce(new Response('private detail',{status:401}));const r=await handle(request(),d);expect(r.status).toBe(502);expect(await r.text()).not.toContain('private detail');d.upstream.mockResolvedValueOnce(Response.json({answers:{}}));expect((await handle(request(),d)).status).toBe(502);});
+ it('limits streamed bodies even without content-length',async()=>{const d=deps();expect((await handle(request({x:'a'.repeat(40000)}),d)).status).toBe(413);expect(d.reserve).not.toHaveBeenCalled();});
+});
+describe('durable quota policy',()=>{
+ it('enforces burst and daily per-IP limits independently',()=>{let state;const start=Date.UTC(2026,8,18);for(let i=0;i<20;i++){const result=consumeQuota(state,'client',start+Math.floor(i/5)*60000);expect(result.allowed).toBe(true);state=result.state;if(i===4)expect(consumeQuota(state,'client',start).allowed).toBe(false);}expect(consumeQuota(state,'client',start+3600000).allowed).toBe(false);expect(consumeQuota(state,'other',start+3600000).allowed).toBe(true);});
+ it('enforces a global daily cap and resets on UTC day boundaries',()=>{let state;const now=Date.UTC(2026,8,18);for(let i=0;i<LIMITS.dailyTotal;i++){const result=consumeQuota(state,'ip-'+i,now);expect(result.allowed).toBe(true);state=result.state;}expect(consumeQuota(state,'new',now).allowed).toBe(false);const next=consumeQuota(state,'new',now+86400000);expect(next.allowed).toBe(true);expect(next.state.total).toBe(1);expect(Object.keys(next.state.clients)).toHaveLength(1);});
+});

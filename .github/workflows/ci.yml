@@ -36,3 +36,21 @@ jobs:
           cache-dependency-path: agent/requirements.txt
       - run: python -m pip install -r agent/requirements.txt
       - run: python -m unittest discover -s agent/jev_demo -p 'test_*.py'
+
+  jev-public-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: worker/jev
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/jev/package-lock.json
+      - run: npm ci
+      - run: npm run check
+        env:
+          WRANGLER_SEND_METRICS: 'false'

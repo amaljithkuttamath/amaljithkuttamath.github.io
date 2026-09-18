@@ -13,3 +13,8 @@ docs/plans/
 .env.*.local
 .venv-jev/
 __pycache__/
+# Cloudflare local runtime and secret files
+.wrangler/
+.dev.vars
+.dev.vars.*
+.worker-build/

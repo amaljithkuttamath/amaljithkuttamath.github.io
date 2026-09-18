@@ -2,6 +2,8 @@ import catalog from '../../data/jev/labs.json';
 import captured from '../../data/jev/lab-recordings.json';
 import { answerView, pretty, type Request } from './model';
 import { buildLabRequest, validateLabResponse, reviewDecision, leadComposite, type Lab, type LabRecording } from './labs';
+import { classificationBase } from './runtime';
+const apiBase = classificationBase(import.meta.env.DEV, import.meta.env.PUBLIC_JEV_API_URL);
 const tasks = catalog as unknown as Lab[];
 const recordings = captured as unknown as LabRecording[];
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -28,7 +30,7 @@ function showResult() {
   $<HTMLButtonElement>('jl-download').disabled = !result;
   $('jl-origin').textContent = result ? live ? 'LIVE RESULT' : 'RECORDED RESULT' : 'NO RESULT';
   $('jl-meta').textContent = result ? `${Math.round(result.latency_ms)} ms · ${new Date(result.recorded_at).toLocaleDateString()} · ${result.request.model}` : '';
-  if (!result) { target.append(element('p', 'j-empty', running ? 'Jev is evaluating the supplied text…' : 'Edited text needs a fresh inference. Run locally, copy the request into Playground, or restore an example.')); return; }
+  if (!result) { target.append(element('p', 'j-empty', running ? 'Jev is evaluating the supplied text…' : 'Edited text needs a fresh inference. Use live classification when connected, copy the request into Playground, or restore an example.')); return; }
   const primary = result.response.answers[task.primary];
   const decision = reviewDecision(primary, Number(threshold.value) / 100);
   const summary = element('div', 'jl-verdict');
@@ -118,13 +120,17 @@ run.addEventListener('click', async () => {
   if (running || !ready) return;
   let payload: Request; try { payload = request(); } catch { return; }
   result = undefined; live = true; controller = new AbortController(); setRunning(true); showResult();
-  $('jl-status').textContent = 'Sending this input to TypeSafe through the local backend…';
+  $('jl-status').textContent = 'Sending this input to TypeSafe for classification…';
   let timedOut = false;
   const timeout = setTimeout(() => { timedOut = true; controller?.abort(); }, 35000);
   try {
-    const response = await fetch('/api/jev/classify', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jev-Demo': '1' }, body: JSON.stringify({ task: task.id, inputs: payload.state }), signal: controller.signal });
+    const response = await fetch(`${apiBase}/api/jev/classify`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jev-Demo': '1' }, body: JSON.stringify({ task: task.id, inputs: payload.state }), signal: controller.signal });
     const value = await response.json();
-    if (!response.ok) throw new Error(typeof value?.error === 'string' ? value.error : `Runtime returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      const retry = Number(response.headers.get('Retry-After'));
+      const wait = response.status === 429 && Number.isFinite(retry) && retry > 0 ? ` Retry in about ${Math.ceil(retry / 60)} minute(s).` : '';
+      throw new Error((typeof value?.error === 'string' ? value.error : `Runtime returned HTTP ${response.status}.`) + wait);
+    }
     if (!validateLabResponse(task, value?.response) || typeof value?.latency_ms !== 'number' || !Number.isFinite(value.latency_ms)) throw new Error('The runtime returned an invalid classification.');
     result = { task: task.id, example: 'custom', request: payload, response: value.response, latency_ms: value.latency_ms, recorded_at: new Date().toISOString() };
     $('jl-status').textContent = 'Live inference complete. These answers belong to the current input.';
@@ -133,10 +139,20 @@ run.addEventListener('click', async () => {
   } finally { clearTimeout(timeout); setRunning(false); showResult(); }
 });
 selectTask(task.id);
-if (import.meta.env.DEV) {
-  fetch('/api/jev/health').then(r => r.ok ? r.json() : null).then(value => {
+if (apiBase !== null) {
+  run.textContent = 'Connecting…';
+  fetch(`${apiBase}/api/jev/health`, {signal: AbortSignal.timeout(8000)}).then(r => r.ok ? r.json() : null).then(value => {
     ready = value?.ready === true;
     try { request(); run.disabled = !ready || running; } catch { run.disabled = true; }
-    $('jl-runtime').textContent = ready ? 'Live local runtime connected. Your input is sent to TypeSafe when you classify.' : 'Start the local backend to classify custom text. Saved examples work now.';
-  }).catch(() => { $('jl-runtime').textContent = 'Local runtime unavailable. Explore saved examples or copy a request into Playground.'; });
-} else $('jl-runtime').textContent = 'Recorded mode on GitHub Pages. Custom text needs the local backend or TypeSafe Playground; the API key stays private.';
+    run.textContent = ready ? 'Classify live ↗' : 'Live service unavailable';
+    $('jl-runtime').textContent = ready
+      ? import.meta.env.DEV ? 'Live local runtime connected. Your input is sent to TypeSafe when you classify.' : 'Live classification connected. Input is sent to TypeSafe. Limit: 5/minute and 20/day per network address; 200/day across the demo. Resets at midnight UTC.'
+      : 'Live classification is temporarily unavailable. Saved examples and request copying still work.';
+  }).catch(() => {
+    run.textContent = 'Live service unavailable';
+    $('jl-runtime').textContent = 'Could not connect to live classification. Reload to retry, or explore saved examples.';
+  });
+} else {
+  run.textContent = 'Live service not connected';
+  $('jl-runtime').textContent = 'This deployment has no live API connected yet. Saved examples work; custom input needs the local app or TypeSafe Playground.';
+}
