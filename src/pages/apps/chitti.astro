@@ -69,7 +69,7 @@ const PRESETS = [
         <h1>Chitti</h1>
         <div class="ch-badges">
           <span class="badge">{SOURCE_COUNT} databases</span>
-          <span class="badge">browser-only</span>
+          <span class="badge">local workspace</span>
           <span class="badge">byok</span>
           <span class="badge">cited</span>
         </div>
@@ -365,6 +365,13 @@ const PRESETS = [
                 <p class="ch-sources-empty" id="ch-sources-empty" hidden>No databases match.</p>
               </div>
               <p class="ch-sources-hint" id="ch-sources-hint">Chitti answers only from the selected databases.</p>
+            </div>
+          </div>
+
+          <div class="ch-byok-row ch-rlm-row">
+            <div class="ch-rlm">
+              <label class="ch-save"><input type="checkbox" id="ch-jev-toggle" /><span>Use Jev for dataset routing &amp; evidence checks</span></label>
+              <p class="ch-rlm-hint" id="ch-jev-hint">Optional for full agent runs. Sends your question, candidate metadata, answer, chart, and fetched rows to TypeSafe through the hosted demo. Jev helps select datasets and replaces the final model review with five evidence checks. Up to four calls per turn, sharing the Jev demo’s limits: 5/minute, 20/day per network address, 200/day total. Direct lookups remain model-free. <a href="/apps/jev/">Inspect the Jev experiments ↗</a> <span id="ch-jev-lock-note" hidden>Locked for this conversation; start a new question to change.</span></p>
             </div>
           </div>
 

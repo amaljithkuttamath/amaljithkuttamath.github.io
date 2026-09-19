@@ -110,7 +110,7 @@ export function buildVerifyReceipt(e: TraceEvent): HTMLElement {
   wrap.appendChild(verdict);
   const meta = document.createElement('div');
   meta.className = 'ch-trace-detail';
-  const conf = verifierConfidenceLabel(e.confidence);
+  const conf = e.verifyEngine === 'jev' ? '90% cutoff per check · not calibrated' : verifierConfidenceLabel(e.confidence);
   const n = (e.issues && e.issues.length) || 0;
   meta.textContent = conf + ' · ' + n + (n === 1 ? ' issue' : ' issues');
   wrap.appendChild(meta);
@@ -369,7 +369,7 @@ export function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
     // search-receipt card instead of the plain "N hits" detail line.
     if (e.tool === 'find_series' && e.receipt) {
       body.appendChild(buildReceiptCard(e.receipt));
-    } else if (e.detail && e.tool !== 'verify') {
+    } else if (e.detail && e.tool !== 'verify' && e.tool !== 'jev_route') {
       const d = document.createElement('div');
       d.className = 'ch-trace-detail';
       d.textContent = e.detail;
@@ -386,18 +386,28 @@ export function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
     // The verify receipt renders one of the three honest outcomes. The
     // ink-stamped amber VERIFIED badge appears ONLY on a genuine pass; the
     // other states are muted and never borrow amber.
+    if (e.tool === 'jev_route' || e.verifyEngine === 'jev') {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = e.tool === 'jev_route' ? 'Jev routing decision & probabilities' : 'Jev evidence checks & probabilities';
+      const pre = document.createElement('pre');
+      pre.className = 'ch-file-body';
+      pre.textContent = e.detail || 'Waiting for Jev…';
+      details.append(summary, pre);
+      body.appendChild(details);
+    }
     if (e.tool === 'verify') {
       const isLast = i === lastVerifyIdx;
       if (e.pass === true) {
         const stampEl = document.createElement('span');
         stampEl.className = 'ch-stamp';
-        stampEl.textContent = 'verified';
+        stampEl.textContent = e.verifyEngine === 'jev' ? 'Jev checks passed' : 'verified';
         // The rubber-stamp styling carries the "passed a check" meaning
         // visually; role="img" + aria-label speak it in plain words.
         stampEl.setAttribute('role', 'img');
-        stampEl.setAttribute('aria-label', verificationStampLabel());
+        stampEl.setAttribute('aria-label', e.verifyEngine === 'jev' ? 'Passed the configured Jev checks; this is a model judgment, not proof of correctness.' : verificationStampLabel());
         body.appendChild(stampEl);
-        if (e.confidence && e.confidence !== 'none') {
+        if (e.confidence && e.confidence !== 'none' && e.verifyEngine !== 'jev') {
           const c = document.createElement('div');
           c.className = 'ch-trace-detail';
           c.textContent = verifierConfidenceLabel(e.confidence);
@@ -420,7 +430,7 @@ export function renderTrace(tb: TurnBlock, events: TraceEvent[]) {
       } else if (e.verifyStatus === 'unavailable') {
         const note = document.createElement('div');
         note.className = 'ch-trace-detail ch-trace-unavailable';
-        note.textContent = 'verification unavailable — provider error';
+        note.textContent = e.verifyEngine === 'jev' ? e.detail || 'Jev review unavailable' : 'verification unavailable — provider error';
         body.appendChild(note);
       } else {
         // Final could-not-verify: verdict + confidence + issue count, with the

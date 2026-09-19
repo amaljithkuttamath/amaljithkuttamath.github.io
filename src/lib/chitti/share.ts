@@ -31,6 +31,7 @@ export const MAX_SHARE_BYTES = 8000;
 
 // The compact, versioned schema the fragment carries.
 export interface ShareVerification {
+  engine?: 'jev';
   status: 'verified' | 'unverified' | 'unavailable';
   confidence: 'high' | 'medium' | 'low' | 'none';
   issues: string[];
@@ -61,7 +62,7 @@ export interface ShareInput {
   rows: DataRow[];
   citations: Citation[];
   verification:
-    | { status?: string; confidence?: string; issues?: string[] }
+    | { engine?: string; status?: string; confidence?: string; issues?: string[] }
     | null
     | undefined;
   ts?: string;
@@ -163,6 +164,7 @@ function cleanVerification(v: unknown): ShareVerification | null {
   if (!VERIFY_STATUS.has(o.status as string)) return null;
   return {
     status: o.status as ShareVerification['status'],
+    ...(o.engine === 'jev' ? {engine:'jev' as const} : {}),
     confidence: VERIFY_CONFIDENCE.has(o.confidence as string)
       ? (o.confidence as ShareVerification['confidence'])
       : 'none',

@@ -5,7 +5,7 @@
 import { run, allTurns, liveChartTurns, consoleEl, threadEl, newConvoBtn, composerQ,
          qIn, keyIn, byokSum, modelSel, askBtn, sourcesSearch, askForm } from './state';
 import { unlockSources, openByok, selectedSources, updateSourcesCount, currentProvider,
-         rlmEnabled, lockSources } from './config';
+         rlmEnabled, jevConfig, lockSources } from './config';
 import { createSession } from '../agent';
 import { parseFastPath, runFastPath, type FastPathResult } from '../fastpath';
 import { rowsToCSV } from '../tools';
@@ -362,7 +362,7 @@ export async function handleAskSubmit(e: SubmitEvent) {
     // is locked for the rest of the conversation. "+ new conversation" clears
     // `session` and unlocks the picker.
     if (!run.session) {
-      run.session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled() });
+      run.session = createSession(cfg, { sources: selectedSources(), rlm: rlmEnabled(), jev: jevConfig() });
       lockSources();
     }
     const out = await run.session!.ask(question, {

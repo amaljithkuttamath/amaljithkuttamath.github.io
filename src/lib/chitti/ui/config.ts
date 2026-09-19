@@ -15,6 +15,13 @@ import {
   type ProviderId, type ModelOption,
 } from '../providers';
 import { $ } from './dom';
+import { classificationBase } from '../../jev/runtime';
+import { jevToggle, jevHint } from './state';
+const jevBase = classificationBase(import.meta.env.DEV, import.meta.env.PUBLIC_JEV_API_URL);
+const jevLockNote = document.getElementById('ch-jev-lock-note');
+if (jevToggle) jevToggle.disabled = jevBase === null;
+if (jevBase === null && jevHint) jevHint.textContent = 'Jev assist is unavailable: no hosted service is configured.';
+export function jevConfig() { return jevToggle?.checked && jevBase !== null ? {base:jevBase} : undefined; }
 
 // Model + databases live behind a disclosure so the sheet is short on mobile
 // (the keyboard-vs-key-field problem). Key-first: collapsed until there's a
@@ -389,6 +396,8 @@ export function rlmEnabled(): boolean {
 
 export function lockSources() {
   sourcesLocked = true;
+  if (jevToggle) jevToggle.disabled = true;
+  if (jevLockNote) jevLockNote.hidden = false;
   sourcesBox?.classList.add('is-locked');
   sourceItems.forEach((b) => b.setAttribute('aria-disabled', 'true'));
   if (sourcesSearch) sourcesSearch.disabled = true;
@@ -407,6 +416,8 @@ export function lockSources() {
 
 export function unlockSources() {
   sourcesLocked = false;
+  if (jevToggle) jevToggle.disabled = jevBase === null;
+  if (jevLockNote) jevLockNote.hidden = true;
   sourcesBox?.classList.remove('is-locked');
   sourceItems.forEach((b) => b.removeAttribute('aria-disabled'));
   if (sourcesSearch) sourcesSearch.disabled = false;

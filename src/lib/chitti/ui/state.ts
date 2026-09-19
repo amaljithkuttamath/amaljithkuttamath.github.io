@@ -72,6 +72,8 @@ export const sourcesEmpty = $('ch-sources-empty');
 export const sourceItems = Array.from(
   document.querySelectorAll<HTMLButtonElement>('.ch-source-item')
 );
+export const jevToggle = $('ch-jev-toggle') as HTMLInputElement | null;
+export const jevHint = $('ch-jev-hint');
 export const rlmBox = $('ch-rlm');
 export const rlmToggle = $('ch-rlm-toggle') as HTMLInputElement | null;
 export const rlmHint = $('ch-rlm-hint');
