@@ -69,6 +69,7 @@ import {
 import { MAX_TOOL_CALLS, MAX_LLM_PER_RUN, MAX_LLM_PER_TURN, LLM_DATA_CAP, MAX_DELEGATIONS_PER_TURN, MAX_SUBAGENT_CALLS } from './budgets';
 import { buildSystemPrompt, buildSubAgentPrompt } from './prompts';
 import { needsPlan, parsePlanBrief, type PlanStep, type InsightBrief } from './planner';
+import { createJevAssist, type JevConfig } from './jev';
 import { verify, type VerificationVerdict, type VerifyStatus, type ParsedVerdict } from './verifier';
 import { normalizeSpec } from './spec';
 import { extractJsonObject } from './parse-json';
@@ -224,6 +225,8 @@ export function buildRejectionSteer(
 }
 
 export interface SessionOptions {
+  // Opt-in hosted typed routing/review; the main generative model is unchanged.
+  jev?: JevConfig;
   // Active database ids (from tools.ts SOURCES). Empty/omitted → all sources.
   // The hard filter: only these sources' tools and prompt guidance reach the
   // model, so it can only answer from the databases the user selected.
@@ -323,6 +326,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
 
   async function ask(question: string, cb: AgentCallbacks, signal?: AbortSignal): Promise<AgentOutput> {
     turnCount++;
+    const jev = opts?.jev ? createJevAssist(opts.jev, signal) : null;
     // Forwarded to every complete() this turn makes (main loop, verify, llm(),
     // sub-agents) so an in-flight provider fetch aborts the moment the user
     // stops, instead of waiting out the 60s provider timeout.
@@ -824,7 +828,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         let result = '';
         switch (tc.name) {
           case 'find_series': {
-            const { hits, receipt } = await findSeriesWithReceipt(
+            let { hits, receipt } = await findSeriesWithReceipt(
               String(a.query ?? ''),
               sourceIds,
               signal
@@ -833,6 +837,19 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
             // The model still receives only the SeriesHit[] JSON (plus a single
             // orientation line) — no context bloat.
             ev.receipt = receipt;
+            let routingNote = '';
+            if (jev && hits.length) {
+              const routeEvent = pushTrace({tool:'jev_route', argSummary:'candidate selection', status:'running'});
+              const started = Date.now();
+              const routed = await jev.route(JSON.stringify({question, search:String(a.query ?? '')}), hits);
+              throwIfAborted();
+              hits = routed.hits;
+              routingNote = routed.report.split('\n')[0];
+              routeEvent.status = 'ok';
+              routeEvent.detail = routed.report;
+              routeEvent.durationMs = Date.now() - started;
+              updateTrace();
+            }
             // Remember these ids so the indicator-id guard trusts a subsequent
             // fetch of any of them (the model searched, then fetched a real hit).
             for (const h of hits) seenSeriesIds.add(String(h.id).trim().toLowerCase());
@@ -841,8 +858,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
               const summary =
                 `searched ${receipt.sourcesSearched.length} database${receipt.sourcesSearched.length === 1 ? '' : 's'} · ` +
                 `${receipt.candidateCount} candidate${receipt.candidateCount === 1 ? '' : 's'}` +
-                (top ? ` · top: ${top.name} (${top.sourceLabel})` : '');
-              result = summary + '\n' + JSON.stringify(hits);
+                (top ? ` · retrieval top: ${top.name} (${top.sourceLabel})` : '');
+              result = summary + (routingNote ? '\n' + routingNote : '') + '\n' + JSON.stringify(hits);
             } else {
               result = 'No matching series in the active databases — try different keywords.';
             }
@@ -1637,13 +1654,19 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     }
 
     async function runVerify(critique?: string, insight?: string): Promise<VerificationVerdict> {
-      const ev = pushTrace({ tool: 'verify', argSummary: critique ? 'retry' : '', status: 'running' });
+      const ev = pushTrace({ tool: 'verify', argSummary: jev ? 'Jev evidence checks' : critique ? 'retry' : '', status: 'running' });
+      const started = Date.now();
       // Hand the verifier the structured ledger entries (truthful URLs +
       // vintages) rather than reconstructed citation strings — light touch, the
       // verdict logic is unchanged (backlog #11 point 5). When a plan was made,
       // the intended insight rides along so the verdict judges the answer
       // against what it SET OUT to show, not only the raw question (backlog #10).
-      const result = await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c), completeDeps, insight);
+      const result = jev
+        ? await jev.review({question, spec:turnChartSpec, finding:state.finding, rows:state.rows, citations:[...state.citations.values()], intendedInsight:insight})
+        : await verify(cfg, question, turnChartSpec, state.finding, [...state.citations.values()], (c) => (totalCost += c), completeDeps, insight);
+      throwIfAborted();
+      ev.verifyEngine = result.engine;
+      ev.durationMs = Date.now() - started;
       // A genuine pass is the only 'ok' receipt; unverified AND unavailable both
       // read as error receipts (existing torn-receipt styling). The stamp is
       // driven off `pass` alone, so only a real pass can be stamped.

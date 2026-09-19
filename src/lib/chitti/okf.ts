@@ -53,6 +53,7 @@ function fmtYearRange(yr: Citation['yearRange']): string {
 // The verification line, mirroring the app's own honest states. Never claims a
 // pass the verdict didn't assert.
 function verificationLine(v: VerificationVerdict): string {
+  if (v.engine === 'jev') return v.status === 'verified' ? 'Jev checks passed (model judgment; uncalibrated thresholds)' : 'Jev review: ' + v.status;
   const label =
     v.status === 'verified'
       ? 'Verified'

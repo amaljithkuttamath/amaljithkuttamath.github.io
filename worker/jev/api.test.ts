@@ -20,3 +20,19 @@ describe('durable quota policy',()=>{
  it('enforces burst and daily per-IP limits independently',()=>{let state;const start=Date.UTC(2026,8,18);for(let i=0;i<20;i++){const result=consumeQuota(state,'client',start+Math.floor(i/5)*60000);expect(result.allowed).toBe(true);state=result.state;if(i===4)expect(consumeQuota(state,'client',start).allowed).toBe(false);}expect(consumeQuota(state,'client',start+3600000).allowed).toBe(false);expect(consumeQuota(state,'other',start+3600000).allowed).toBe(true);});
  it('enforces a global daily cap and resets on UTC day boundaries',()=>{let state;const now=Date.UTC(2026,8,18);for(let i=0;i<LIMITS.dailyTotal;i++){const result=consumeQuota(state,'ip-'+i,now);expect(result.allowed).toBe(true);state=result.state;}expect(consumeQuota(state,'new',now).allowed).toBe(false);const next=consumeQuota(state,'new',now+86400000);expect(next.allowed).toBe(true);expect(next.state.total).toBe(1);expect(Object.keys(next.state.clients)).toHaveLength(1);});
 });
+
+describe('Chitti named judgments',()=>{
+ it('runs a fixed five-question evidence review under the shared quota',async()=>{
+  const d=deps();const ids=['answers_question','supported_by_data','sources_match','chart_matches_data','no_overclaim'];
+  d.upstream.mockResolvedValueOnce(Response.json({answers:Object.fromEntries(ids.map(id=>[id,{type:'noul',noul:.95}]))}));
+  const r=await handle(request({task:'chitti_review',inputs:{evidence:'{"question":"test","rows":[]}'}}),d);
+  expect(r.status).toBe(200);expect(d.reserve).toHaveBeenCalledOnce();
+  const sent=JSON.parse((d.upstream.mock.calls[0] as unknown as [string,RequestInit])[1].body as string);
+  expect(Object.keys(sent.questions)).toEqual(ids);expect(sent.model).toBe('jev-latest');
+ });
+ it('rejects overrides and oversized evidence before reserving quota',async()=>{
+  for(const value of [{task:'chitti_review',inputs:{evidence:'x'.repeat(22001)}},{task:'chitti_route',inputs:{query:'GDP',candidates:'[]',model:'custom'}},{task:'chitti_review',inputs:{evidence:'{}'},questions:{}}]){
+   const d=deps();expect((await handle(request(value),d)).status).toBe(400);expect(d.reserve).not.toHaveBeenCalled();
+  }
+ });
+});

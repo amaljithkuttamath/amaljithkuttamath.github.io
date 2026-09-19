@@ -1,10 +1,11 @@
 # Chitti — library architecture (Phases A + B)
 
-Chitti is a browser-only data-analyst agent: it fetches real numbers live from
+Chitti is a browser-run data-analyst agent: it fetches real numbers live from
 free institutional APIs (World Bank, Our World in Data, IMF DataMapper, WHO GHO),
 computes over them, renders a chart, and verifies the answer. This document maps
 the `src/lib/chitti/` modules, the source-adapter interface, the layering rules,
-and how to add a new data source.
+and how to add a new data source. Optional Jev routing and review use a hosted
+relay; planning, computation, and the workspace remain in the browser.
 
 Phase A was a **behavior-identical** refactor: the former monoliths `tools.ts`
 (~1840 lines) and `agent.ts` (~2535 lines) were split by responsibility into
@@ -195,3 +196,11 @@ parsing (`parsePlanBrief`) keep their exact bespoke semantics and were **not**
 forced onto `codec.ts` — doing so would change observable parsing behavior. They
 share the same defensive discipline (`extractJsonObject` in `parse-json.ts`);
 that shared helper is the cross-reference, which is enough.
+
+## Optional Jev assist
+
+`jev.ts` supplies bounded typed dataset selection and evidence review, enabled through Connect → Model & databases. `SessionOptions.jev` injects the configured relay and optional fetch dependency. A new client is created per turn, sharing a two-route/two-review budget across parent and delegated tool calls. Existing direct answers do not invoke it.
+
+After `find_series`, Jev can promote one of the first eight hits; source restrictions and the remaining hit set are preserved. Its separate receipt does not rewrite the lexical retrieval evidence. For chart turns, Jev replaces the final generative verifier with five independent evidence checks over actual rows, chart points, and citation metadata. Thresholds are explicit policies, not calibrated confidence. All supplied rows are sent or the review reports unavailable; there is no silent sampling.
+
+Fixed task definitions in `src/data/jev/chitti-tasks.json` are shared by the Cloudflare Worker and local Python relay. The public service uses the existing shared hard quota and private TypeSafe secret. This opt-in path sends the disclosed analysis material to the hosted relay; API credentials, VFS files, and conversation history are excluded. `verifyEngine` receipts and the optional `engine` verdict field preserve attribution through UI and answer exports.

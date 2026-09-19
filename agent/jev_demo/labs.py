@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 
 CATALOG = json.loads((Path(__file__).resolve().parents[2] / 'src/data/jev/labs.json').read_text())
+CATALOG += json.loads((Path(__file__).resolve().parents[2] / 'src/data/jev/chitti-tasks.json').read_text())
 TASKS = {task['id']: task for task in CATALOG}
 
 def build_request(body):

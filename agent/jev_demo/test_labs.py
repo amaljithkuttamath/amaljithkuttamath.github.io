@@ -2,6 +2,14 @@ import unittest
 from labs import build_request, validate_response
 
 class LabTests(unittest.TestCase):
+    def test_chitti_tasks_share_the_fixed_question_contract(self):
+        route = build_request({'task': 'chitti_route', 'inputs': {'query': 'GDP', 'candidates': '[]'}})
+        review = build_request({'task': 'chitti_review', 'inputs': {'evidence': '{}'}})
+        self.assertEqual(len(route['questions']['dataset']['criteria']), 9)
+        self.assertEqual(len(review['questions']), 5)
+        with self.assertRaises(ValueError):
+            build_request({'task': 'chitti_review', 'inputs': {'evidence': 'x' * 22001}})
+
     def test_only_named_tasks_are_accepted(self):
         with self.assertRaises(ValueError): build_request({'task': 'arbitrary', 'inputs': {'text': 'hi'}})
 

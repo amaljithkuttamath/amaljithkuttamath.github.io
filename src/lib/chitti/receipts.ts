@@ -21,6 +21,7 @@ export interface TraceEvent {
   // has returned a verdict. Drives the ink-stamped VERIFIED badge. The UI
   // must only stamp a step where this is true.
   pass?: boolean;
+  verifyEngine?: 'jev';
   // The three honest verification outcomes, set only on a 'verify' event:
   //   'verified'    — the verifier ran and passed (pass===true; amber stamp).
   //   'unverified'  — the verifier ran and did NOT confirm the answer, or its

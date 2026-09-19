@@ -22,6 +22,7 @@ export type VerifyStatus = 'verified' | 'unverified' | 'unavailable' | 'skipped'
 // only when status==='verified' — the two are kept in lockstep so a caller can
 // never read a truthy pass out of an unavailable/unverified verdict.
 export interface VerificationVerdict {
+  engine?: 'jev';
   status: VerifyStatus;
   pass: boolean;
   confidence: 'high' | 'medium' | 'low' | 'none';

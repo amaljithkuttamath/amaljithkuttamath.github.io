@@ -1,6 +1,7 @@
 import catalog from '../../src/data/jev/labs.json';
-import { buildLabRequest, validateLabResponse, type Lab } from '../../src/lib/jev/labs';
-const tasks = catalog as unknown as Lab[];
+import chittiTasks from '../../src/data/jev/chitti-tasks.json';
+import { buildLabRequest, validateLabResponse, type LabSpec } from '../../src/lib/jev/labs';
+const tasks = [...catalog, ...chittiTasks] as unknown as LabSpec[];
 const ORIGIN = 'https://amaljithkuttamath.github.io';
 export const LIMITS = { perMinute: 5, perDay: 20, dailyTotal: 200 } as const;
 export interface QuotaState { day: number; total: number; clients: Record<string, { total: number; minute: number; count: number }> }
@@ -57,7 +58,7 @@ export async function handle(request: Request, deps: Dependencies): Promise<Resp
   if (request.headers.get('X-Jev-Demo') !== '1' || !request.headers.get('CF-Connecting-IP')) return reply(403,{error:'Request not allowed.'});
   if (!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json')) return reply(415,{error:'Send a JSON request.'});
   if (!deps.key) return reply(503,{error:'Live classification is not configured yet.'});
-  let task: Lab | undefined, payload;
+  let task: LabSpec | undefined, payload;
   try {
     const body = await readBody(request);
     if (!isObject(body) || Object.keys(body).sort().join(',') !== 'inputs,task' || typeof body.task !== 'string' || !isObject(body.inputs)) throw new Error();
