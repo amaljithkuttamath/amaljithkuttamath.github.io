@@ -155,11 +155,11 @@ export function renderSharedVerification(tb: TurnBlock, v: AgentOutput['verifica
   if (v.status === 'verified') {
     text = v.engine === 'jev' ? 'Passed configured Jev checks at time of generation · model judgment, not proof of correctness' : 'verified at time of generation — passed a second-model check';
   } else if (v.status === 'unavailable') {
-    text = 'verification unavailable at time of generation — provider error';
+    text = v.engine === 'jev' ? 'Jev review unavailable at time of generation' : 'verification unavailable at time of generation — provider error';
     el.classList.add('ch-verify-unavailable');
   } else {
     const reason = v.issues && v.issues.length ? v.issues[0] : 'the finding could not be confirmed';
-    text = 'could not verify at time of generation — ' + reason;
+    text = (v.engine === 'jev' ? 'Jev flagged a review gap at time of generation — ' : 'could not verify at time of generation — ') + reason;
     el.classList.add('ch-verify-unverified');
   }
   const tag = document.createElement('span');
