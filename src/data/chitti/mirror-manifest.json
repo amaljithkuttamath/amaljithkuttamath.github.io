@@ -1,5 +1,191 @@
 {
   "_comment": "GENERATED FILE — do not hand-edit. Lists which World Bank indicators have a same-origin snapshot under public/apps/chitti/mirror/. Only this index is bundled; the data files themselves are fetched at runtime. An empty indicators object simply means every fetch goes to the live API, which is the correct fallback in all cases. Regenerate with: npm run mirror:refresh (see scripts/gen-chitti-mirror.mjs).",
-  "generated": null,
-  "indicators": {}
+  "generated": "2026-07-27T22:41:51.910Z",
+  "indicators": {
+    "BX.GSR.TOTL.CD": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "BX.KLT.DINV.WD.GD.ZS": {
+      "yearStart": 1970,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "EG.FEC.RNEW.ZS": {
+      "yearStart": 1990,
+      "yearEnd": 2022,
+      "sourceUpdated": "2026-07-13"
+    },
+    "EN.GHG.CO2.MT.CE.AR5": {
+      "yearStart": 1970,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "EN.GHG.CO2.PC.CE.AR5": {
+      "yearStart": 1970,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "FP.CPI.TOTL.ZG": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "GC.DOD.TOTL.GD.ZS": {
+      "yearStart": 1970,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "IT.NET.USER.ZS": {
+      "yearStart": 1990,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "MS.MIL.XPND.GD.ZS": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "NE.EXP.GNFS.ZS": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "NE.IMP.GNFS.ZS": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "NY.GDP.MKTP.KD.ZG": {
+      "yearStart": 1961,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "NY.GDP.PCAP.PP.CD": {
+      "yearStart": 1990,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SE.ADT.LITR.ZS": {
+      "yearStart": 1970,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SE.PRM.CMPT.ZS": {
+      "yearStart": 1970,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SE.SEC.ENRR": {
+      "yearStart": 1970,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SE.XPD.TOTL.GD.ZS": {
+      "yearStart": 1970,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SG.GEN.PARL.ZS": {
+      "yearStart": 1997,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SH.DYN.MORT": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SH.HIV.INCD.ZS": {
+      "yearStart": 1990,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SH.STA.MMRT": {
+      "yearStart": 1985,
+      "yearEnd": 2023,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SH.XPD.CHEX.GD.ZS": {
+      "yearStart": 2000,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SI.DST.10TH.10": {
+      "yearStart": 1963,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SI.POV.DDAY": {
+      "yearStart": 1963,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SI.POV.GINI": {
+      "yearStart": 1963,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SL.TLF.CACT.FE.ZS": {
+      "yearStart": 1990,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SL.UEM.TOTL.ZS": {
+      "yearStart": 1991,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SM.POP.NETM": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.DYN.IMRT.IN": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.DYN.LE00.FE.IN": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.DYN.LE00.IN": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.DYN.LE00.MA.IN": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.DYN.TFRT.IN": {
+      "yearStart": 1960,
+      "yearEnd": 2024,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.POP.65UP.TO.ZS": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.POP.GROW": {
+      "yearStart": 1961,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.POP.TOTL": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    },
+    "SP.URB.TOTL.IN.ZS": {
+      "yearStart": 1960,
+      "yearEnd": 2025,
+      "sourceUpdated": "2026-07-13"
+    }
+  }
 }
