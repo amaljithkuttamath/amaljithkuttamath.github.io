@@ -146,24 +146,31 @@ it("updates movement summaries and preserves the observation view while stepping
   );
   const doc = dom.window.document;
   await vi.waitFor(() =>
-    expect(doc.querySelectorAll(".evolution-empty")).toHaveLength(3),
+    expect(doc.querySelectorAll(".thread-name")).toHaveLength(3),
   );
   (
     doc.querySelector('[data-evolution-date="2026-10-23"]') as HTMLButtonElement
   ).click();
   await vi.waitFor(() =>
-    expect(doc.querySelector(".evolution-details")!.textContent).toContain(
-      "Rising work",
+    expect(doc.querySelector(".thread-name")!.textContent).toContain(
+      "Cooling work",
     ),
   );
+  (
+    doc.querySelector(
+      '[data-trace="https://example.com/cooling"]',
+    ) as HTMLButtonElement
+  ).click();
   expect(doc.querySelector(".evolution-details")!.textContent).toContain(
     "score −1, traction +0.3%",
   );
-  expect(
-    doc
-      .querySelector("[data-evolution-date][aria-current]")!
-      .getAttribute("data-evolution-date"),
-  ).toBe("2026-10-23");
+  await vi.waitFor(() =>
+    expect(
+      doc
+        .querySelector("[data-evolution-date][aria-current]")!
+        .getAttribute("data-evolution-date"),
+    ).toBe("2026-10-23"),
+  );
   (
     doc.querySelector('[data-signal-view="observations"]') as HTMLButtonElement
   ).click();

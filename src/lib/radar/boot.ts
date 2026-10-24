@@ -36,7 +36,7 @@ export function bootRadar() {
     $("signal-workspace").hidden = view === "evolution";
     $("signal-total").hidden = view === "evolution";
     $("signal-title").textContent =
-      view === "evolution" ? "Research evolution" : "Research observations";
+      view === "evolution" ? "Research threads" : "Research observations";
     document
       .querySelectorAll<HTMLButtonElement>("[data-signal-view]")
       .forEach((button) =>
