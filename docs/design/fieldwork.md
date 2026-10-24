@@ -35,3 +35,19 @@ It shows deterministic UTF-8 bit columns immediately and loads the real GPT-4o
 vocabulary only on request. Large Inter display type and an inverted instrument
 surface provide the primary visual contrast. Binary patterns encode actual byte
 or token IDs; they are never represented as attention, confidence, or embeddings.
+
+
+## Compact, functional revision
+
+The first viewport must identify the work and offer project entry points before
+the language demo. Replace the oversized metaphor headline with “AI agents and
+model experiments.” Reduce headline, masthead, diagram, and demo height without
+shrinking reading text. Use direct function descriptions; no slogans or sales copy.
+
+Radar exposes the published observation index through a source/minimum-score
+matrix. Counts are cumulative, selected records stay inspectable, and the same
+filters transfer into the Evidence view. The matrix always describes the current
+feed even when the reader opens a historical briefing. Month controls filter the
+archive using real edition counts. About groups existing research repositories
+by the questions they address. Interaction provides personality; labels explain
+what controls do. Existing tool internals and routes remain unchanged.

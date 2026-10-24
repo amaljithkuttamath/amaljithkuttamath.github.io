@@ -1,0 +1,222 @@
+<section class="signal-desk" aria-labelledby="signal-title">
+  <div class="signal-topline">
+    <div>
+      <h2 id="signal-title">Explore the evidence</h2>
+      <p>
+        Select a source and minimum score, then step through the observations.
+      </p>
+    </div>
+    <span id="signal-total">Loading observations…</span>
+  </div>
+  <div id="signal-workspace">
+    <p class="signal-wait">Building the source map from published evidence…</p>
+  </div>
+</section>
+<style is:global>
+  .signal-desk {
+    background: var(--fg);
+    color: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    --desk-line: color-mix(in srgb, var(--bg) 22%, var(--fg));
+    --desk-muted: color-mix(in srgb, var(--bg) 72%, var(--fg));
+  }
+  .signal-topline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+  .signal-topline h2 {
+    font: 500 1.25rem var(--font-sans);
+    letter-spacing: -0.04em;
+    margin: 0 0 5px;
+  }
+  .signal-topline p,
+  .signal-wait {
+    font-size: 0.78rem;
+    color: var(--desk-muted);
+    margin: 0;
+  }
+  #signal-total {
+    font: 0.65rem var(--font-mono);
+    color: var(--desk-muted);
+    white-space: nowrap;
+  }
+  .signal-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+  }
+  .signal-map {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 5px;
+    margin: -5px;
+  }
+  .signal-map th {
+    text-align: left;
+    font: 400 0.7rem var(--font-mono);
+    color: var(--desk-muted);
+    padding: 4px 0;
+  }
+  .signal-map thead th:not(:first-child) {
+    text-align: center;
+  }
+  .signal-map button {
+    width: 100%;
+    min-height: 32px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--bg) var(--density), var(--fg));
+    color: var(--bg);
+    font: 500 0.8rem var(--font-mono);
+    cursor: pointer;
+  }
+  .signal-map button[aria-pressed="true"] {
+    background: var(--bg);
+    color: var(--fg);
+  }
+  .signal-map button:hover:not(:disabled) {
+    border-color: var(--bg);
+  }
+  .signal-map button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .signal-desk :focus-visible {
+    outline-color: var(--bg);
+    outline-offset: 2px;
+  }
+  .signal-inspector {
+    border-left: 1px solid var(--desk-line);
+    padding-left: 28px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .signal-inspector-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .signal-inspector-head p {
+    font: 0.7rem var(--font-mono);
+    margin: 0;
+    color: var(--desk-muted);
+  }
+  .signal-stepper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .signal-stepper span {
+    font: 0.65rem var(--font-mono);
+  }
+  .signal-stepper button {
+    border: 1px solid var(--desk-line);
+    background: none;
+    color: var(--bg);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .signal-stepper button:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .signal-item h3 {
+    font: 500 1.1rem/1.4 var(--font-sans);
+    letter-spacing: -0.03em;
+    margin: 18px 0 12px;
+    overflow-wrap: anywhere;
+  }
+  .signal-item dl {
+    display: flex;
+    gap: 24px;
+    margin: 0 0 16px;
+  }
+  .signal-item dt {
+    font-size: 0.65rem;
+    color: var(--desk-muted);
+    margin-bottom: 4px;
+  }
+  .signal-item dd {
+    margin: 0;
+    font: 0.72rem var(--font-mono);
+  }
+  .signal-item a {
+    color: var(--bg);
+    font-size: 0.8rem;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    overflow-wrap: anywhere;
+  }
+  .signal-note {
+    font-size: 0.65rem;
+    color: var(--desk-muted);
+    margin: 16px 0 0;
+  }
+  .signal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    border-top: 1px solid var(--desk-line);
+    margin-top: 14px;
+    padding-top: 12px;
+  }
+  .signal-footer p {
+    font-size: 0.7rem;
+    color: var(--desk-muted);
+    margin: 0;
+    max-width: 75ch;
+  }
+  .signal-footer button {
+    font-size: 0.75rem;
+    color: var(--bg);
+    background: none;
+    border: 0;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  @media (max-width: 700px) {
+    .signal-layout {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .signal-inspector {
+      border-left: 0;
+      border-top: 1px solid var(--desk-line);
+      padding: 16px 0 0;
+    }
+    .signal-topline {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .signal-desk {
+      padding: 16px;
+    }
+    .signal-footer {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+  .signal-map th:first-child {
+    width: 30%;
+  }
+  .signal-description {
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--desk-muted);
+    margin: 0 0 16px;
+  }
+</style>

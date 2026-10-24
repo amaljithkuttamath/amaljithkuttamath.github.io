@@ -12,7 +12,7 @@ function openArchive(receipt: unknown) {
     <span id="radar-status">Reading publication…</span><time id="radar-date"></time>
     <div id="radar-brief"></div><span id="evidence-count"></span>
     <div id="source-filters"></div><input id="evidence-search" />
-    <select id="evidence-sort"><option>score</option></select><input id="high-only" type="checkbox" />
+    <select id="evidence-sort"><option>score</option></select><select id="minimum-score"><option value="0">All</option></select>
     <div id="evidence-result"></div><div id="evidence-list"></div><button id="evidence-more"></button>
     <input id="archive-search" /><div id="archive-result"></div><div id="archive-list"></div>
     <button id="radar-refresh"></button></main>`,

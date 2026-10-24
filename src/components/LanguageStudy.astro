@@ -17,7 +17,7 @@
     <input
       id="language-input"
       type="text"
-      value="Make the invisible inspectable."
+      value="How does a model read this?"
       maxlength="80"
       autocomplete="off"
       spellcheck="false"
@@ -48,19 +48,19 @@
       <span class="readout-label" id="study-kind">
         Byte
       </span>
-      <strong id="study-symbol">M</strong>
+      <strong id="study-symbol">H</strong>
       <span class="readout-rule" aria-hidden="true"></span>
       <span class="readout-label">Decimal</span>
-      <strong id="study-id">77</strong>
+      <strong id="study-id">72</strong>
       <span class="readout-rule" aria-hidden="true"></span>
       <span class="readout-label">Binary</span>
-      <strong id="study-bits">01001101</strong>
+      <strong id="study-bits">01001000</strong>
     </div>
     <span class="study-total" id="study-total" role="status"></span>
   </div>
   <div class="study-caption">
     <p id="study-caption">
-      A sentence becomes numbers. Select a column to inspect a byte.
+      Each column is one UTF-8 byte. Select it to see its value.
     </p>
     <a href="/apps/tokenizer">
       Compare five model vocabularies <span aria-hidden="true">↗</span>
@@ -89,10 +89,10 @@
     units: Unit[] = [],
     example = 0;
   const examples = [
-    "Make the invisible inspectable.",
+    "How does a model read this?",
     "A → B ≠ understanding",
     "Hello, world. 👋",
-    "const trust = verify(answer);",
+    "const tokens = encode(text);",
   ];
   function inspect(index: number, focus = false) {
     if (!units[index]) return;
@@ -168,7 +168,7 @@
     }
     document.getElementById("study-caption")!.textContent =
       mode === "bytes"
-        ? "A sentence becomes numbers. Select a column to inspect a byte."
+        ? "Each column is one UTF-8 byte. Select it to see its value."
         : "Real GPT-4o vocabulary IDs, shown in binary. [byte] marks a token containing part of a UTF-8 character.";
   }
   modes.forEach((b) =>
@@ -223,7 +223,7 @@
     background: var(--study-paper);
     color: var(--study-ink);
     border-radius: var(--radius-sm);
-    padding: var(--space-lg) var(--space-xl);
+    padding: 16px 24px;
     position: relative;
   }
   .study-toolbar {
@@ -231,7 +231,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-lg);
-    padding-bottom: var(--space-lg);
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--study-line);
   }
   .study-mode {
@@ -266,7 +266,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-lg);
-    margin: var(--space-lg) 0;
+    margin: 10px 0;
   }
   .study-composer label {
     font: var(--text-tag) var(--font-mono);
@@ -279,7 +279,7 @@
     border: 0;
     border-bottom: 1px solid transparent;
     color: var(--study-ink);
-    font: 500 clamp(1.1rem, 2.5vw, 1.7rem)/1.5 var(--font-sans);
+    font: 500 clamp(1rem, 1.8vw, 1.2rem)/1.5 var(--font-sans);
     padding: var(--space-sm) 0;
     letter-spacing: -0.03em;
   }
@@ -303,7 +303,7 @@
     position: relative;
     display: flex;
     gap: var(--space-md);
-    padding: var(--space-md) 0 var(--space-lg);
+    padding: 8px 0 12px;
   }
   .study-axis {
     display: flex;
@@ -315,10 +315,10 @@
   }
   .study-matrix {
     display: flex;
-    gap: 5px;
+    gap: 3px;
     overflow-x: auto;
     flex: 1;
-    min-height: 170px;
+    min-height: 112px;
     padding: 0 var(--space-xs) var(--space-sm);
     scrollbar-color: var(--study-muted) transparent;
   }
@@ -354,14 +354,14 @@
   .study-matrix :global(.unit-bits) {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 3px;
     width: 100%;
     max-width: 26px;
   }
   .study-matrix :global(.bit) {
     display: block;
-    min-height: 8px;
-    height: calc(120px / var(--bit-count));
+    min-height: 3px;
+    height: calc(56px / var(--bit-count));
     background: var(--study-line);
     border-radius: 1px;
     transition: background var(--duration) var(--ease);
@@ -425,7 +425,7 @@
     justify-content: space-between;
     align-items: center;
     gap: var(--space-lg);
-    padding-top: var(--space-md);
+    padding-top: 10px;
   }
   .study-caption p {
     font-size: 0.7rem;
@@ -492,7 +492,7 @@
       min-width: 20px;
     }
     .study-matrix {
-      min-height: 170px;
+      min-height: 112px;
     }
   }
   @media (prefers-reduced-motion: reduce) {
