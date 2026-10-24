@@ -5,6 +5,7 @@ import { mdToHtml } from "../../lib/chitti/ui/dom";
 import { recentStart } from "../../lib/chitti/workspace/steering";
 import Chart from "./Chart";
 export const ResultInteraction = createContext(true);
+export const InlineComposer = createContext(false);
 export function Result({
   result,
   onSteer,
@@ -13,6 +14,7 @@ export function Result({
   onSteer?: (name: string, value: string) => void;
 }) {
   const enabled = useContext(ResultInteraction);
+  const inlineComposer = useContext(InlineComposer);
   const [steer, setSteer] = useState("");
   const choices =
     result.spec && result.spec.series.length > 1
@@ -77,29 +79,31 @@ export function Result({
               Explain changes
             </button>
           </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (steer.trim()) {
-                onSteer("ask-view", steer.trim());
-                setSteer("");
-              }
-            }}
-          >
-            <input
-              aria-label="Ask about this view"
-              value={steer}
-              onChange={(e) => setSteer(e.target.value)}
-              placeholder="Ask about this view or change it…"
-              maxLength={2000}
-            />
-            <button
-              disabled={!enabled || !steer.trim()}
-              aria-label="Update this view"
+          {!inlineComposer && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (steer.trim()) {
+                  onSteer("ask-view", steer.trim());
+                  setSteer("");
+                }
+              }}
             >
-              ↗
-            </button>
-          </form>
+              <input
+                aria-label="Ask about this view"
+                value={steer}
+                onChange={(e) => setSteer(e.target.value)}
+                placeholder="Ask about this view or change it…"
+                maxLength={2000}
+              />
+              <button
+                disabled={!enabled || !steer.trim()}
+                aria-label="Update this view"
+              >
+                ↗
+              </button>
+            </form>
+          )}
         </fieldset>
       )}
       {result.answer && (

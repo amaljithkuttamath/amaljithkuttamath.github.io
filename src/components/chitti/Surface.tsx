@@ -18,7 +18,7 @@ import {
 } from "../../lib/chitti/workspace/catalog";
 import { CATALOG_ID } from "../../lib/chitti/workspace/model";
 import { cleanShareState } from "../../lib/chitti/share";
-import { Result, ResultInteraction } from "./Result";
+import { Result, ResultInteraction, InlineComposer } from "./Result";
 
 const resultComponent = createComponentImplementation(
   resultApi,
@@ -101,10 +101,12 @@ export default function Surface({
   operations,
   onAction,
   disabled = false,
+  inlineComposer = false,
 }: {
   operations: unknown[];
   onAction?: (action: ActionPayload) => void;
   disabled?: boolean;
+  inlineComposer?: boolean;
 }) {
   const [model, setModel] =
     useState<SurfaceModel<ReactCatalogComponent> | null>(null);
@@ -148,7 +150,9 @@ export default function Surface({
     <p role="alert">{error}</p>
   ) : model ? (
     <ResultInteraction.Provider value={!disabled}>
-      <A2uiSurface surface={model} />
+      <InlineComposer.Provider value={inlineComposer}>
+        <A2uiSurface surface={model} />
+      </InlineComposer.Provider>
     </ResultInteraction.Provider>
   ) : (
     <p role="status">Preparing result…</p>

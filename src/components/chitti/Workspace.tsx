@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { describeChange } from "../../lib/chitti/workspace/changes";
 import type { ViewEdit } from "../../lib/chitti/workspace/steering";
 import { ChittiAgent } from "../../lib/chitti/workspace/agent";
 import { DEMOS } from "../../lib/chitti/demos";
@@ -52,7 +53,10 @@ export default function Workspace() {
     DEMOS[0] ? `example:${DEMOS[0].id}` : "",
   );
   const [question, setQuestion] = useState("");
-  const [useCurrent, setUseCurrent] = useState(true);
+  const [useCurrent, setUseCurrent] = useState(false);
+  const [redo, setRedo] = useState<string[]>([]);
+  const [latestRequest, setLatestRequest] = useState("");
+  const [navigationNote, setNavigationNote] = useState("");
   const parents = useRef<Record<string, string>>({});
   const contexts = useRef<Record<string, ShareStateV1 | null>>({});
   const [running, setRunning] = useState(false),
@@ -137,9 +141,11 @@ export default function Workspace() {
   );
   const operations = useMemo(
     () =>
-      surfaces[selected] ||
-      (active?.result ? resultSurface(active.result) : null),
-    [surfaces, selected, active?.result],
+      active?.origin === "view" && active.result
+        ? resultSurface({ ...active.result, answer: "" })
+        : surfaces[selected] ||
+          (active?.result ? resultSurface(active.result) : null),
+    [surfaces, selected, active?.result, active?.origin],
   );
   const respond = useCallback(
     (action: ActionPayload) => {
@@ -155,9 +161,7 @@ export default function Workspace() {
   const submit = async (
     text = question,
     force = false,
-    context: ShareStateV1 | null = useCurrent && active?.origin !== "example"
-      ? active?.result || null
-      : null,
+    context: ShareStateV1 | null = useCurrent ? active?.result || null : null,
     edit?: ViewEdit,
   ) => {
     if (busy.current || !text.trim()) return;
@@ -168,6 +172,9 @@ export default function Workspace() {
     setReceipt(false);
     const id = crypto.randomUUID();
     activeRun.current = id;
+    setLatestRequest(id);
+    setNavigationNote("");
+    setRedo([]);
     parents.current[id] = selected;
     contexts.current[id] = context;
     setQuestion("");
@@ -207,13 +214,43 @@ export default function Workspace() {
   const newAnalysis = () => {
     if (busy.current) return;
     agent.reset();
+    setNavigationNote("");
     setSelected("");
+    setLatestRequest("");
+    setRedo([]);
+    setUseCurrent(false);
     setQuestion("");
     setNotice("");
     setDashboards(false);
     setClarification(null);
     history.replaceState(null, "", location.pathname);
     composer.current?.focus();
+  };
+  const currentRequest = turns.find((t) => t.id === latestRequest);
+  const change = useMemo(
+    () =>
+      active?.result
+        ? describeChange(contexts.current[active.id] || null, active.result)
+        : active?.status || "",
+    [active],
+  );
+  const undo = () => {
+    if (busy.current || !Object.hasOwn(parents.current, selected)) return;
+    setNavigationNote(`Undid: ${active?.question || "change"}.`);
+    setRedo((stack) => [...stack, selected]);
+    setSelected(parents.current[selected]);
+    setLatestRequest("");
+    setReceipt(false);
+    setUseCurrent(true);
+  };
+  const redoChange = () => {
+    if (busy.current || !redo.length) return;
+    setNavigationNote("Change restored.");
+    setSelected(redo[redo.length - 1]);
+    setRedo((stack) => stack.slice(0, -1));
+    setLatestRequest("");
+    setReceipt(false);
+    setUseCurrent(true);
   };
   const saveConfig = (value: Config, remember: boolean) => {
     try {
@@ -265,6 +302,77 @@ export default function Workspace() {
       setNotice("Clipboard unavailable. Use the CSV or Markdown download.");
     }
   };
+  const composerView = (
+    <>
+      <form
+        className="cw-composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <label htmlFor="cw-question">
+          {useCurrent && active?.result
+            ? "Ask or change this view"
+            : "Ask a data question"}
+        </label>
+        {active?.result && (
+          <label className="cw-context-toggle">
+            <input
+              type="checkbox"
+              checked={useCurrent}
+              disabled={running}
+              onChange={(e) => setUseCurrent(e.target.checked)}
+            />
+            Use current view
+          </label>
+        )}
+        <textarea
+          id="cw-question"
+          aria-label="Ask a data question"
+          ref={composer}
+          value={question}
+          rows={2}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void submit();
+            }
+          }}
+          placeholder={
+            useCurrent && active?.result
+              ? "Ask about the current view…"
+              : "Compare life expectancy in Japan, Italy and Spain since 1960"
+          }
+        />
+        <div>
+          <span>
+            {config.apiKey
+              ? `${config.model} · ${config.sources.length} sources`
+              : "Direct lookups need no API key"}
+          </span>
+          {running ? (
+            <button type="button" onClick={() => agent.stop()}>
+              Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="cw-primary"
+              disabled={!question.trim()}
+            >
+              {useCurrent && active?.result ? "Update" : "Analyze"}{" "}
+              <span aria-hidden="true">↗</span>
+            </button>
+          )}
+        </div>
+      </form>
+      <p className="cw-privacy">
+        Your key stays in this browser. Requests go to your selected provider.
+      </p>
+    </>
+  );
   return (
     <div className="cw">
       <header className="cw-header">
@@ -290,153 +398,6 @@ export default function Workspace() {
         </div>
       </header>
       <div className="cw-workspace">
-        <aside className="cw-conversation" aria-label="Conversation">
-          <div className="cw-conversation-head">
-            <h2>Conversation</h2>
-            <button disabled={running} onClick={newAnalysis}>
-              New
-            </button>
-          </div>
-          <div className="cw-messages" aria-live="polite">
-            {turns.filter((t) => t.origin !== "shared").length === 0 && (
-              <div className="cw-welcome">
-                <p>Ask for data, or start with the open example.</p>
-                <p>
-                  Focus a series or change the period in the workspace. Ask
-                  about the view to continue with your model.
-                </p>
-              </div>
-            )}
-            {turns
-              .filter((t) => t.origin !== "shared")
-              .map((t) => (
-                <section className="cw-message" key={t.id}>
-                  <p className="cw-user-message">{t.question}</p>
-                  <p className="cw-status" data-phase={t.phase}>
-                    {t.status}
-                  </p>
-                  {t.result && (
-                    <button
-                      className="cw-open-result"
-                      aria-pressed={selected === t.id}
-                      onClick={() => {
-                        setSelected(t.id);
-                        setDashboards(false);
-                        setReceipt(false);
-                      }}
-                    >
-                      View result <span aria-hidden="true">↗</span>
-                    </button>
-                  )}
-                  {t.phase === "needs-key" && (
-                    <div className="cw-actions">
-                      <button onClick={() => setSettings(true)}>
-                        Connect model
-                      </button>
-                      <button
-                        disabled={running}
-                        onClick={() =>
-                          void submit(
-                            t.question,
-                            false,
-                            contexts.current[t.id] || null,
-                          )
-                        }
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  )}
-                  {t.phase === "error" && (
-                    <button
-                      disabled={running}
-                      onClick={() =>
-                        void submit(
-                          t.question,
-                          false,
-                          contexts.current[t.id] || null,
-                        )
-                      }
-                    >
-                      Retry
-                    </button>
-                  )}
-                  {clarification?.runId === t.id && (
-                    <Surface
-                      operations={clarification.operations}
-                      onAction={respond}
-                    />
-                  )}
-                </section>
-              ))}
-          </div>
-          <form
-            className="cw-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submit();
-            }}
-          >
-            <label htmlFor="cw-question">
-              {agent.sessionLocked
-                ? "Continue this analysis"
-                : "Ask a data question"}
-            </label>
-            {active?.result && active.origin !== "example" && (
-              <label className="cw-context-toggle">
-                <input
-                  type="checkbox"
-                  checked={useCurrent}
-                  disabled={running}
-                  onChange={(e) => setUseCurrent(e.target.checked)}
-                />
-                Use current view
-              </label>
-            )}
-            <textarea
-              id="cw-question"
-              ref={composer}
-              value={question}
-              rows={2}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              placeholder={
-                useCurrent && active?.result && active.origin !== "example"
-                  ? "Ask about the current view…"
-                  : "Compare life expectancy in Japan, Italy and Spain since 1960"
-              }
-            />
-            <div>
-              <span>
-                {config.apiKey
-                  ? `${config.model} · ${config.sources.length} sources`
-                  : "Direct lookups need no API key"}
-              </span>
-              {running ? (
-                <button type="button" onClick={() => agent.stop()}>
-                  Stop
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="cw-primary"
-                  disabled={!question.trim()}
-                >
-                  Analyze <span aria-hidden="true">↗</span>
-                </button>
-              )}
-            </div>
-          </form>
-          <p className="cw-privacy">
-            Your key stays in this browser. Requests go to your selected
-            provider.
-          </p>
-        </aside>
         <section className="cw-main" aria-label="Analysis workspace">
           {dashboards ? (
             <Dashboards
@@ -449,52 +410,128 @@ export default function Workspace() {
             />
           ) : (
             <>
-              <div className="cw-workspace-bar">
-                <span>Workspace</span>
+              <div className="cw-thread-tools">
+                <button disabled={running} onClick={newAnalysis}>
+                  New analysis
+                </button>
                 <label>
-                  Open result
+                  Examples
                   <select
                     aria-label="Open result"
-                    value={selected}
+                    value={example ? selected : ""}
+                    disabled={running}
                     onChange={(e) => {
+                      setNavigationNote("");
                       setSelected(e.target.value);
+                      setLatestRequest("");
+                      setRedo([]);
                       setReceipt(false);
+                      setUseCurrent(true);
                     }}
                   >
-                    <option value="">Choose a result</option>
-                    <optgroup label="Recorded examples">
-                      {DEMOS.map((d) => (
-                        <option key={d.id} value={`example:${d.id}`}>
-                          {d.question}
-                        </option>
-                      ))}
-                    </optgroup>
-                    {turns.some((t) => t.result) && (
-                      <optgroup label="This session">
-                        {turns
-                          .filter((t) => t.result)
-                          .map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.question}
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
+                    <option value="">Choose an example</option>
+                    {DEMOS.map((d) => (
+                      <option key={d.id} value={`example:${d.id}`}>
+                        {d.question}
+                      </option>
+                    ))}
                   </select>
                 </label>
+                {turns.length > 0 && (
+                  <details className="cw-history">
+                    <summary>History ({turns.length})</summary>
+                    <ol>
+                      {turns.map((t) => (
+                        <li
+                          key={t.id}
+                          aria-current={selected === t.id ? "step" : undefined}
+                        >
+                          <div>
+                            <strong>{t.question}</strong>
+                            <p>
+                              {t.result
+                                ? describeChange(
+                                    contexts.current[t.id] || null,
+                                    t.result,
+                                  )
+                                : t.status}
+                            </p>
+                          </div>
+                          {t.result && (
+                            <button
+                              disabled={running || selected === t.id}
+                              onClick={() => {
+                                setNavigationNote("");
+                                setSelected(t.id);
+                                setLatestRequest("");
+                                setRedo([]);
+                                setReceipt(false);
+                                setUseCurrent(true);
+                              }}
+                            >
+                              Restore
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
               </div>
-              {running && (
-                <p className="cw-live-status" role="status">
-                  <span className="cw-pulse" />
-                  {turns.find((t) => t.id === activeRun.current)?.status ||
-                    "Starting analysis"}
-                  <span>
-                    {selected === activeRun.current
-                      ? "Draft · Stop to steer"
-                      : "Preparing next revision"}
-                  </span>
-                </p>
-              )}
+              {currentRequest &&
+                (running ||
+                  (!currentRequest.result &&
+                    ["needs-key", "error", "stopped"].includes(
+                      currentRequest.phase,
+                    ))) && (
+                  <section className="cw-inflight" aria-label="Current request">
+                    {selected !== currentRequest.id && (
+                      <p className="cw-request-text">
+                        {currentRequest.question}
+                      </p>
+                    )}
+                    <p role="status">{currentRequest.status}</p>
+                    <div className="cw-actions">
+                      {running && (
+                        <button
+                          onClick={() => {
+                            setUseCurrent(true);
+                            agent.stop();
+                            composer.current?.focus();
+                          }}
+                        >
+                          Stop and steer
+                        </button>
+                      )}
+                      {currentRequest.phase === "needs-key" && (
+                        <button onClick={() => setSettings(true)}>
+                          Connect model
+                        </button>
+                      )}
+                      {["needs-key", "error"].includes(
+                        currentRequest.phase,
+                      ) && (
+                        <button
+                          onClick={() =>
+                            void submit(
+                              currentRequest.question,
+                              false,
+                              contexts.current[currentRequest.id] || null,
+                            )
+                          }
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                    {clarification?.runId === currentRequest.id && (
+                      <Surface
+                        operations={clarification.operations}
+                        onAction={respond}
+                      />
+                    )}
+                  </section>
+                )}
               {notice && (
                 <p className="cw-notice" role="status">
                   {notice}
@@ -502,75 +539,73 @@ export default function Workspace() {
               )}
               {active ? (
                 <article className="cw-analysis">
-                  <header className="cw-analysis-head">
-                    <div>
-                      <span className="cw-origin">
+                  <header className="cw-turn-head">
+                    <div className="cw-request">
+                      <span>
                         {active.origin === "example"
-                          ? "Recorded example"
+                          ? "Example"
                           : active.origin === "shared"
-                            ? "Shared snapshot"
-                            : active.origin === "view"
-                              ? "Adjusted view"
-                              : active.origin === "direct"
-                                ? "Direct lookup"
-                                : "Agent analysis"}
+                            ? "Shared"
+                            : "You"}
                       </span>
                       <h2>{active.question}</h2>
-                      <p
-                        role="status"
-                        className="cw-status"
-                        data-phase={active.phase}
-                      >
-                        {active.status}
-                        {active.cost !== undefined
-                          ? ` · $${active.cost.toFixed(4)}`
-                          : ""}
-                      </p>
                     </div>
-                    {active.origin === "view" && (
-                      <button
-                        disabled={running}
-                        onClick={() => {
-                          setSelected(parents.current[selected] || "");
-                        }}
-                      >
-                        Previous view
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setReceipt(!receipt)}
-                      aria-expanded={receipt}
-                    >
-                      Steps
-                      {active.trace.length ? ` ${active.trace.length}` : ""}
-                    </button>
+                    <div className="cw-change" aria-label="Workspace change">
+                      <span className="cw-change-author">Chitti</span>
+                      <div>
+                        <p role="status">
+                          {navigationNote && <span>{navigationNote} </span>}
+                          {active.origin === "example" ||
+                          active.origin === "shared"
+                            ? "Opened recorded chart and sources."
+                            : change}
+                        </p>
+                        {active.origin === "view" && (
+                          <small>View only. Source data unchanged.</small>
+                        )}
+                        {(active.phase === "running" ||
+                          active.phase === "waiting") && (
+                          <small>Draft; not yet verified.</small>
+                        )}
+                      </div>
+                      <div className="cw-change-actions">
+                        {Object.hasOwn(parents.current, selected) && (
+                          <button disabled={running} onClick={undo}>
+                            Undo
+                          </button>
+                        )}
+                        {!!redo.length && (
+                          <button disabled={running} onClick={redoChange}>
+                            Redo
+                          </button>
+                        )}
+                        <button
+                          disabled={running}
+                          onClick={() => {
+                            setUseCurrent(true);
+                            composer.current?.focus();
+                          }}
+                        >
+                          Steer
+                        </button>
+                        <button
+                          onClick={() => setReceipt(!receipt)}
+                          aria-expanded={receipt}
+                        >
+                          Steps
+                          {active.trace.length ? ` ${active.trace.length}` : ""}
+                        </button>
+                      </div>
+                    </div>
                   </header>
-                  {active.phase === "needs-key" && (
-                    <div className="cw-actions">
-                      <button onClick={() => setSettings(true)}>
-                        Connect model
-                      </button>
-                      <button
-                        disabled={running}
-                        onClick={() => void submit(active.question)}
-                      >
-                        Retry question
-                      </button>
-                    </div>
-                  )}
-                  {active.phase === "error" && (
-                    <button
-                      disabled={running}
-                      onClick={() => void submit(active.question)}
-                    >
-                      Retry
-                    </button>
-                  )}
                   {receipt && (
                     <section
                       className="cw-receipts"
                       aria-label="Execution steps"
                     >
+                      {active.cost !== undefined && (
+                        <p>Model cost: ${active.cost.toFixed(4)}</p>
+                      )}
                       {!active.trace.length && (
                         <p>
                           {active.origin === "example" ||
@@ -622,6 +657,7 @@ export default function Workspace() {
                       operations={operations}
                       onAction={steerResult}
                       disabled={running}
+                      inlineComposer
                     />
                   ) : active.phase === "running" ? (
                     <div className="cw-pending">
@@ -629,78 +665,76 @@ export default function Workspace() {
                       Reading sources and preparing the result…
                     </div>
                   ) : null}
+                  {composerView}
                   {active.result && (
-                    <footer className="cw-actions cw-result-actions">
-                      <button onClick={() => void share()}>Share result</button>
-                      <button
-                        disabled={!active.result.rows.length}
-                        onClick={() =>
-                          download(
-                            "chitti-data.csv",
-                            rowsToCSV(active.result!.rows),
-                            "text/csv",
-                          )
-                        }
-                      >
-                        Download CSV
-                      </button>
-                      <button
-                        onClick={() =>
-                          download(
-                            "chitti-analysis.md",
-                            buildFindingOkf({
-                              question: active.question,
-                              finding: active.result!.answer,
-                              spec: active.result!.spec,
-                              citations: active.result!.citations,
-                              verification: active.result!.verification,
-                              createdAt: active.result!.ts,
-                            }),
-                            "text/markdown",
-                          )
-                        }
-                      >
-                        Markdown
-                      </button>
-                      {active.result.spec && (
-                        <button
-                          onClick={() => {
-                            setPin(active.result);
-                            setDashboards(true);
-                          }}
-                        >
-                          Pin chart
+                    <details className="cw-export">
+                      <summary>Save or export</summary>
+                      <footer className="cw-actions cw-result-actions">
+                        <button onClick={() => void share()}>
+                          Share result
                         </button>
-                      )}
-                      {active.origin === "direct" &&
-                        active.phase === "done" && (
+                        <button
+                          disabled={!active.result.rows.length}
+                          onClick={() =>
+                            download(
+                              "chitti-data.csv",
+                              rowsToCSV(active.result!.rows),
+                              "text/csv",
+                            )
+                          }
+                        >
+                          Download CSV
+                        </button>
+                        <button
+                          onClick={() =>
+                            download(
+                              "chitti-analysis.md",
+                              buildFindingOkf({
+                                question: active.question,
+                                finding: active.result!.answer,
+                                spec: active.result!.spec,
+                                citations: active.result!.citations,
+                                verification: active.result!.verification,
+                                createdAt: active.result!.ts,
+                              }),
+                              "text/markdown",
+                            )
+                          }
+                        >
+                          Markdown
+                        </button>
+                        {active.result.spec && (
                           <button
-                            disabled={running}
-                            onClick={() => void submit(active.question, true)}
+                            onClick={() => {
+                              setPin(active.result);
+                              setDashboards(true);
+                            }}
                           >
-                            Analyze with model
+                            Pin chart
                           </button>
                         )}
-                    </footer>
+                        {active.origin === "direct" &&
+                          active.phase === "done" && (
+                            <button
+                              disabled={running}
+                              onClick={() => void submit(active.question, true)}
+                            >
+                              Analyze with model
+                            </button>
+                          )}
+                      </footer>
+                    </details>
                   )}
                 </article>
               ) : (
                 <div className="cw-start">
-                  <h2>Chart, data and sources stay together.</h2>
-                  <p>
-                    Choose a recorded example to inspect its chart, values and
-                    sources, or ask your own question in the conversation.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setQuestion(
-                        "Chart life expectancy in Japan, Italy and Spain since 1960",
-                      );
-                      composer.current?.focus();
-                    }}
-                  >
-                    Try a live data lookup
-                  </button>
+                  <h2>Ask for data.</h2>
+                  {!!redo.length && (
+                    <button disabled={running} onClick={redoChange}>
+                      Redo
+                    </button>
+                  )}
+                  {composerView}
                 </div>
               )}
             </>
