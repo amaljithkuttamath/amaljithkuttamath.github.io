@@ -65,3 +65,6 @@ retains record identity. The source link stays visible while long descriptions
 scroll within a bounded inspector. Regrouping motion respects reduced motion.
 Desktop height is about 360px, below the previous matrix; mobile repacks in its
 own coordinate space to retain readable category labels.
+
+
+Radar's first view now names the three highest-evidence observations beside the field, including source type, score, and an existing source description when available. Rank uses the same score/date/title ordering as Evidence; the list action includes all ties at the displayed cutoff. Clicking a title or mark replaces this shortlist with details in the same bounded sidebar, with a keyboard-accessible return. Dot opacity reflects evidence score. Desktop and mobile panel dimensions remain unchanged.

@@ -1,4 +1,4 @@
-import { escapeHTML as esc, type Row } from "./data";
+import { escapeHTML as esc, filterRows, type Row } from "./data";
 import {
   researchField,
   nearestPoint,
@@ -23,15 +23,41 @@ export function mountSignals(
       '<p class="signal-wait">No observations yet. The briefing and archive remain available below.</p>';
     return;
   }
+  const ranked = filterRows(rows);
+  const highlights = ranked.slice(0, 3);
+  const cutoff = highlights[highlights.length - 1].score;
+  const qualifying = rows.filter((row) => row.score >= cutoff).length;
+  let showingHighlights = true;
   let mode: FieldMode = "source",
     field = researchField(rows, mode),
-    selected = field.points[0].row.id,
+    selected = highlights[0].id,
     movingUntil = 0;
   const ids = new Map(rows.map((row, i) => [row.id, `signal-dot-${i}`]));
-  host.innerHTML = `<div class="signal-layout"><div class="signal-canvas"><div class="signal-modes" role="group" aria-label="Arrange observations"><button type="button" data-arrangement="source" aria-pressed="true">By source</button><button type="button" data-arrangement="score" aria-pressed="false">By score</button><span>Size = evidence score</span></div><svg class="signal-field" viewBox="0 0 ${FIELD_WIDTH} ${FIELD_HEIGHT}" role="listbox" tabindex="0" aria-label="Research observations. Use arrow keys to select a mark, Home or End for the first or last item."><g class="field-groups" aria-hidden="true"></g><g class="field-points">${rows.map((row) => `<circle id="${ids.get(row.id)}" data-observation="${esc(row.id)}" role="option" aria-label="${esc(row.title)}, ${esc(row.group)}, evidence score ${row.score} out of 5" aria-selected="false" cx="0" cy="0" r="${1.65 + row.score * 0.32}"></circle>`).join("")}</g><circle class="field-selection" r="7" fill="none" aria-hidden="true" pointer-events="none"/><circle class="field-preview" r="7" fill="none" aria-hidden="true" pointer-events="none"/></svg></div><div class="signal-inspector"><div class="signal-inspector-head"><p id="signal-selection"></p><span id="signal-position"></span><div class="field-navigation"><button type="button" id="signal-prev" aria-label="Previous observation">←</button><button type="button" id="signal-next" aria-label="Next observation">→</button></div></div><div class="signal-item" id="signal-item"></div><a id="signal-source" class="signal-source" target="_blank" rel="noopener noreferrer">Open original source ↗</a><span class="sr-only" id="signal-announcement" role="status"></span></div></div><div class="signal-footer"><p>Hover to preview. Select a mark to keep it open. Arrow keys move between items.</p><button type="button" id="signal-explore"></button></div>`;
+  host.innerHTML = `<div class="signal-layout"><div class="signal-canvas"><div class="signal-modes" role="group" aria-label="Arrange observations"><button type="button" data-arrangement="source" aria-pressed="true">By source</button><button type="button" data-arrangement="score" aria-pressed="false">By score</button><span>Solid marks: 4–5/5 evidence</span></div><svg class="signal-field" viewBox="0 0 ${FIELD_WIDTH} ${FIELD_HEIGHT}" role="listbox" tabindex="0" aria-label="Research observations. Use arrow keys to select a mark, Home or End for the first or last item."><g class="field-groups" aria-hidden="true"></g><g class="field-points">${rows.map((row) => `<circle id="${ids.get(row.id)}" data-observation="${esc(row.id)}" data-score="${row.score}" style="--evidence-opacity:${Math.min(1, 0.2 + row.score * 0.2)}" role="option" aria-label="${esc(row.title)}, ${esc(row.group)}, evidence score ${row.score} out of 5" aria-selected="false" cx="0" cy="0" r="${1.65 + row.score * 0.32}"></circle>`).join("")}</g><circle class="field-selection" r="7" fill="none" aria-hidden="true" pointer-events="none"/><circle class="field-preview" r="7" fill="none" aria-hidden="true" pointer-events="none"/></svg></div><div class="signal-sidebar"><div id="signal-highlights" class="signal-highlights"><div class="signal-highlights-head"><h3>Highest evidence</h3><button type="button" id="signal-all-highlights">See all ${qualifying}</button></div><ol>${highlights
+    .map((row) => {
+      const [title, ...description] = row.title.split(" — ");
+      const name = title.replace(/ \(HF (?:Dataset|Model)\)$/, "");
+      return `<li><button type="button" data-highlight="${esc(row.id)}"><span class="highlight-meta">${esc(row.group)}<span>${row.score}/5</span></span><strong>${esc(name)}</strong>${description.length ? `<span class="highlight-description">${esc(description.join(" — "))}</span>` : ""}</button></li>`;
+    })
+    .join(
+      "",
+    )}</ol></div><div id="signal-detail" class="signal-inspector" hidden><button type="button" id="signal-back">← Highlights</button><div class="signal-inspector-head"><p id="signal-selection"></p><span id="signal-position"></span><div class="field-navigation"><button type="button" id="signal-prev" aria-label="Previous observation">←</button><button type="button" id="signal-next" aria-label="Next observation">→</button></div></div><div class="signal-item" id="signal-item"></div><a id="signal-source" class="signal-source" target="_blank" rel="noopener noreferrer">Open original source ↗</a><span class="sr-only" id="signal-announcement" role="status"></span></div></div></div><div class="signal-footer"><p>Select a title or mark to inspect. Arrow keys move between marks.</p><button type="button" id="signal-explore"></button></div>`;
   const svg = host.querySelector<SVGSVGElement>("svg")!,
     inspector = document.getElementById("signal-item")!,
     preview = host.querySelector<SVGCircleElement>(".field-preview")!;
+  const showHighlights = () => {
+    showingHighlights = true;
+    document.getElementById("signal-explore")!.textContent =
+      "All observations →";
+    document.getElementById("signal-highlights")!.hidden = false;
+    document.getElementById("signal-detail")!.hidden = true;
+    preview.style.opacity = "0";
+  };
+  const showDetail = () => {
+    showingHighlights = false;
+    document.getElementById("signal-highlights")!.hidden = true;
+    document.getElementById("signal-detail")!.hidden = false;
+  };
   const paint = (point: FieldPoint, announce = false) => {
     const row = point.row,
       [name, ...description] =
@@ -49,6 +75,7 @@ export function mountSignals(
   };
   const select = (point: FieldPoint, announce = true) => {
     selected = point.row.id;
+    if (announce) showDetail();
     const index = field.points.indexOf(point);
     (document.getElementById("signal-prev") as HTMLButtonElement).disabled =
       index === 0;
@@ -66,8 +93,9 @@ export function mountSignals(
     const ring = host.querySelector<SVGCircleElement>(".field-selection")!;
     ring.style.transform = `translate(${point.x}px,${point.y}px)`;
     preview.style.opacity = "0";
-    document.getElementById("signal-explore")!.textContent =
-      `List ${point.row.group.toLowerCase()} →`;
+    document.getElementById("signal-explore")!.textContent = showingHighlights
+      ? "All observations →"
+      : `List ${point.row.group.toLowerCase()} →`;
     paint(point, announce);
   };
   const layout = () => {
@@ -124,7 +152,7 @@ export function mountSignals(
       hovered = point.row.id;
       preview.style.transform = `translate(${point.x}px,${point.y}px)`;
       preview.style.opacity = "1";
-      paint(point);
+      if (!showingHighlights) paint(point);
     } else if (!point && hovered) {
       hovered = "";
       preview.style.opacity = "0";
@@ -171,7 +199,12 @@ export function mountSignals(
   document
     .getElementById("signal-explore")!
     .addEventListener("click", () =>
-      onExplore(field.points.find((p) => p.row.id === selected)!.row.group, 0),
+      onExplore(
+        showingHighlights
+          ? "All"
+          : field.points.find((p) => p.row.id === selected)!.row.group,
+        0,
+      ),
     );
   for (const [id, delta] of [
     ["signal-prev", -1],
@@ -183,6 +216,46 @@ export function mountSignals(
       if (field.points[index]) select(field.points[index]);
     });
   }
+  host
+    .querySelectorAll<HTMLButtonElement>("[data-highlight]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        select(
+          field.points.find(
+            (point) => point.row.id === button.dataset.highlight,
+          )!,
+        );
+        document.getElementById("signal-back")!.focus();
+      });
+      const previewHighlight = () => {
+        const point = field.points.find(
+          (point) => point.row.id === button.dataset.highlight,
+        )!;
+        preview.style.transform = `translate(${point.x}px,${point.y}px)`;
+        preview.style.opacity = "1";
+      };
+      button.addEventListener("pointerenter", previewHighlight);
+      button.addEventListener("focus", previewHighlight);
+      button.addEventListener("pointerleave", () => {
+        preview.style.opacity = "0";
+      });
+      button.addEventListener("blur", () => {
+        preview.style.opacity = "0";
+      });
+    });
+  document.getElementById("signal-back")!.addEventListener("click", () => {
+    showHighlights();
+    const buttons = [
+      ...host.querySelectorAll<HTMLButtonElement>("[data-highlight]"),
+    ];
+    (
+      buttons.find((button) => button.dataset.highlight === selected) ||
+      buttons[0]
+    ).focus();
+  });
+  document
+    .getElementById("signal-all-highlights")!
+    .addEventListener("click", () => onExplore("All", cutoff));
   layout();
   if (typeof ResizeObserver !== "undefined") {
     let previousWidth = svg.clientWidth;
