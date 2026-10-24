@@ -176,6 +176,11 @@ export function Result({
           (result.spec ? (
             <Chart
               spec={result.spec}
+              onAsk={
+                enabled && onSteer
+                  ? (question) => onSteer("ask-view", question)
+                  : undefined
+              }
               onSelect={
                 enabled && onSteer
                   ? (name) => onSteer("focus", name)

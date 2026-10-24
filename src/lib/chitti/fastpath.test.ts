@@ -209,7 +209,7 @@ describe('buildFastSummary — states the data, never interprets it', () => {
     expect(s).toContain('rose');
     expect(s).toContain('442');
     expect(s).toContain('2,050');
-    expect(s).toMatch(/\+36[0-9]%/);
+    expect(s).toContain('+363.8%');
   });
 
   it('says "fell" when the series declines', () => {
@@ -235,4 +235,10 @@ describe('buildFastSummary — states the data, never interprets it', () => {
   it('returns empty rather than inventing a story from a single point', () => {
     expect(buildFastSummary(plan, rows([['India', 'IND', 2000, 442]]), 'GDP')).toBe('');
   });
+});
+it('keeps sub-unit endpoint changes visible in the direct summary', () => {
+ const plan=parse('Chart life expectancy in Japan since 2015')!;
+ const rows: DataRow[]=[{country:'Japan',iso3:'JPN',year:2015,value:83.79},{country:'Japan',iso3:'JPN',year:2024,value:84.04}];
+ const summary=buildFastSummary(plan,rows,'Life expectancy');
+ expect(summary).toContain('83.79 in 2015'); expect(summary).toContain('84.04 in 2024');
 });
