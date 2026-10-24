@@ -119,3 +119,67 @@ it("handles an empty feed without inventing observations", () => {
   expect(dom.window.document.body.textContent).toContain("No observations yet");
   expect(dom.window.document.querySelector("svg")).toBeNull();
 });
+
+it("shows ranked titles without hovering, opens details, and restores the shortlist", () => {
+  dom = new JSDOM(
+    '<span id="signal-total"></span><div id="signal-workspace"></div>',
+  );
+  vi.stubGlobal("document", dom.window.document);
+  const explore = vi.fn();
+  mountSignals([...rows].reverse(), explore);
+  const doc = dom.window.document;
+  const highlights = doc.getElementById("signal-highlights")!;
+  const detail = doc.getElementById("signal-detail")!;
+  const buttons = [
+    ...doc.querySelectorAll<HTMLButtonElement>("[data-highlight]"),
+  ];
+  expect(highlights.hidden).toBe(false);
+  expect(detail.hidden).toBe(true);
+  expect(buttons.map((b) => b.dataset.highlight)).toEqual([
+    "ghrepo:a",
+    "ghrepo:b",
+    "ghrepo:c",
+  ]);
+  expect(highlights.textContent).toContain("4/5");
+  expect(highlights.querySelector("img")).toBeNull();
+  expect(highlights.textContent).toContain("<img");
+  buttons[1].click();
+  expect(highlights.hidden).toBe(true);
+  expect(detail.hidden).toBe(false);
+  expect(doc.getElementById("signal-source")!.getAttribute("href")).toBe(
+    "https://github.com/b",
+  );
+  (
+    doc.querySelector('[data-arrangement="score"]') as HTMLButtonElement
+  ).click();
+  expect(detail.hidden).toBe(false);
+  expect(doc.getElementById("signal-source")!.getAttribute("href")).toBe(
+    "https://github.com/b",
+  );
+  doc.getElementById("signal-back")!.click();
+  expect(highlights.hidden).toBe(false);
+  expect(detail.hidden).toBe(true);
+  expect(doc.activeElement).toBe(buttons[1]);
+  doc.getElementById("signal-all-highlights")!.click();
+  expect(explore).toHaveBeenCalledWith("All", 3);
+});
+it("includes tied scores in the evidence handoff and handles a single observation", () => {
+  dom = new JSDOM(
+    '<span id="signal-total"></span><div id="signal-workspace"></div>',
+  );
+  vi.stubGlobal("document", dom.window.document);
+  const explore = vi.fn();
+  const tied = rows.map((row) => ({ ...row, score: 4 }));
+  mountSignals(tied, explore);
+  const all = dom.window.document.getElementById("signal-all-highlights")!;
+  expect(all.textContent).toBe("See all 4");
+  all.click();
+  expect(explore).toHaveBeenCalledWith("All", 4);
+  mountSignals([rows[0]], explore);
+  expect(dom.window.document.querySelectorAll("[data-highlight]")).toHaveLength(
+    1,
+  );
+  expect(
+    dom.window.document.getElementById("signal-all-highlights")!.textContent,
+  ).toBe("See all 1");
+});
