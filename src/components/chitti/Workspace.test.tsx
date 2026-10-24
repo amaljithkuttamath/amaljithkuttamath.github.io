@@ -14,7 +14,7 @@ vi.mock("../../lib/chitti/fastpath", async (importOriginal) => ({
   runFastPath: vi.fn(),
 }));
 import Workspace from "./Workspace";
-import { runFastPath } from "../../lib/chitti/fastpath";
+import { runFastPath, parseFastPath } from "../../lib/chitti/fastpath";
 import { DEMOS } from "../../lib/chitti/demos";
 afterEach(() => {
   cleanup();
@@ -42,6 +42,8 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
   await waitFor(() => expect(runFastPath).toHaveBeenCalled());
   await act(async () =>
     resolve({
+      plan: parseFastPath(question)!,
+      hit: {id:"SP.DYN.LE00.IN",name:"Life expectancy",source:"worldbank"},
       spec: previous.state.spec!,
       rows: previous.state.rows,
       citations: previous.state.citations,
