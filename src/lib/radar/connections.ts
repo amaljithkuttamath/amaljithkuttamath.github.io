@@ -84,7 +84,7 @@ export const CONNECTIONS: readonly Connection[] = [
       quote:
         "Chaining may therefore pass information from an intermediate future chunk to later predictors",
       context:
-        "An explicit design critique by the Looking Ahead authors. They describe the work as independent and concurrent with Next Forcing; this is not a replication or a claim of direct lineage.",
+        "The authors critique chaining but describe independent and concurrent development. This is a design argument, not a replication or direct lineage.",
     },
     checked: "2026-10-24",
   },
