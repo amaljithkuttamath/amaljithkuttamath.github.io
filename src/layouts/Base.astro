@@ -1,188 +1,313 @@
 ---
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/500.css';
-import '@fontsource/inter/600.css';
-import '@fontsource/jetbrains-mono/400.css';
-import '@fontsource-variable/newsreader/opsz.css';
-import '@fontsource-variable/newsreader/opsz-italic.css';
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
 
 interface Props {
   title: string;
+  wide?: boolean;
   description?: string;
   ogImage?: string;
   article?: { published: string; modified?: string };
 }
 
-const { title, description = 'AI Engineer. Building things that think.', ogImage = '/amal.jpg', article } = Astro.props;
+const {
+  wide = false,
+  title,
+  description = "AI Engineer. Building things that think.",
+  ogImage = "/amal.jpg",
+  article,
+} = Astro.props;
 const currentPath = Astro.url.pathname;
 const canonicalURL = new URL(currentPath, Astro.site);
 const ogImageURL = new URL(ogImage, Astro.site);
 
 const navItems = [
-  { href: '/', label: 'Home' },
-  { href: '/apps', label: 'Apps' },
-  { href: '/lab', label: 'Lab' },
-  { href: '/radar', label: 'Radar' },
-  { href: '/about', label: 'About' },
+  { href: "/", label: "Work" },
+  { href: "/radar", label: "Radar" },
+  { href: "/about", label: "About" },
 ];
 
-const breadcrumbItems: { "@type": string; position: number; name: string; item: string }[] = [
-  { "@type": "ListItem", "position": 1, "name": "Home", "item": new URL('/', Astro.site).href }
+const breadcrumbItems: {
+  "@type": string;
+  position: number;
+  name: string;
+  item: string;
+}[] = [
+  {
+    "@type": "ListItem",
+    position: 1,
+    name: "Home",
+    item: new URL("/", Astro.site).href,
+  },
 ];
 
-const matchedNav = navItems.find(item =>
-  item.href !== '/' && (currentPath === item.href || currentPath === item.href + '/' || currentPath.startsWith(item.href))
+const matchedNav = navItems.find(
+  (item) =>
+    item.href !== "/" &&
+    (currentPath === item.href ||
+      currentPath === item.href + "/" ||
+      currentPath.startsWith(item.href)),
 );
 
 if (matchedNav) {
   breadcrumbItems.push({
     "@type": "ListItem",
-    "position": 2,
-    "name": matchedNav.label,
-    "item": new URL(matchedNav.href, Astro.site).href
+    position: 2,
+    name: matchedNav.label,
+    item: new URL(matchedNav.href, Astro.site).href,
   });
 
-  const isSubpage = currentPath !== matchedNav.href && currentPath !== matchedNav.href + '/';
+  const isSubpage =
+    currentPath !== matchedNav.href && currentPath !== matchedNav.href + "/";
   if (isSubpage) {
     breadcrumbItems.push({
       "@type": "ListItem",
-      "position": 3,
-      "name": title.replace(/ \| .+$/, ''),
-      "item": canonicalURL.href
+      position: 3,
+      name: title.replace(/ \| .+$/, ""),
+      item: canonicalURL.href,
     });
   }
 }
 ---
 
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content={description} />
-  <meta name="author" content="Amaljith Kuttamath" />
-  <meta name="theme-color" content="#0b0d0c" />
-  <script is:inline>
-    // Theme: dark by default for everyone; light is opt-in and remembered.
-    // Runs before paint to avoid a flash of the wrong theme.
-    if (localStorage.getItem('theme') === 'light') {
-      document.documentElement.dataset.theme = 'light';
-      document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f6f8f7');
-    }
-  </script>
-  <link rel="canonical" href={canonicalURL} />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="author" content="Amaljith Kuttamath" />
+    <meta name="theme-color" content="#0b0d0c" />
+    <script is:inline>
+      // Theme: dark by default for everyone; light is opt-in and remembered.
+      // Runs before paint to avoid a flash of the wrong theme.
+      try {
+        if (localStorage.getItem("theme") === "light") {
+          document.documentElement.dataset.theme = "light";
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute("content", "#f6f8f7");
+        }
+      } catch {}
+    </script>
+    <link rel="canonical" href={canonicalURL} />
 
-  <!-- Open Graph -->
-  <meta property="og:type" content={article ? 'article' : 'website'} />
-  {article && <meta property="article:published_time" content={new Date(article.published).toISOString()} />}
-  {article && article.modified && <meta property="article:modified_time" content={new Date(article.modified).toISOString()} />}
-  {article && <meta property="article:author" content="Amaljith Kuttamath" />}
-  <meta property="og:url" content={canonicalURL} />
-  <meta property="og:title" content={title} />
-  <meta property="og:description" content={description} />
-  <meta property="og:locale" content="en_US" />
-  <meta property="og:site_name" content="Amaljith Kuttamath" />
-  <meta property="og:image" content={ogImageURL} />
+    <!-- Open Graph -->
+    <meta property="og:type" content={article ? "article" : "website"} />
+    {article && (
+      <meta
+        property="article:published_time"
+        content={new Date(article.published).toISOString()}
+      />
+    )}
+    {article && article.modified && (
+      <meta
+        property="article:modified_time"
+        content={new Date(article.modified).toISOString()}
+      />
+    )}
+    {article && <meta property="article:author" content="Amaljith Kuttamath" />}
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="Amaljith Kuttamath" />
+    <meta property="og:image" content={ogImageURL} />
 
-  <!-- Twitter -->
-  <meta name="twitter:card" content={ogImage === '/amal.jpg' ? 'summary' : 'summary_large_image'} />
-  <meta name="twitter:site" content="@amaljithkm" />
-  <meta name="twitter:title" content={title} />
-  <meta name="twitter:description" content={description} />
-  <meta name="twitter:image" content={ogImageURL} />
+    <!-- Twitter -->
+    <meta
+      name="twitter:card"
+      content={ogImage === "/amal.jpg" ? "summary" : "summary_large_image"}
+    />
+    <meta name="twitter:site" content="@amaljithkm" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
 
-  <title>{title}</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="sitemap" href="/sitemap-index.xml" />
+    <title>{title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
 
-  <!-- JSON-LD: Person -->
-  <script type="application/ld+json" set:html={JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "Person",
-    "name": "Amaljith Kuttamath",
-    "url": "https://amaljithkuttamath.github.io",
-    "jobTitle": "AI Engineer",
-    "sameAs": [
-      "https://github.com/amaljithkuttamath",
-      "https://linkedin.com/in/amaljithk",
-      "https://x.com/amaljithkm"
-    ]
-  })} />
+    <!-- JSON-LD: Person -->
+    <script
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Person",
+        name: "Amaljith Kuttamath",
+        url: "https://amaljithkuttamath.github.io",
+        jobTitle: "AI Engineer",
+        sameAs: [
+          "https://github.com/amaljithkuttamath",
+          "https://linkedin.com/in/amaljithk",
+          "https://x.com/amaljithkm",
+        ],
+      })}
+    />
+    <!-- JSON-LD: WebSite -->
+    <script
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        name: "Amaljith Kuttamath",
+        url: "https://amaljithkuttamath.github.io",
+        description: "AI Engineer. Building things that think.",
+        author: {
+          "@type": "Person",
+          name: "Amaljith Kuttamath",
+        },
+      })}
+    />
+    <!-- JSON-LD: BreadcrumbList -->
+    <script
+      type="application/ld+json"
+      set:html={JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: breadcrumbItems,
+      })}
+    />
+    <!-- Per-page head additions (e.g. a PWA manifest for a specific app). -->
+    <slot name="head" />
+  </head>
+  <body>
+    <a href="#main" class="skip-link">
+      Skip to content
+    </a>
 
-  <!-- JSON-LD: WebSite -->
-  <script type="application/ld+json" set:html={JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "Amaljith Kuttamath",
-    "url": "https://amaljithkuttamath.github.io",
-    "description": "AI Engineer. Building things that think.",
-    "author": {
-      "@type": "Person",
-      "name": "Amaljith Kuttamath"
-    }
-  })} />
+    <div class:list={["container", { "folio-shell": wide }]}>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="/" class="logo" aria-label="Home">
+          <span class="identity-mark" aria-hidden="true">
+            a<span>k</span>
+          </span>
+          <span>
+            Amaljith Kuttamath<small>Independent work in AI</small>
+          </span>
+        </a>
+        <div class="nav-links">
+          <a
+            href="/"
+            aria-current={
+              !currentPath.startsWith("/radar") &&
+              !currentPath.startsWith("/about")
+                ? "page"
+                : undefined
+            }
+            class:list={[
+              {
+                active:
+                  !currentPath.startsWith("/radar") &&
+                  !currentPath.startsWith("/about"),
+              },
+            ]}
+          >
+            work
+          </a>
+          <a
+            href="/radar"
+            aria-current={currentPath.startsWith("/radar") ? "page" : undefined}
+            class:list={[{ active: currentPath.startsWith("/radar") }]}
+          >
+            radar
+          </a>
+          <a
+            href="/about"
+            aria-current={currentPath.startsWith("/about") ? "page" : undefined}
+            class:list={[{ active: currentPath.startsWith("/about") }]}
+          >
+            about
+          </a>
+          <button
+            id="theme-toggle"
+            class="theme-toggle"
+            aria-label="Switch between dark and light theme"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-5.4-5.4c0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z" />
+            </svg>
+          </button>
+        </div>
+      </nav>
 
-  <!-- JSON-LD: BreadcrumbList -->
-  <script type="application/ld+json" set:html={JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    "itemListElement": breadcrumbItems
-  })} />
+      <main id="main">
+        <slot />
+      </main>
 
-  <!-- Per-page head additions (e.g. a PWA manifest for a specific app). -->
-  <slot name="head" />
+      <footer class="site-footer">
+        <div class="footer-note">
+          <span>Amaljith Kuttamath</span>
+          <p>Tools and experiments in AI.</p>
+        </div>
+        <div class="footer-links">
+          <a
+            href="https://github.com/amaljithkuttamath"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub (opens in new tab)"
+          >
+            github
+          </a>
+          <a
+            href="https://linkedin.com/in/amaljithk"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="LinkedIn (opens in new tab)"
+          >
+            linkedin
+          </a>
+          <a
+            href="https://x.com/amaljithkm"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="X / Twitter (opens in new tab)"
+          >
+            x
+          </a>
+          <a href="mailto:kuttamath.amaljith@gmail.com" aria-label="Send email">
+            email
+          </a>
+        </div>
+      </footer>
+    </div>
 
-</head>
-<body>
-  <a href="#main" class="skip-link">Skip to content</a>
-
-  <div class="container">
-    <nav>
-      <a href="/" class="logo" aria-label="Home">Amaljith Kuttamath</a>
-      <div class="nav-links">
-        <a href="/build" class:list={[{ active: currentPath.startsWith('/build') }]}>build</a>
-        <a href="/apps" class:list={[{ active: currentPath.startsWith('/apps') }]}>apps</a>
-        <a href="/lab" class:list={[{ active: currentPath.startsWith('/lab') }]}>lab</a>
-        <a href="/radar" class:list={[{ active: currentPath.startsWith('/radar') }]}>radar</a>
-        <a href="/about" class:list={[{ active: currentPath === '/about' || currentPath === '/about/' }]}>about</a>
-        <button id="theme-toggle" class="theme-toggle" aria-label="Switch between dark and light theme">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-5.4-5.4c0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z" />
-          </svg>
-        </button>
-      </div>
-    </nav>
-
-    <main id="main">
-      <slot />
-    </main>
-
-    <footer>
-      <div class="footer-links">
-        <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer" aria-label="GitHub (opens in new tab)">github</a>
-        <a href="https://linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn (opens in new tab)">linkedin</a>
-        <a href="https://x.com/amaljithkm" target="_blank" rel="noopener noreferrer" aria-label="X / Twitter (opens in new tab)">x</a>
-        <a href="mailto:kuttamath.amaljith@gmail.com" aria-label="Send email">email</a>
-      </div>
-    </footer>
-  </div>
-
-  <script is:inline>
-    document.getElementById('theme-toggle').addEventListener('click', function () {
-      var light = document.documentElement.dataset.theme === 'light';
-      if (light) {
-        delete document.documentElement.dataset.theme;
-        localStorage.setItem('theme', 'dark');
-      } else {
-        document.documentElement.dataset.theme = 'light';
-        localStorage.setItem('theme', 'light');
-      }
-      document.querySelector('meta[name="theme-color"]').setAttribute('content', light ? '#0b0d0c' : '#f6f8f7');
-    });
-  </script>
-</body>
+    <script is:inline>
+      document
+        .getElementById("theme-toggle")
+        .addEventListener("click", function () {
+          var light = document.documentElement.dataset.theme === "light";
+          if (light) {
+            delete document.documentElement.dataset.theme;
+            try {
+              localStorage.setItem("theme", "dark");
+            } catch {}
+          } else {
+            document.documentElement.dataset.theme = "light";
+            try {
+              localStorage.setItem("theme", "light");
+            } catch {}
+          }
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute("content", light ? "#0b0d0c" : "#f6f8f7");
+        });
+    </script>
+  </body>
 </html>
 
 <style is:global>
-  @import '../styles/global.css';
+  @import "../styles/global.css";
 </style>

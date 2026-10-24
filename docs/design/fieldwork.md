@@ -1,0 +1,37 @@
+# Fieldwork: the site as an inspectable body of work
+
+The audience should meet Amal's actual tools and research before a services pitch.
+The homepage asks what a language model is doing, then lets the reader inspect a
+real tokenizer. Apps are instruments, lab entries are questions, Radar is a daily
+observation, and About explains collaboration through concrete work.
+
+Keep the existing Newsreader / Inter / JetBrains Mono families. Newsreader gets
+room to speak in large complete headlines; Inter carries readable descriptions;
+mono is reserved for actual labels, controls, and provenance. Keep graphite
+#0b0d0c, paper #f6f8f7, foreground #e6e9e7 / #171b19, and status amber #d9a13b /
+#9a6c14. Improve secondary-text contrast through the shared token.
+
+Layout: a wide shared masthead on editorial pages, asymmetric opening spreads,
+full-width project rows with small mechanism diagrams, and compact utilities.
+Reading remains within 65–75 characters. App workspaces retain their functional
+layout. Mobile becomes one column with full-width touch controls.
+
+No decorative metrics, invented results, fake model outputs, or ornamental
+charts. A conceptual schematic says it is a schematic. Loading/error states
+must remain honest. Hover brightens to ink; motion is restrained and respects
+reduced motion. Use the site's existing theme preference everywhere.
+
+Radar lives at /radar in the main site. Its overview, evidence, full briefing,
+and archive are different reading depths. Date-only report labels never become
+invented timestamps, and provider names never come from a hardcoded default.
+
+Navigation is deliberately limited to Work, Radar, About. Work is the homepage
+and contains all tools and experiments. About owns research context and
+collaboration. The retired Apps, Lab, and Build hubs redirect to relevant
+sections; individual tools and experiments keep their original URLs.
+
+The final opening is a live language workbench, not a passive tokenizer card.
+It shows deterministic UTF-8 bit columns immediately and loads the real GPT-4o
+vocabulary only on request. Large Inter display type and an inverted instrument
+surface provide the primary visual contrast. Binary patterns encode actual byte
+or token IDs; they are never represented as attention, confidence, or embeddings.

@@ -1,264 +1,289 @@
 ---
-import Base from '../layouts/Base.astro';
+import Base from "../layouts/Base.astro";
 
 const research = [
   {
-    href: 'https://github.com/amaljithkuttamath/trust-bench',
-    title: 'trust-bench',
-    detail: 'Interpretability toolkit probing SAE features, activations, and circuits in Llama 3.1 8B.',
+    href: "https://github.com/amaljithkuttamath/trust-bench",
+    title: "trust-bench",
+    detail:
+      "Interpretability toolkit probing SAE features, activations, and circuits in Llama 3.1 8B.",
   },
   {
-    href: 'https://github.com/amaljithkuttamath/jlens-replication',
-    title: 'jlens-replication',
-    detail: "Replicating Anthropic's Jacobian lens on small open-weight models with free compute.",
+    href: "https://github.com/amaljithkuttamath/jlens-replication",
+    title: "jlens-replication",
+    detail:
+      "Replicating Anthropic's Jacobian lens on small open-weight models with free compute.",
   },
   {
-    href: 'https://github.com/amaljithkuttamath/sae-explorer',
-    title: 'sae-explorer',
-    detail: "One SAE feature that fires on 'and' across six languages in Gemma 2 2B, zero false positives.",
+    href: "https://github.com/amaljithkuttamath/sae-explorer",
+    title: "sae-explorer",
+    detail:
+      "Investigating a Gemma 2 2B SAE feature associated with conjunctions across six languages.",
   },
   {
-    href: 'https://github.com/amaljithkuttamath/mlx-interp',
-    title: 'mlx-interp',
-    detail: 'First mechanistic interpretability library for Apple MLX. Sparse autoencoders on Apple Silicon.',
+    href: "https://github.com/amaljithkuttamath/mlx-interp",
+    title: "mlx-interp",
+    detail:
+      "Mechanistic interpretability tools for Apple MLX. Sparse autoencoders on Apple Silicon.",
   },
   {
-    href: 'https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5',
-    title: 'hybrid-attention-mlx',
-    detail: 'From-scratch MLX implementation of Qwen3.5 hybrid DeltaNet + full-attention architecture.',
+    href: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5",
+    title: "hybrid-attention-mlx",
+    detail:
+      "From-scratch MLX implementation of Qwen3.5 hybrid DeltaNet + full-attention architecture.",
   },
 ];
 ---
 
 <Base
-  title="About · Amaljith Kuttamath"
-  description="AI Engineer researching LLM trust, safety, and mechanistic interpretability. Building tools that make language models legible."
+  wide
+  title="About | Amaljith Kuttamath"
+  description="Amaljith Kuttamath, AI engineer working on language model behavior, retrieval, evaluation, and mechanistic interpretability."
 >
-  <article class="about-content animate-in">
-    <h1>About</h1>
-
-    <section class="about-intro">
-      <img src="/amal.jpg" alt="Amaljith Kuttamath" class="about-photo" width="120" height="120" />
-      <div class="intro-text">
-        <p>
-          I build small tools that make language models legible &mdash; what
-          they see, how sure they are, and where they break. My background is
-          in retrieval systems and knowledge graphs for healthcare, which
-          pulled me toward the deeper question of what's actually happening
-          inside these models.
-        </p>
-        <p>
-          Everything on this site runs in your browser. Try the
-          <a href="/apps">apps</a> or the <a href="/lab">lab</a>.
-        </p>
-      </div>
-    </section>
-
-    <section class="about-section">
-      <div class="section-header">
-        <h2>Background</h2>
-      </div>
-      <p class="background-brief">
-        Started at <a href="https://www.isro.gov.in" target="_blank" rel="noopener noreferrer">ISRO</a>.
-        Co-founded <strong>RadianArc</strong>, where we built digital twins for
-        predictive maintenance on industrial machinery. MS in Data Analytics
-        from George Mason University; thesis on RAG systems for healthcare.
+  <header class="about-opening folio-hero">
+    <div>
+      <p class="folio-label">A little background</p>
+      <h1>
+        I like knowing
+        <br />
+        why it works.
+      </h1>
+      <p class="folio-intro">
+        I’m Amaljith Kuttamath. I build AI systems and tools for understanding
+        them. The questions that stick with me tend to start where a
+        good-looking answer stops.
       </p>
-      <div class="credentials">
-        <div class="detail-row">
-          <span class="detail-label">Cert</span>
-          <span class="detail-value">Google Cloud Professional ML Engineer, 2024</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Paper</span>
-          <span class="detail-value">
-            <a href="https://doi.org/10.1097/QMH.0000000000000525" target="_blank" rel="noopener noreferrer">Predicting Risk of Lung Cancer</a>,
-            Quality Management in Health Care
-          </span>
-        </div>
-      </div>
-    </section>
-
-    <section class="about-section">
-      <div class="section-header">
-        <h2>Research libraries</h2>
-      </div>
-      <p class="research-lead">
-        Longer-running open-source work. These are libraries and research
-        replications rather than in-browser tools; they live on GitHub.
-      </p>
-      <div class="research-list">
-        {research.map((r) => (
-          <a href={r.href} class="research-row" target="_blank" rel="noopener noreferrer">
-            <span class="research-title">{r.title}</span>
-            <span class="research-detail">{r.detail}</span>
-          </a>
-        ))}
-      </div>
-    </section>
-
-    <section class="about-section about-cta">
+    </div>
+    <figure>
+      <img src="/amal.jpg" alt="Amaljith Kuttamath" width="360" height="420" />
+      <figcaption>Amaljith Kuttamath / AI engineer</figcaption>
+    </figure>
+  </header>
+  <section class="about-story">
+    <h2>
+      From physical systems
+      <br />
+      to model internals.
+    </h2>
+    <div>
       <p>
-        Want to collaborate or talk shop?
-        <a href="mailto:kuttamath.amaljith@gmail.com">kuttamath.amaljith@gmail.com</a>
-        &middot;
-        <a href="/resume.pdf" class="resume-link">Resume (PDF)</a>
+        I started at ISRO, then co-founded RadianArc, building digital twins for
+        predictive maintenance on industrial machinery.
       </p>
-      <div class="social-links">
-        <a href="https://github.com/amaljithkuttamath" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://linkedin.com/in/amaljithk" target="_blank" rel="noopener noreferrer">LinkedIn</a>
-        <a href="https://x.com/amaljithkm" target="_blank" rel="noopener noreferrer">X</a>
-        <a href="https://substack.com/@amaljithk" target="_blank" rel="noopener noreferrer">Substack</a>
+      <p>
+        Retrieval systems and knowledge graphs for healthcare pulled me toward a
+        different kind of machinery: language models, the representations inside
+        them, and the gap between a confident answer and a justified one.
+      </p>
+      <p>
+        I completed an MS in Data Analytics at George Mason University, with a
+        thesis on RAG systems for healthcare. The work here grows out of those
+        questions: what a model sees, how its decisions behave, and how to make
+        a system easier to inspect.
+      </p>
+      <a href="/resume.pdf" class="folio-link">
+        Read my résumé
+      </a>
+    </div>
+  </section>
+  <section class="folio-section" aria-labelledby="research-title">
+    <div class="folio-section-head">
+      <h2 id="research-title">Threads I keep pulling</h2>
+      <p>Research libraries &amp; replications</p>
+    </div>
+    <div class="folio-rows">
+      {research.map((r) => (
+        <a
+          class="folio-row"
+          href={r.href}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <h3>{r.title}</h3>
+          <p>{r.detail}</p>
+          <span aria-hidden="true">↗</span>
+        </a>
+      ))}
+    </div>
+  </section>
+  <section class="about-record folio-section">
+    <h2>A few points of reference</h2>
+    <dl>
+      <div>
+        <dt>Education</dt>
+        <dd>
+          MS, Data Analytics
+          <br />
+          George Mason University
+        </dd>
       </div>
-    </section>
-  </article>
-
-  <script type="application/ld+json" set:html={JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "ProfilePage",
-    "mainEntity": {
-      "@type": "Person",
-      "name": "Amaljith Kuttamath",
-      "jobTitle": "AI Engineer",
-      "url": "https://amaljithkuttamath.github.io",
-      "email": "kuttamath.amaljith@gmail.com",
-      "alumniOf": [
-        { "@type": "CollegeOrUniversity", "name": "George Mason University" },
-        { "@type": "CollegeOrUniversity", "name": "GITAM University" }
-      ],
-      "sameAs": [
-        "https://github.com/amaljithkuttamath",
-        "https://linkedin.com/in/amaljithk",
-        "https://x.com/amaljithkm",
-        "https://substack.com/@amaljithk"
-      ]
-    }
-  })} />
+      <div>
+        <dt>Certification</dt>
+        <dd>
+          Google Cloud Professional
+          <br />
+          ML Engineer, 2024
+        </dd>
+      </div>
+      <div>
+        <dt>Publication</dt>
+        <dd>
+          <a
+            href="https://doi.org/10.1097/QMH.0000000000000525"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Predicting Risk of Lung Cancer ↗
+          </a>
+          <br />
+          Quality Management in Health Care
+        </dd>
+      </div>
+    </dl>
+  </section>
+  <section id="work-together" class="about-end folio-section">
+    <h2>
+      Have a question
+      <br />
+      worth building for?
+    </h2>
+    <div>
+      <p>
+        I work on retrieval, evaluation, and model-backed products. We start
+        with one concrete problem, agree on what success looks like, then build
+        a working slice and test it.
+      </p>
+      <p>
+        For a project, a research conversation, or a useful disagreement:
+        <br />
+        <a class="folio-link" href="mailto:kuttamath.amaljith@gmail.com">
+          kuttamath.amaljith@gmail.com
+        </a>
+      </p>
+      <a class="folio-link" href="/resume.pdf">
+        Résumé
+      </a>
+    </div>
+  </section>
+  <script
+    type="application/ld+json"
+    set:html={JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "ProfilePage",
+      mainEntity: {
+        "@type": "Person",
+        name: "Amaljith Kuttamath",
+        jobTitle: "AI Engineer",
+        url: "https://amaljithkuttamath.github.io",
+      },
+    })}
+  />
 </Base>
-
 <style>
-  .about-intro {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-lg);
-    margin-bottom: var(--space-xl);
+  .about-opening {
+    display: grid;
+    grid-template-columns: 1.3fr 0.8fr;
+    gap: var(--space-3xl);
+    align-items: center;
   }
-
-  .about-photo {
-    border-radius: 50%;
-    flex-shrink: 0;
+  .about-opening .folio-label {
+    margin-bottom: var(--space-lg);
+  }
+  .about-opening h1 {
+    max-width: 15ch;
+  }
+  .about-opening figure {
+    margin: 0;
+  }
+  .about-opening img {
+    width: 100%;
+    height: 360px;
     object-fit: cover;
+    object-position: center 30%;
+    border-radius: var(--radius-md);
+    filter: grayscale(1);
+    border: 1px solid var(--fg-faint);
   }
-
-  .intro-text {
-    flex: 1;
+  .about-opening figcaption {
+    font: 0.6rem/1.6 var(--font-mono);
+    color: var(--fg-muted);
+    margin-top: var(--space-sm);
   }
-
-  .about-section {
-    margin-bottom: var(--space-xl);
+  .about-story {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: var(--space-2xl);
+    border-top: 1px solid var(--line-strong);
+    padding-top: var(--space-xl);
   }
-
-  .about-section:last-child {
-    margin-bottom: 0;
+  .about-story h2 {
+    font-size: 2.2rem;
+    line-height: 1.2;
+    margin: 0;
   }
-
-  .background-brief {
+  .about-story p {
+    color: var(--fg-muted);
+    line-height: 1.85;
+  }
+  .about-record {
+    border-top: 1px solid var(--line-strong);
+    padding-top: var(--space-xl);
+  }
+  .about-record h2 {
+    font-size: 2rem;
+    margin: 0 0 var(--space-xl);
+  }
+  .about-record dl {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.4fr;
+    gap: var(--space-xl);
+  }
+  .about-record dt {
+    font: var(--text-label) var(--font-mono);
+    color: var(--fg-muted);
     margin-bottom: var(--space-md);
   }
-
-  .credentials {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .credentials .detail-row {
-    padding: var(--space-xs) 0;
-    border-bottom: 1px solid var(--fg-faint);
-  }
-
-  .credentials .detail-row:first-child {
-    border-top: 1px solid var(--fg-faint);
-  }
-
-  .research-lead {
-    margin-bottom: var(--space-md);
-  }
-
-  .research-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .research-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 1rem;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    text-decoration: none;
-    color: var(--fg);
-    transition: color var(--duration) var(--ease);
-  }
-
-  .research-row:first-child {
-    border-top: 1px solid var(--fg-faint);
-  }
-
-  .research-row:hover {
-    color: var(--accent-color);
-  }
-
-  .research-title {
-    font-family: var(--font-mono);
+  .about-record dd {
     font-size: var(--text-small);
-    font-weight: 500;
-    flex-shrink: 0;
+    line-height: 1.8;
   }
-
-  .research-detail {
+  .about-record a {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .about-end {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xl);
+    border-top: 1px solid var(--line-strong);
+    padding-top: var(--space-xl);
+  }
+  .about-end h2 {
+    font-size: 2.6rem;
+    line-height: 1.1;
+    margin: 0;
+  }
+  .about-end p {
+    color: var(--fg-muted);
+    align-self: center;
     font-size: var(--text-small);
-    color: var(--fg-muted);
-    text-align: right;
-    line-height: 1.5;
   }
-
-  .about-cta p {
-    margin-bottom: var(--space-sm);
+  .about-end a {
+    overflow-wrap: anywhere;
   }
-
-  .social-links {
-    display: flex;
-    gap: var(--space-lg);
-    flex-wrap: wrap;
-  }
-
-  .social-links a {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    letter-spacing: 0.02em;
-    transition: color var(--duration) var(--ease);
-  }
-
-  .social-links a:hover {
-    color: var(--accent-color);
-  }
-
-  @media (max-width: 600px) {
-    .about-intro {
-      flex-direction: column;
-      align-items: flex-start;
+  @media (max-width: 760px) {
+    .about-opening,
+    .about-story,
+    .about-end {
+      grid-template-columns: 1fr;
+      gap: var(--space-xl);
     }
-
-    .research-row {
-      flex-direction: column;
-      gap: 0.15rem;
+    .about-opening figure {
+      max-width: 320px;
     }
-
-    .research-detail {
-      text-align: left;
+    .about-record dl {
+      grid-template-columns: 1fr;
+      gap: var(--space-lg);
     }
   }
 </style>
