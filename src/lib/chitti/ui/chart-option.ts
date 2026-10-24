@@ -6,6 +6,7 @@ import {
   chartValue,
   highlightChanges,
   deltaLabel,
+  changeDigits,
   type ChartChange,
 } from "../chart-insights";
 import type { ChartSpec } from "../tools";
@@ -364,7 +365,7 @@ export function buildOption(
               label: selected
                 ? {
                     show: true,
-                    formatter: chartValue(point[1]),
+                    formatter: chartValue(point[1], changeDigits(c)),
                     position: point === c.from ? "top" : "bottom",
                     color: fg,
                     fontSize: 10,
