@@ -12,6 +12,7 @@ import {
 } from "./data";
 import { digestView } from "./digest";
 import { mountSignals } from "./signals";
+import { editionEvolution, renderEvolution, type Evolution } from "./evolution";
 export function bootRadar() {
   const $ = (id: string) => document.getElementById(id)!;
   const input = (id: string) => $(id) as HTMLInputElement;
@@ -23,6 +24,67 @@ export function bootRadar() {
     currentDate = "",
     publication: any = null;
   const cache = new Map<string, Promise<string>>();
+  const movements = new Map<string, Evolution | null>();
+  const movementLoads = new Set<string>();
+  let movementRevision = 0;
+  function showResearch(view: string) {
+    const evolution = document.getElementById("evolution-workspace");
+    if (!evolution) return;
+    evolution.hidden = view !== "evolution";
+    if (document.getElementById("radar-timeline"))
+      $("radar-timeline").hidden = view === "evolution";
+    $("signal-workspace").hidden = view === "evolution";
+    $("signal-total").hidden = view === "evolution";
+    $("signal-title").textContent =
+      view === "evolution" ? "Research evolution" : "Research observations";
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-signal-view]")
+      .forEach((button) =>
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.signalView === view),
+        ),
+      );
+  }
+  function paintEvolution() {
+    const host = document.getElementById("evolution-workspace");
+    if (!host) return;
+    const requested = location.hash.slice(1).split("/")[1];
+    const selected = validDate(requested || "") ? requested : editions[0]?.date;
+    if (!selected) {
+      host.innerHTML =
+        '<p class="signal-wait">No edition history available.</p>';
+      return;
+    }
+    const dates = editions.map((edition) => edition.date);
+    const index = Math.max(0, dates.indexOf(selected));
+    const start = Math.max(0, Math.min(index - 3, dates.length - 7));
+    renderEvolution(host, dates, selected, movements, (date) => {
+      showResearch("evolution");
+      location.hash = `briefing/${date}`;
+    });
+    const generation = movementRevision;
+    for (const date of dates.slice(start, start + 7)) {
+      if (movements.has(date) || movementLoads.has(date)) continue;
+      movementLoads.add(date);
+      void read(`reports/${date}-digest.md`)
+        .then((md) => {
+          const digest = digestView(md, document);
+          if (digest.date !== date) throw new Error("Edition date mismatch");
+          if (generation === movementRevision)
+            movements.set(date, editionEvolution(digest.root, date));
+        })
+        .catch(() => {
+          if (generation === movementRevision) movements.set(date, null);
+        })
+        .finally(() => {
+          if (generation === movementRevision) {
+            movementLoads.delete(date);
+            paintEvolution();
+          }
+        });
+    }
+  }
   async function read(path: string) {
     if (!cache.has(path))
       cache.set(
@@ -203,6 +265,7 @@ export function bootRadar() {
   function renderTimeline() {
     const host = document.getElementById("radar-timeline");
     if (!host) return;
+    const hadFocus = host.contains(document.activeElement);
     const requested = location.hash.slice(1).split("/")[1];
     const selected = validDate(requested || "") ? requested : editions[0]?.date;
     const index = Math.max(
@@ -214,6 +277,7 @@ export function bootRadar() {
     host.innerHTML = editions.length
       ? `<span>Timeline</span><button type="button" data-timeline-date="${editions[index + 1]?.date || ""}" aria-label="Previous edition" ${index >= editions.length - 1 ? "disabled" : ""}>←</button>${visible.map((edition) => `<a href="#briefing/${edition.date}" aria-label="Read ${dateLabel(edition.date)}" ${edition.date === selected ? 'aria-current="date"' : ""}>${edition.date.slice(5).replace("-", "/")}</a>`).join("")}<button type="button" data-timeline-date="${editions[index - 1]?.date || ""}" aria-label="Next edition" ${index === 0 ? "disabled" : ""}>→</button>`
       : '<a href="#archive">Timeline unavailable</a>';
+    if (hadFocus) host.querySelector<HTMLElement>("[aria-current]")?.focus();
     host
       .querySelectorAll<HTMLButtonElement>("[data-timeline-date]")
       .forEach((button) =>
@@ -279,15 +343,18 @@ export function bootRadar() {
       }
       renderArchive();
       renderTimeline();
+      paintEvolution();
     } catch (e) {
       error($("archive-list"), e, loadArchive);
       renderTimeline();
+      paintEvolution();
     }
   }
   let briefKey = "";
   function route(force = false) {
     if (location.hash === "#main") return;
     renderTimeline();
+    paintEvolution();
     const [part, date] = location.hash.slice(1).split("/"),
       view = ["evidence", "archive"].includes(part) ? part : "briefing";
     document
@@ -300,6 +367,7 @@ export function bootRadar() {
       });
     if (view === "briefing") {
       const key = validDate(date || "") ? date : "latest";
+      if (key !== "latest") showResearch("evolution");
       if (key !== briefKey || force) {
         briefKey = key;
         void loadBrief(key);
@@ -363,12 +431,22 @@ export function bootRadar() {
   }
   function refresh() {
     cache.clear();
+    movementRevision++;
+    movements.clear();
+    movementLoads.clear();
     publication = null;
     void loadPublication();
     void loadEvidence();
     void loadArchive();
     route(true);
   }
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-signal-view]")
+    .forEach((button) =>
+      button.addEventListener("click", () =>
+        showResearch(button.dataset.signalView!),
+      ),
+    );
   $("radar-refresh").addEventListener("click", refresh);
   document.getElementById("jump-briefing")?.addEventListener("click", () => {
     $("tab-briefing").focus();
