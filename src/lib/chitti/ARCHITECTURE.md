@@ -96,6 +96,18 @@ series, values and interval through the existing A2UI action, with the current
 workspace's full evidence. Percentage deltas are percentage points, not relative
 percent changes. No causal explanation is inferred locally.
 
+`explain-change` A2UI actions carry an identity derived from plotted coordinates;
+the workspace resolves it against the current chart before running the agent.
+Explanation runs use the same AG-UI adapter and full selected evidence, but their
+snapshots and draft surfaces stay attached to that change instead of replacing
+the workspace. One compact inline panel holds the answer, sources, key gate,
+clarification, stop/retry and close controls. Closing removes the highlight.
+The selected interval and its two observed endpoints are emphasized on the
+original chart; other series remain visible. A highlight identifies the measured
+change, not proof of a causal mechanism. The prompt requests a short sourced
+answer and explicitly separates observation from cause. Inline explanations are
+session-only and are not added to the existing result's share/export payload.
+
 There is still no durable background agent or remote workspace service.
 
 Tests cover the actual protocol processor/action round trip, follow-up routing,

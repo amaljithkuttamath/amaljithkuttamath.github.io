@@ -97,3 +97,11 @@ export function deltaLabel(change: ChartChange, unit?: string): string {
 export function explainChange(change: ChartChange): string {
   return `Why did ${change.series} change from ${chartValue(change.from[1], changeDigits(change))} to ${chartValue(change.to[1], changeDigits(change))} between ${change.from[0]} and ${change.to[0]}?`;
 }
+
+/** Stable identity is computed from the plotted data, never trusted from a UI payload. */
+export function changeKey(c: ChartChange): string {
+  return JSON.stringify([c.series, ...c.from, ...c.to]);
+}
+export function changeQuestion(c: ChartChange): string {
+  return `${explainChange(c)} Explain only this change in at most 80 words. Use the selected workspace evidence and cite the sources. Distinguish the observed change from its cause: if these sources cannot establish why, say so. Do not invent causes or replace the chart.`;
+}

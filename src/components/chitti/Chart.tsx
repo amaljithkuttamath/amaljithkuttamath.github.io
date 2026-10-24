@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useContext } from "react";
 import type { ChartSpec } from "../../lib/chitti/tools";
 import { buildOption } from "../../lib/chitti/ui/chart-option";
 import {
@@ -9,7 +9,10 @@ import {
   deltaLabel,
   explainChange,
   changeDigits,
+  changeKey,
+  type ChartChange,
 } from "../../lib/chitti/chart-insights";
+import { ChangeExplanation, ExplanationContext } from "./ChangeExplanation";
 import { chartAriaLabel } from "../../lib/chitti/a11y";
 export default function Chart({
   spec,
@@ -18,8 +21,10 @@ export default function Chart({
 }: {
   spec: ChartSpec;
   onSelect?: (name: string) => void;
-  onAsk?: (question: string) => void;
+  onAsk?: (question: string, change: ChartChange) => void;
 }) {
+  const explanation = useContext(ExplanationContext);
+  const selected = explanation?.change;
   const [fit, setFit] = useState(true);
   const domain = useMemo(() => lineDomain(spec), [spec]);
   const highlights = useMemo(() => highlightChanges(spec), [spec]);
@@ -34,14 +39,14 @@ export default function Chart({
       chart: import("echarts/core").EChartsType | undefined;
     const resize = new ResizeObserver(() => chart?.resize());
     const theme = new MutationObserver(() =>
-      chart?.setOption(buildOption(spec, fit), true),
+      chart?.setOption(buildOption(spec, fit, selected), true),
     );
     setFailed(false);
     void import("./chart-runtime")
       .then(({ init }) => {
         if (disposed || !host.current) return;
         chart = init(host.current);
-        chart.setOption(buildOption(spec, fit));
+        chart.setOption(buildOption(spec, fit, selected));
         chart.on("click", (params) => {
           const data = params.data as { changeYear?: number } | undefined;
           const year =
@@ -52,7 +57,7 @@ export default function Chart({
             (c) => c.series === params.seriesName && c.to[0] === year,
           );
           if (change && ask.current) {
-            ask.current(explainChange(change));
+            ask.current(explainChange(change), change);
             return;
           }
           if (params.componentType !== "series") return;
@@ -79,7 +84,7 @@ export default function Chart({
       theme.disconnect();
       chart?.dispose();
     };
-  }, [spec, fit]);
+  }, [spec, fit, selected]);
   return (
     <figure className="cw-chart">
       <figcaption>
@@ -112,7 +117,13 @@ export default function Chart({
             <button
               key={`${c.series}-${c.to[0]}`}
               disabled={!onAsk}
-              onClick={() => onAsk?.(explainChange(c))}
+              onClick={() => onAsk?.(explainChange(c), c)}
+              aria-controls={
+                selected && changeKey(selected) === changeKey(c)
+                  ? "cw-change-explanation"
+                  : undefined
+              }
+              aria-expanded={!!selected && changeKey(selected) === changeKey(c)}
               aria-label={`Ask why: ${c.series}, ${deltaLabel(c, spec.y_axis)}, ${c.from[0]} to ${c.to[0]}`}
             >
               <strong>
@@ -127,6 +138,7 @@ export default function Chart({
           ))}
         </div>
       )}
+      <ChangeExplanation unit={spec.y_axis} />
       {failed ? (
         <p role="status">
           Chart unavailable. The values are still available in Data.
@@ -136,7 +148,7 @@ export default function Chart({
           ref={host}
           className="cw-chart-canvas"
           role="img"
-          aria-label={`${chartAriaLabel(spec)}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}
+          aria-label={`${chartAriaLabel(spec)}${selected ? ` Highlighted ${selected.series}, ${selected.from[0]} to ${selected.to[0]}, ${chartValue(selected.from[1])} to ${chartValue(selected.to[1])}.` : ""}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}
         />
       )}
     </figure>

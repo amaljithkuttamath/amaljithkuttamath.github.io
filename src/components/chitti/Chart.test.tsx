@@ -17,6 +17,8 @@ vi.mock("./chart-runtime", () => ({
   init: () => ({ setOption, on, dispose, resize: vi.fn() }),
 }));
 import Chart from "./Chart";
+import { chartChanges, changeKey } from "../../lib/chitti/chart-insights";
+import { ExplanationContext } from "./ChangeExplanation";
 vi.stubGlobal(
   "ResizeObserver",
   class {
@@ -51,6 +53,7 @@ it("exposes a fitted axis, actual change and keyboard-accessible explanation act
   fireEvent.click(screen.getByRole("button", { name: /Ask why: Spain/ }));
   expect(onAsk).toHaveBeenCalledWith(
     "Why did Spain change from 83.8 to 82.3 between 2019 and 2020?",
+    chartChanges(spec)[0],
   );
   fireEvent.click(screen.getByRole("button", { name: "From zero" }));
   await waitFor(() =>
@@ -70,6 +73,7 @@ it("routes a plotted marker click to the same exact change question", async () =
   });
   expect(onAsk).toHaveBeenCalledWith(
     expect.stringContaining("83.8 to 82.3 between 2019 and 2020"),
+    chartChanges(spec)[0],
   );
 });
 it("does not offer active agent actions during a run", async () => {
@@ -105,10 +109,9 @@ it("sends a clicked change through the actual A2UI result surface", async () => 
   await waitFor(() =>
     expect(onAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "ask-view",
+        name: "explain-change",
         context: {
-          value:
-            "Why did Spain change from 83.8 to 82.3 between 2019 and 2020?",
+          value: changeKey(chartChanges(spec)[0]),
         },
       }),
     ),
@@ -121,4 +124,66 @@ it("keeps the zero baseline and original values for a bar chart", async () => {
   expect(screen.queryByRole("button", { name: "Fit values" })).toBeNull();
   expect(setOption.mock.calls[0][0].yAxis.min).toBeUndefined();
   expect(setOption.mock.calls[0][0].series[0].data).toEqual([83.8, 82.3]);
+});
+
+it("anchors the explanation to exact plotted values and clears the highlight on close", async () => {
+  const change = chartChanges(spec)[0];
+  const detail = {
+    change,
+    analysis: {
+      id: "why",
+      question: "why",
+      phase: "done" as const,
+      status: "Done",
+      origin: "agent" as const,
+      trace: [],
+      files: {},
+      result: {
+        v: 1 as const,
+        q: "why",
+        answer: "The series records a fall. It does not establish a cause.",
+        spec: null,
+        rows: [],
+        citations: [],
+        verification: null,
+        ts: "2026-10-24",
+      },
+    },
+    onClose: vi.fn(),
+    onRetry: vi.fn(),
+    onConnect: vi.fn(),
+    onStop: vi.fn(),
+  };
+  const { rerender } = render(
+    <ExplanationContext.Provider value={detail}>
+      <Chart spec={spec} onAsk={vi.fn()} />
+    </ExplanationContext.Provider>,
+  );
+  await screen.findByRole("region", { name: /Explanation: Spain/ });
+  await waitFor(() => expect(setOption).toHaveBeenCalled());
+  const line = setOption.mock.calls.at(-1)![0].series[0];
+  expect(line.markLine.data[0]).toEqual([
+    { coord: [0, 83.8] },
+    { coord: [1, 82.3] },
+  ]);
+  expect(line.markPoint.data.map((p: any) => p.coord)).toEqual([
+    [0, 83.8],
+    [1, 82.3],
+  ]);
+  expect(screen.getByRole("img").getAttribute("aria-label")).toContain(
+    "Highlighted Spain, 2019 to 2020",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close explanation" }));
+  expect(detail.onClose).toHaveBeenCalled();
+  rerender(
+    <ExplanationContext.Provider value={null}>
+      <Chart spec={spec} />
+    </ExplanationContext.Provider>,
+  );
+  await waitFor(() =>
+    expect(setOption.mock.calls.at(-1)![0].series[0].markLine).toBeUndefined(),
+  );
+  expect(
+    screen.queryByRole("region", { name: /Explanation: Spain/ }),
+  ).toBeNull();
 });

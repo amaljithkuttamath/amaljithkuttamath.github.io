@@ -3,6 +3,7 @@ import type { ShareStateV1 } from "../../lib/chitti/share";
 import { safeLink } from "../../lib/chitti/workspace/model";
 import { mdToHtml } from "../../lib/chitti/ui/dom";
 import { recentStart } from "../../lib/chitti/workspace/steering";
+import { changeKey } from "../../lib/chitti/chart-insights";
 import Chart from "./Chart";
 export const ResultInteraction = createContext(true);
 export const InlineComposer = createContext(false);
@@ -178,7 +179,8 @@ export function Result({
               spec={result.spec}
               onAsk={
                 enabled && onSteer
-                  ? (question) => onSteer("ask-view", question)
+                  ? (_question, change) =>
+                      onSteer("explain-change", changeKey(change))
                   : undefined
               }
               onSelect={

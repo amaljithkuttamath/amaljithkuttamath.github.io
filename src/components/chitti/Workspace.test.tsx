@@ -8,7 +8,30 @@ import {
   waitFor,
   act,
 } from "@testing-library/react";
-vi.mock("./Chart", () => ({ default: () => <div>Chart rendered</div> }));
+vi.mock("./Chart", async () => {
+  const { highlightChanges, explainChange, deltaLabel } = await import(
+    "../../lib/chitti/chart-insights"
+  );
+  const { ChangeExplanation } = await import("./ChangeExplanation");
+  return {
+    default: ({ spec, onAsk }: any) => (
+      <div>
+        <span>Chart rendered</span>
+        {highlightChanges(spec).map((c) => (
+          <button
+            key={c.series}
+            disabled={!onAsk}
+            onClick={() => onAsk(explainChange(c), c)}
+            aria-label={`Ask why: ${c.series}, ${deltaLabel(c, spec.y_axis)}, ${c.from[0]} to ${c.to[0]}`}
+          >
+            Why?
+          </button>
+        ))}
+        <ChangeExplanation unit={spec.y_axis} />
+      </div>
+    ),
+  };
+});
 vi.mock("../../lib/chitti/fastpath", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/chitti/fastpath")>()),
   runFastPath: vi.fn(),
@@ -20,6 +43,8 @@ vi.mock("../../lib/chitti/session", async (importOriginal) => ({
 import { createSession, type ChittiSession } from "../../lib/chitti/session";
 import Workspace from "./Workspace";
 import { runFastPath, parseFastPath } from "../../lib/chitti/fastpath";
+import { highlightChanges, deltaLabel } from "../../lib/chitti/chart-insights";
+import { within } from "@testing-library/react";
 import { DEMOS } from "../../lib/chitti/demos";
 afterEach(() => {
   cleanup();
@@ -159,4 +184,138 @@ it("keeps a model-key request beside the unchanged result", async () => {
   await screen.findByRole("button", { name: "Connect model" });
   expect(screen.getByRole("heading", { name: DEMOS[0].question })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Current request" })).toBeTruthy();
+});
+
+it("keeps explanation progress and the answer beside the selected change without replacing the source chart", async () => {
+  sessionStorage.setItem("chitti:provider", "openrouter");
+  sessionStorage.setItem("chitti:key", "test-key");
+  const demo = DEMOS[2];
+  const change = highlightChanges(demo.state.spec!)[0];
+  let resolve!: (value: any) => void;
+  const ask = vi.fn((_q, callbacks) => {
+    callbacks.onPreview({
+      chartSpec: { ...demo.state.spec, title: "Replacement must not appear" },
+      rows: demo.state.rows,
+      citations: demo.state.citations,
+    });
+    return new Promise((r) => {
+      resolve = r;
+    });
+  });
+  vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
+  render(<Workspace />);
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${demo.id}` },
+  });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Ask why: ${change.series}, ${deltaLabel(change, demo.state.spec!.y_axis)}, ${change.from[0]} to ${change.to[0]}`,
+    }),
+  );
+  const panel = await screen.findByRole("region", {
+    name: `Explanation: ${change.series}, ${change.from[0]} to ${change.to[0]}`,
+  });
+  expect(
+    within(panel).getByText("Checking this change against the sources…"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Current request" })).toBeNull();
+  expect(screen.getByRole("heading", { name: demo.question })).toBeTruthy();
+  expect(screen.queryByText("Replacement must not appear")).toBeNull();
+  expect(vi.mocked(createSession).mock.calls[0][1]!.workspace).toEqual(
+    demo.state,
+  );
+  expect(ask.mock.calls[0][0]).toContain("at most 80 words");
+  await act(async () =>
+    resolve({
+      finding:
+        "The observations show a decline; the source cannot establish its cause.",
+      chartSpec: null,
+      rows: demo.state.rows,
+      citations: demo.state.citations,
+      verification: null,
+      cost: 0,
+    }),
+  );
+  expect(
+    await within(panel).findByText(
+      "The observations show a decline; the source cannot establish its cause.",
+    ),
+  ).toBeTruthy();
+
+  expect(screen.queryByText(/History/)).toBeNull();
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Close explanation" }),
+  );
+  expect(screen.queryByRole("region", { name: /Explanation:/ })).toBeNull();
+  expect(screen.getByRole("heading", { name: demo.question })).toBeTruthy();
+});
+it("keeps missing-key and retry controls in the change, not a new conversation turn", async () => {
+  render(<Workspace />);
+  const demo = DEMOS[2];
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${demo.id}` },
+  });
+  const change = highlightChanges(demo.state.spec!)[0];
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Ask why: ${change.series}, ${deltaLabel(change, demo.state.spec!.y_axis)}, ${change.from[0]} to ${change.to[0]}`,
+    }),
+  );
+  const panel = await screen.findByRole("region", { name: /Explanation:/ });
+  await within(panel).findByRole("button", { name: "Connect model" });
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Retry explanation" }),
+  );
+  await within(panel).findByRole("button", { name: "Connect model" });
+  expect(screen.queryByRole("region", { name: "Current request" })).toBeNull();
+  expect(createSession).not.toHaveBeenCalled();
+  expect(screen.getByRole("heading", { name: demo.question })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${DEMOS[0].id}` },
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: /Explanation:/ })).toBeNull(),
+  );
+});
+
+it("stops an inline explanation and retries against the same evidence", async () => {
+  sessionStorage.setItem("chitti:provider", "openrouter");
+  sessionStorage.setItem("chitti:key", "test-key");
+  const demo = DEMOS[2];
+  const change = highlightChanges(demo.state.spec!)[0];
+  const ask = vi.fn(
+    (_q, _callbacks, signal) =>
+      new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(new Error("Stopped")), {
+          once: true,
+        }),
+      ),
+  );
+  vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
+  render(<Workspace />);
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${demo.id}` },
+  });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Ask why: ${change.series}, ${deltaLabel(change, demo.state.spec!.y_axis)}, ${change.from[0]} to ${change.to[0]}`,
+    }),
+  );
+  const panel = await screen.findByRole("region", { name: /Explanation:/ });
+  await waitFor(() => expect(ask).toHaveBeenCalledOnce());
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Stop explanation" }),
+  );
+  await within(panel).findByText("Stopped");
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Retry explanation" }),
+  );
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(createSession).mock.calls[1][1]!.workspace).toEqual(
+    demo.state,
+  );
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Stop explanation" }),
+  );
+  await within(panel).findByText("Stopped");
 });

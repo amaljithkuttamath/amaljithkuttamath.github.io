@@ -6,6 +6,8 @@ import {
   chartValue,
   highlightChanges,
   deltaLabel,
+  changeDigits,
+  type ChartChange,
 } from "../chart-insights";
 import type { ChartSpec } from "../tools";
 import {
@@ -16,7 +18,11 @@ import {
 } from "../chart-format";
 import { cssVar, escapeHtml, prefersReducedMotion } from "./dom";
 
-export function buildOption(spec: ChartSpec, fitLine = true) {
+export function buildOption(
+  spec: ChartSpec,
+  fitLine = true,
+  selected?: ChartChange,
+) {
   const signal = cssVar("--signal") || "#d9a13b";
   const muted = cssVar("--fg-muted") || "#79817c";
   const fg = cssVar("--fg") || "#e6e9e7";
@@ -341,18 +347,71 @@ export function buildOption(spec: ChartSpec, fitLine = true) {
           tooltip: {
             formatter: (p: any) => escapeHtml(String(p.data?.name || "")),
           },
-          data: highlights
-            .filter((c) => c.series === s.name)
-            .map((c) => ({
+          data: (selected
+            ? selected.series === s.name
+              ? [selected]
+              : []
+            : highlights.filter((c) => c.series === s.name)
+          ).flatMap((c) =>
+            (selected ? [c.from, c.to] : [c.to]).map((point) => ({
               name: `${c.series}: ${deltaLabel(c, spec.y_axis)}, ${c.from[0]}–${c.to[0]}`,
               coord: [
-                lineCats.findIndex((x) => Number(x) === c.to[0]),
-                c.to[1],
+                lineCats.findIndex((x) => Number(x) === point[0]),
+                point[1],
               ],
               changeYear: c.to[0],
+              symbolSize: selected ? 12 : 11,
+              itemStyle: selected ? { borderWidth: 2, borderColor: fg } : {},
+              label: selected
+                ? {
+                    show: true,
+                    formatter: chartValue(point[1], changeDigits(c)),
+                    position: point === c.from ? "top" : "bottom",
+                    color: fg,
+                    fontSize: 10,
+                  }
+                : { show: false },
             })),
+          ),
         },
-        lineStyle: { width: i === 0 ? 2 : 1.4 },
+        markLine:
+          selected?.series === s.name
+            ? {
+                silent: true,
+                symbol: ["none", "none"],
+                label: { show: false },
+                lineStyle: {
+                  width: 4,
+                  type: "solid",
+                  color: linePalette[i % linePalette.length],
+                },
+                data: [
+                  [
+                    {
+                      coord: [
+                        lineCats.findIndex(
+                          (x) => Number(x) === selected.from[0],
+                        ),
+                        selected.from[1],
+                      ],
+                    },
+                    {
+                      coord: [
+                        lineCats.findIndex((x) => Number(x) === selected.to[0]),
+                        selected.to[1],
+                      ],
+                    },
+                  ],
+                ],
+              }
+            : undefined,
+        lineStyle: {
+          width: i === 0 ? 2 : 1.4,
+          opacity: selected && selected.series !== s.name ? 0.28 : 1,
+        },
+        itemStyle: {
+          opacity: selected && selected.series !== s.name ? 0.28 : 1,
+        },
         data: lineCats.map((c) => map.get(c) ?? null),
       };
     }),

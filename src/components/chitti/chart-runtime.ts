@@ -8,6 +8,7 @@ import {
   ToolboxComponent,
   AriaComponent,
   MarkPointComponent,
+  MarkLineComponent,
 } from "echarts/components";
 import { LabelLayout } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
@@ -22,6 +23,7 @@ use([
   ToolboxComponent,
   AriaComponent,
   MarkPointComponent,
+  MarkLineComponent,
   CanvasRenderer,
   LabelLayout,
 ]);
