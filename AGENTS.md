@@ -53,9 +53,9 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
   `fastpath.ts` (the no-model direct answer — see below),
   `agent.ts` (facade re-exporting `session` + the split modules).
-- **UI layer** — `ui/*`, all loaded by `src/pages/apps/chitti.astro` via one
-  `import './boot'`. `ui/state.ts` owns all shared state; `ui/boot.ts` is the
-  composition root.
+- **UI layer** — `components/chitti/*` is one React workspace. `workspace/agent.ts`
+  adapts the browser engine to AG-UI; `Surface.tsx` renders the registered A2UI
+  catalog. `ui/dom.ts` and `ui/chart-option.ts` remain pure shared helpers.
 
 ## Conventions & gotchas
 
@@ -171,8 +171,7 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   only when entered through the wrong file, so the app stayed green and a CI
   runner was the first thing to notice. If it fails, move the shared value into
   `core.ts` rather than reordering imports.
-- **Don't reintroduce cycles** in the module layering, and keep cross-module
-  reassignable state on the exported `run` object in `ui/state.ts`.
+- **Don't reintroduce cycles** in the module layering, and keep UI state in React and protocol state in the agent adapter.
 
 ## Tracing (optional, off by default)
 
@@ -182,7 +181,7 @@ Chitti can export each completed turn to **LangSmith** as a run tree (root
 at build time, so the shipped site sends nothing.
 
 - The pure builder is `src/lib/chitti/tracing.ts` (`buildTurnRuns`, unit-tested);
-  the exporter fires fire-and-forget in `ui/composer.ts`'s `finally`.
+  the exporter fires fire-and-forget in `workspace/agent.ts`'s `finally`.
 - **The API key never touches the browser.** The exporter POSTs to a same-origin
   relay (`/langsmith/...`); the relay injects `LANGSMITH_API_KEY` server-side. In
   `npm run dev` that relay is the Vite proxy in `astro.config.mjs`, which reads

@@ -19,7 +19,7 @@
  */
 
 // Bump this string to invalidate the whole cache on the next deploy.
-const CACHE_VERSION = 'chitti-v1';
+const CACHE_VERSION = 'chitti-v2';
 const CACHE_NAME = CACHE_VERSION;
 
 // The shell URL to pre-cache so offline navigation has something to serve.
@@ -53,6 +53,8 @@ function classify(input) {
     return 'bypass';
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'bypass';
+  // Development module URLs change contents without changing paths. Never cache them.
+  if (['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) return 'bypass';
   if (isBlockedHost(u.hostname)) return 'bypass';
   if (u.hostname === 'cdn.jsdelivr.net') return 'cache-first';
 
@@ -88,7 +90,7 @@ self.addEventListener('activate', (event) => {
       // Drop any cache whose name isn't the current version.
       const names = await caches.keys();
       await Promise.all(
-        names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n))
+        names.filter((n) => n.startsWith('chitti-') && n !== CACHE_NAME).map((n) => caches.delete(n))
       );
       await self.clients.claim();
     })()

@@ -67,6 +67,8 @@ export function classifyRequest(input: ClassifyInput): CacheStrategy {
 
   // Only http(s). chrome-extension:, data:, etc. pass straight through.
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'bypass';
+  // Development module URLs change contents without changing paths. Never cache them.
+  if (['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) return 'bypass';
 
   // LLM providers + live data APIs: never cached, no exceptions.
   if (isBlockedHost(u.hostname)) return 'bypass';

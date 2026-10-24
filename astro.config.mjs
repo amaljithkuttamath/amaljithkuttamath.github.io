@@ -1,6 +1,7 @@
 import { defineConfig } from 'astro/config';
 import { loadEnv } from 'vite';
 import sitemap from '@astrojs/sitemap';
+import react from '@astrojs/react';
 
 // Read .env (incl. non-PUBLIC vars) at config time. LANGSMITH_API_KEY is used
 // ONLY here, in the Node dev server — it is never referenced from client code,
@@ -36,6 +37,7 @@ export default defineConfig({
   // be submitted for indexing: a sitemap entry asks a crawler to index a page
   // whose only content is a redirect, and competes with the real destination.
   integrations: [
+    react(),
     sitemap({
       filter: (page) =>
         !/\/(playground|blog|work|trust-bench)(\/|$)/.test(new URL(page).pathname),
