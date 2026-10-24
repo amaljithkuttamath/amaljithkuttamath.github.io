@@ -57,7 +57,7 @@ Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.t
 | --- | --- |
 | `workspace/agent.ts` | `AbstractAgent` adapter: runs, state snapshots, text, A2UI custom events, cancellation, and input replies. Provider credentials remain private configuration. |
 | `workspace/model.ts` | Whitelisted result surfaces, clarification payloads, analysis state and safe source URLs. |
-| `components/chitti/Workspace.tsx` | React conversation beside a persistent result; history selection, configuration, sharing and exports. |
+| `components/chitti/Workspace.tsx` | One request/change/result thread; inline steering, undo/redo, history, configuration, sharing and exports. |
 | `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog. Replies dispatch A2UI actions into the waiting agent tool. |
 | `components/chitti/Result.tsx` | Finding, chart/data/source tabs and honest verification status. |
 | `components/chitti/Chart.tsx` | Lazy bundled ECharts, theme/resize lifecycle and cleanup. No CDN runtime. |
@@ -78,7 +78,11 @@ processor so the current tab and filter stay open. Drafts carry no verification.
 The result's focus and recent-period controls dispatch A2UI actions into AG-UI
 runs. They change the chart using recorded values, retain the full source rows
 and timestamps, and discard the old conclusion/verdict. Each revision links back
-to its exact parent view. Chart clicks have the same focus action as the keyboard
+to its exact parent view. The workspace shows a deterministic difference summary
+next to Undo, Redo and Steer. Undo/redo restores snapshots without rerunning the
+agent; starting a new branch clears redo but keeps the old branch in History.
+The single composer uses the restored view as its context. Earlier turns and
+exports are collapsed, and running input requests/errors stay beside the result. Chart clicks have the same focus action as the keyboard
 accessible selector. Questions sent from a result seed a new engine session with
 that selected chart, rows and citation ledger; the engine reads `workspace.csv`,
 `workspace-view.json`, and `citations.json`. A fresh pull replaces overlapping
