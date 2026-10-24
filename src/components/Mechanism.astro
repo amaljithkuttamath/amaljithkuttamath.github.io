@@ -1,0 +1,106 @@
+---
+interface Props {
+  kind: "agent" | "model" | "file";
+}
+const { kind } = Astro.props;
+---
+
+<svg class="mechanism" viewBox="0 0 420 180" fill="none" aria-hidden="true">
+  {kind === "agent" ? (
+    <>
+      <path
+        d="M45 90H375M140 90V35H280V90M140 90V145H280V90"
+        stroke="currentColor"
+        opacity=".2"
+      />
+      {[45, 140, 280, 375].map((x, i) => (
+        <g>
+          <circle
+            cx={x}
+            cy="90"
+            r={i === 1 || i === 2 ? 23 : 8}
+            fill="var(--bg)"
+            stroke="currentColor"
+          />
+          <circle cx={x} cy="90" r="3" fill="currentColor" />
+        </g>
+      ))}
+      <path
+        d="m277 35-5-4m5 4-5 4M150 145l5-4m-5 4 5 4"
+        stroke="currentColor"
+      />
+      <text x="140" y="20" text-anchor="middle">
+        retrieve
+      </text>
+      <text x="280" y="168" text-anchor="middle">
+        verify
+      </text>
+    </>
+  ) : kind === "model" ? (
+    <>
+      {[45, 150, 260, 375].map((x, c) => (
+        <g>
+          {[45, 90, 135].map((y) => (
+            <>
+              {c < 3 &&
+                [45, 90, 135].map((y2) => (
+                  <path
+                    d={`M${x} ${y}L${[150, 260, 375][c]} ${y2}`}
+                    stroke="currentColor"
+                    opacity=".12"
+                  />
+                ))}
+              <circle
+                cx={x}
+                cy={y}
+                r={c === 2 ? 10 : 5}
+                fill="var(--bg)"
+                stroke="currentColor"
+                opacity={c === 2 ? 1 : 0.5}
+              />
+            </>
+          ))}
+        </g>
+      ))}
+      <path
+        d="M45 90L150 45L260 90L375 135"
+        stroke="currentColor"
+        stroke-width="1.5"
+      />
+    </>
+  ) : (
+    <>
+      <path d="M95 28H190L220 58V152H95Z" stroke="currentColor" />
+      <path
+        d="M190 28V58H220M115 82H192M115 98H179M115 114H192"
+        stroke="currentColor"
+        opacity=".4"
+      />
+      <path d="M235 90H285m-6-5 6 5-6 5" stroke="currentColor" />
+      {[55, 80, 105].map((y, i) => (
+        <rect
+          x="305"
+          y={y}
+          width={[58, 40, 70][i]}
+          height="12"
+          rx="2"
+          stroke="currentColor"
+          opacity=".6"
+        />
+      ))}
+    </>
+  )}
+</svg>
+<style>
+  .mechanism {
+    width: 100%;
+    height: auto;
+    max-height: 180px;
+    color: var(--fg);
+  }
+  text {
+    fill: var(--fg-muted);
+    font: 10px var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+</style>

@@ -1,0 +1,529 @@
+<section class="language-study" aria-label="Interactive language inspection">
+  <div class="study-toolbar">
+    <div class="study-mode" role="group" aria-label="Representation">
+      <button type="button" data-mode="bytes" aria-pressed="true">
+        UTF-8 bytes
+      </button>
+      <button type="button" data-mode="tokens" aria-pressed="false">
+        Model tokens <span aria-hidden="true">↗</span>
+      </button>
+    </div>
+    <span class="study-runtime" id="study-runtime">
+      Computed here, on your device
+    </span>
+  </div>
+  <div class="study-composer">
+    <label for="language-input">Input</label>
+    <input
+      id="language-input"
+      type="text"
+      value="Make the invisible inspectable."
+      maxlength="80"
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <button type="button" id="study-example" aria-label="Try another example">
+      Try another <span aria-hidden="true">↻</span>
+    </button>
+  </div>
+  <div class="study-field">
+    <div class="study-axis" aria-hidden="true">
+      <span id="study-axis-top">2⁷</span>
+      <span>2⁰</span>
+    </div>
+    <div
+      id="study-matrix"
+      class="study-matrix"
+      aria-label="Inspect individual units"
+    ></div>
+    <span class="field-corner corner-top" aria-hidden="true">
+      +
+    </span>
+    <span class="field-corner corner-bottom" aria-hidden="true">
+      +
+    </span>
+  </div>
+  <div class="study-readout">
+    <div class="readout-main">
+      <span class="readout-label" id="study-kind">
+        Byte
+      </span>
+      <strong id="study-symbol">M</strong>
+      <span class="readout-rule" aria-hidden="true"></span>
+      <span class="readout-label">Decimal</span>
+      <strong id="study-id">77</strong>
+      <span class="readout-rule" aria-hidden="true"></span>
+      <span class="readout-label">Binary</span>
+      <strong id="study-bits">01001101</strong>
+    </div>
+    <span class="study-total" id="study-total" role="status"></span>
+  </div>
+  <div class="study-caption">
+    <p id="study-caption">
+      A sentence becomes numbers. Select a column to inspect a byte.
+    </p>
+    <a href="/apps/tokenizer">
+      Compare five model vocabularies <span aria-hidden="true">↗</span>
+    </a>
+  </div>
+  <noscript>
+    <p>
+      This live study requires JavaScript. The tools and research below are
+      still available.
+    </p>
+  </noscript>
+</section>
+<script>
+  import { byteUnits, tokenUnits, type Unit } from "../lib/study/units";
+  const input = document.getElementById("language-input") as HTMLInputElement,
+    matrix = document.getElementById("study-matrix")!,
+    total = document.getElementById("study-total")!,
+    runtime = document.getElementById("study-runtime")!;
+  const modes = [
+    ...document.querySelectorAll<HTMLButtonElement>("[data-mode]"),
+  ];
+  let mode = "bytes",
+    tokenizer: any,
+    loading = false,
+    selection = 0,
+    units: Unit[] = [],
+    example = 0;
+  const examples = [
+    "Make the invisible inspectable.",
+    "A → B ≠ understanding",
+    "Hello, world. 👋",
+    "const trust = verify(answer);",
+  ];
+  function inspect(index: number, focus = false) {
+    if (!units[index]) return;
+    selection = index;
+    const unit = units[index];
+    document.getElementById("study-symbol")!.textContent = unit.label;
+    document.getElementById("study-id")!.textContent = String(unit.id);
+    document.getElementById("study-bits")!.textContent = unit.bits;
+    matrix.querySelectorAll<HTMLButtonElement>("button").forEach((b, i) => {
+      b.setAttribute("aria-pressed", String(i === index));
+      b.tabIndex = i === index ? 0 : -1;
+      if (i === index && focus) b.focus();
+    });
+  }
+  function draw() {
+    units =
+      mode === "bytes"
+        ? byteUnits(input.value)
+        : tokenUnits(tokenizer.encode(input.value), (id) =>
+            tokenizer.decode([id]),
+          );
+    matrix.replaceChildren();
+    const bits = mode === "bytes" ? 8 : 18;
+    matrix.style.setProperty("--bit-count", String(bits));
+    document.getElementById("study-axis-top")!.textContent =
+      mode === "bytes" ? "2⁷" : "2¹⁷";
+    document.getElementById("study-kind")!.textContent =
+      mode === "bytes" ? "Byte" : "Token";
+    units.forEach((u, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "unit-column";
+      b.setAttribute(
+        "aria-label",
+        `${mode === "bytes" ? "Byte" : "Token"} ${i + 1}: ${u.label}, ID ${u.id}`,
+      );
+      b.style.setProperty("--group", String(u.group % 2));
+      const label = document.createElement("span");
+      label.className = "unit-label";
+      label.textContent = u.label;
+      b.append(label);
+      const cells = document.createElement("span");
+      cells.className = "unit-bits";
+      cells.setAttribute("aria-hidden", "true");
+      for (const bit of u.bits) {
+        const cell = document.createElement("i");
+        cell.className = bit === "1" ? "bit on" : "bit";
+        cells.append(cell);
+      }
+      b.append(cells);
+      b.addEventListener("pointerenter", () => inspect(i));
+      b.addEventListener("focus", () => inspect(i));
+      b.addEventListener("click", () => inspect(i));
+      b.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+          e.preventDefault();
+          inspect(
+            Math.max(
+              0,
+              Math.min(units.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)),
+            ),
+            true,
+          );
+        }
+      });
+      matrix.append(b);
+    });
+    total.textContent = `${Array.from(input.value).length} characters / ${units.length} ${mode === "bytes" ? "bytes" : "tokens"}`;
+    if (units.length) inspect(Math.min(selection, units.length - 1));
+    else {
+      for (const id of ["study-symbol", "study-id", "study-bits"])
+        document.getElementById(id)!.textContent = "–";
+    }
+    document.getElementById("study-caption")!.textContent =
+      mode === "bytes"
+        ? "A sentence becomes numbers. Select a column to inspect a byte."
+        : "Real GPT-4o vocabulary IDs, shown in binary. [byte] marks a token containing part of a UTF-8 character.";
+  }
+  modes.forEach((b) =>
+    b.addEventListener("click", async () => {
+      if (loading) return;
+      const next = b.dataset.mode!;
+      if (next === "tokens" && !tokenizer) {
+        loading = true;
+        runtime.textContent = "Loading the model vocabulary…";
+        modes.forEach((x) => (x.disabled = true));
+        try {
+          const url =
+            "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3";
+          const { AutoTokenizer, env } = await import(/* @vite-ignore */ url);
+          env.allowLocalModels = false;
+          tokenizer = await AutoTokenizer.from_pretrained("Xenova/gpt-4o");
+        } catch {
+          runtime.textContent =
+            "Vocabulary unavailable. Bytes still work; select tokens to retry.";
+          loading = false;
+          modes.forEach((x) => (x.disabled = false));
+          return;
+        }
+        loading = false;
+        modes.forEach((x) => (x.disabled = false));
+      }
+      mode = next;
+      selection = 0;
+      modes.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      runtime.textContent =
+        mode === "bytes"
+          ? "Computed here, on your device"
+          : "GPT-4o vocabulary / text stays on-device";
+      draw();
+    }),
+  );
+  input.addEventListener("input", draw);
+  document.getElementById("study-example")!.addEventListener("click", () => {
+    example = (example + 1) % examples.length;
+    input.value = examples[example];
+    selection = 0;
+    draw();
+  });
+  draw();
+</script>
+<style>
+  .language-study {
+    --study-paper: var(--fg);
+    --study-ink: var(--bg);
+    --study-muted: color-mix(in srgb, var(--study-ink) 62%, var(--study-paper));
+    --study-line: color-mix(in srgb, var(--study-ink) 18%, var(--study-paper));
+    background: var(--study-paper);
+    color: var(--study-ink);
+    border-radius: var(--radius-sm);
+    padding: var(--space-lg) var(--space-xl);
+    position: relative;
+  }
+  .study-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--study-line);
+  }
+  .study-mode {
+    display: flex;
+    gap: var(--space-lg);
+  }
+  .study-mode button {
+    color: var(--study-muted);
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    padding: var(--space-xs) 0;
+    font: 500 var(--text-small) var(--font-sans);
+    cursor: pointer;
+  }
+  .study-mode button[aria-pressed="true"] {
+    color: var(--study-ink);
+    border-color: var(--study-ink);
+  }
+  .study-mode button:disabled {
+    cursor: wait;
+  }
+  .study-mode button:hover {
+    color: var(--study-ink);
+  }
+  .study-runtime {
+    font: 0.6rem var(--font-mono);
+    color: var(--study-muted);
+    text-align: right;
+  }
+  .study-composer {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    margin: var(--space-lg) 0;
+  }
+  .study-composer label {
+    font: var(--text-tag) var(--font-mono);
+    color: var(--study-muted);
+  }
+  .study-composer input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    color: var(--study-ink);
+    font: 500 clamp(1.1rem, 2.5vw, 1.7rem)/1.5 var(--font-sans);
+    padding: var(--space-sm) 0;
+    letter-spacing: -0.03em;
+  }
+  .study-composer input:focus {
+    border-color: var(--study-ink);
+    outline: 0;
+  }
+  .study-composer button {
+    background: none;
+    border: 0;
+    color: var(--study-muted);
+    font: var(--text-tag) var(--font-mono);
+    cursor: pointer;
+    white-space: nowrap;
+    padding: var(--space-sm) 0;
+  }
+  .study-composer button:hover {
+    color: var(--study-ink);
+  }
+  .study-field {
+    position: relative;
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-md) 0 var(--space-lg);
+  }
+  .study-axis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 30px 0 4px;
+    color: var(--study-muted);
+    font: 0.65rem var(--font-mono);
+  }
+  .study-matrix {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    flex: 1;
+    min-height: 170px;
+    padding: 0 var(--space-xs) var(--space-sm);
+    scrollbar-color: var(--study-muted) transparent;
+  }
+  .study-matrix :global(.unit-column) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1;
+    min-width: 18px;
+    max-width: 70px;
+    padding: 0 2px 4px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--study-muted);
+    cursor: crosshair;
+  }
+  .study-matrix :global(.unit-column:hover),
+  .study-matrix :global(.unit-column[aria-pressed="true"]) {
+    color: var(--study-ink);
+    border-bottom-color: var(--study-ink);
+  }
+  .study-matrix :global(.unit-label) {
+    height: 22px;
+    width: 100%;
+    font: 0.7rem var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+  }
+  .study-matrix :global(.unit-bits) {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 100%;
+    max-width: 26px;
+  }
+  .study-matrix :global(.bit) {
+    display: block;
+    min-height: 8px;
+    height: calc(120px / var(--bit-count));
+    background: var(--study-line);
+    border-radius: 1px;
+    transition: background var(--duration) var(--ease);
+  }
+  .study-matrix :global(.bit.on) {
+    background: color-mix(in srgb, var(--study-ink) 65%, var(--study-paper));
+  }
+  .study-matrix :global(.unit-column[aria-pressed="true"] .bit.on) {
+    background: var(--study-ink);
+  }
+  .field-corner {
+    position: absolute;
+    right: -12px;
+    color: var(--study-muted);
+    font: var(--text-label) var(--font-mono);
+  }
+  .corner-top {
+    top: 0;
+  }
+  .corner-bottom {
+    bottom: 0;
+  }
+  .study-readout {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: var(--space-md) 0;
+    border-top: 1px solid var(--study-line);
+    border-bottom: 1px solid var(--study-line);
+  }
+  .readout-main {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+  .readout-label {
+    font: 0.6rem var(--font-mono);
+    color: var(--study-muted);
+  }
+  .readout-main strong {
+    font: 500 var(--text-small) var(--font-mono);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .readout-rule {
+    height: 14px;
+    width: 1px;
+    background: var(--study-line);
+    margin: 0 var(--space-sm);
+  }
+  .study-total {
+    font: 0.65rem var(--font-mono);
+    color: var(--study-muted);
+    white-space: nowrap;
+  }
+  .study-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-lg);
+    padding-top: var(--space-md);
+  }
+  .study-caption p {
+    font-size: 0.7rem;
+    line-height: 1.6;
+    color: var(--study-muted);
+    margin: 0;
+  }
+  .study-caption a {
+    font-size: 0.7rem;
+    color: var(--study-ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    white-space: nowrap;
+  }
+  .language-study :global(:focus-visible) {
+    outline-color: var(--study-ink);
+  }
+  @media (max-width: 700px) {
+    .language-study {
+      padding: var(--space-lg);
+    }
+    .study-runtime {
+      max-width: 120px;
+      line-height: 1.6;
+    }
+    .study-mode {
+      gap: var(--space-md);
+    }
+    .study-composer {
+      gap: var(--space-sm);
+      flex-wrap: wrap;
+    }
+    .study-composer label {
+      width: 100%;
+    }
+    .study-composer input {
+      font-size: 1.1rem;
+    }
+    .study-composer button {
+      font-size: 0.6rem;
+    }
+    .study-readout {
+      flex-wrap: wrap;
+      gap: var(--space-sm);
+    }
+    .study-caption {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--space-sm);
+    }
+    .readout-label {
+      font-size: 0.55rem;
+    }
+    .readout-main {
+      gap: var(--space-xs);
+    }
+    .readout-rule {
+      margin: 0 var(--space-xs);
+    }
+    .readout-main strong {
+      font-size: 0.65rem;
+    }
+    .study-matrix :global(.unit-column) {
+      min-width: 20px;
+    }
+    .study-matrix {
+      min-height: 170px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .study-matrix :global(.bit) {
+      transition: none;
+    }
+  }
+  @media (max-width: 560px) {
+    .study-toolbar {
+      flex-wrap: wrap;
+      gap: var(--space-sm);
+    }
+    .study-mode {
+      width: 100%;
+      gap: var(--space-lg);
+    }
+    .study-mode button {
+      white-space: nowrap;
+    }
+    .study-runtime {
+      max-width: none;
+      text-align: left;
+    }
+    .study-composer input {
+      flex-basis: 100%;
+    }
+    .study-composer button {
+      margin-left: auto;
+    }
+    .study-readout {
+      overflow-wrap: anywhere;
+    }
+  }
+</style>

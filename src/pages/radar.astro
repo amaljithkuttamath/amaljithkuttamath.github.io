@@ -1,1194 +1,667 @@
 ---
-import Base from '../layouts/Base.astro';
-
-// Public intelligence instrument over the ai-radar corpus.
-//
-// Design frame (see consultation synthesis, 2026-07-02): the page is an
-// *instrument*, not a newsletter. Observed signals dominate; the model's
-// synthesis is subordinate to the ranked board and is clearly labeled as
-// machine opinion over observed data.
-//
-// Data flow: client-side, three parallel fetches. Zero coupling to the
-// ai-radar repo build — this page always reflects the latest committed
-// state without a site rebuild.
-const RADAR_REPO = 'amaljithkuttamath/ai-radar';
-const RAW = `https://raw.githubusercontent.com/${RADAR_REPO}/main`;
+import Base from "../layouts/Base.astro";
 ---
 
 <Base
+  wide
   title="AI Radar | Amaljith Kuttamath"
-  description="A live intelligence view of AI research, releases, and social signal. Collect the corpus, distill the signal, expose the state of the field."
+  description="A daily AI research briefing and the ranked sources behind it. Read the overview, inspect the evidence, and explore earlier editions."
 >
-  <!-- Break out of the site's 700px reading column so the board has real
-       estate. The BRIEF prose (below) stays in a narrow measure for
-       readability; only the instrument surfaces get the wider canvas.
-       See the "widen the container" tradeoff in the consultation. -->
-  <div class="radar-canvas">
-
-  <!-- ── HERO ─────────────────────────────────────────────────────── -->
-  <section class="radar-hero">
-    <div class="hero-row">
-      <h1 class="hero-title">AI Radar</h1>
-      <span class="live-indicator" aria-live="polite">
-        <span class="live-dot" aria-hidden="true"></span>
-        <span class="live-label">live</span>
-      </span>
-    </div>
-    <p class="hero-lede">
-      An automated pipeline scans new AI papers, models, repos, and lab posts
-      every day, scores each item for relevance, and writes a short brief.
-      The brief below is today's machine-generated summary; the board under
-      it is the ranked evidence behind it.
-      <a href={`https://github.com/${RADAR_REPO}`} target="_blank" rel="noopener noreferrer">
-        method &amp; source &rarr;
-      </a>
-    </p>
-  </section>
-
-  <!-- ── STATUS BAR ───────────────────────────────────────────────── -->
-  <!-- Three numbers a cold reader can parse without a legend:
-       how many items are tracked, how many rank high today, and how
-       fresh the data is. -->
-  <section class="status-bar animate-in animate-in-delay-1" aria-label="System status">
-    <div class="status-cell">
-      <span class="status-label">tracked</span>
-      <span class="status-value" id="status-tracked">–</span>
-    </div>
-    <div class="status-cell">
-      <span class="status-label">high signal</span>
-      <span class="status-value" id="status-high">–</span>
-    </div>
-    <div class="status-cell">
-      <span class="status-label">updated</span>
-      <span class="status-value" id="status-sync">–</span>
-    </div>
-  </section>
-
-  <!-- ── BRIEF ────────────────────────────────────────────────────── -->
-  <!-- The daily digest is verbose machine prose that repeats every item
-       two or three times. We do not reprint the newsletter. We parse it:
-       the one-paragraph top-line leads, the "new today" list follows,
-       and the full raw digest sits behind a toggle for anyone who wants
-       the model's complete commentary. -->
-  <section class="brief animate-in animate-in-delay-1" aria-label="Synthesized brief">
-    <div class="section-head">
-      <span class="section-label">brief</span>
-      <span class="section-hint" id="brief-attribution">machine synthesis · attribution loading</span>
-    </div>
-    <article id="brief-body" class="brief-body">
-      <div class="loading">loading brief&hellip;</div>
-    </article>
-  </section>
-
-  <!-- ── THE BOARD ────────────────────────────────────────────────── -->
-  <!-- Ranked evidence behind the brief. Columns only exist when the
-       data behind them exists: the trend column shows a sparkline once
-       an item has multi-day history, and reads "new" until then.
-       No evidence stacks, streak chips, or tape until the pipeline
-       actually produces that data. Every element earns its space. -->
-  <section class="board animate-in animate-in-delay-2" aria-label="Ranked list of tracked items">
-    <div class="section-head">
-      <span class="section-label">evidence</span>
-      <div class="board-controls" id="board-controls">
-        <button class="board-sort" data-sort="score" data-active="true">top rated</button>
-        <button class="board-sort" data-sort="age" data-active="false">newest</button>
-        <button class="board-sort board-toggle" id="board-toggle" data-active="false">show all</button>
+  <div class="radar-page">
+    <header class="radar-opening">
+      <div>
+        <p class="folio-label">A daily observation</p>
+        <h1>AI Radar</h1>
+        <p>
+          What is changing in AI, <br />
+          and what is worth looking at.
+        </p>
       </div>
-    </div>
-    <!-- Source filter chips, rendered from the data with live counts. -->
-    <div class="board-filters" id="board-filters" role="group" aria-label="Filter by source"></div>
-    <div class="board-header" role="row" aria-hidden="true">
-      <span class="col-score">score</span>
-      <span class="col-item">item</span>
-      <span class="col-trend">trend</span>
-      <span class="col-age">seen</span>
-    </div>
-    <div id="board-body" class="board-body">
-      <div class="loading">loading board&hellip;</div>
-    </div>
-    <div class="board-more-wrap">
-      <button class="board-more" id="board-more" style="display:none">show 20 more</button>
-    </div>
-    <p class="board-foot" id="board-foot"></p>
-  </section>
-
-  <!-- ── RUN LOG ──────────────────────────────────────────────────── -->
-  <!-- Dated pipeline runs. A utility drawer, closed by default: the
-       history matters for accountability, not for the first read. -->
-  <section class="run-log animate-in animate-in-delay-2" aria-label="Historical run log">
-    <details class="run-log-drawer">
-      <summary class="run-log-summary">
-        <span class="section-label">run log</span>
-        <span class="section-hint" id="run-log-count">loading&hellip;</span>
-      </summary>
-      <div id="run-log-body" class="run-log-body">
-        <div class="loading">loading&hellip;</div>
-      </div>
-    </details>
-  </section>
-
-  </div><!-- /radar-canvas -->
-
-  <script type="module" define:vars={{ RAW, RADAR_REPO }}>
-    // ═════════════════════════════════════════════════════════════════
-    // AI Radar — v2 instrument view
-    //
-    // Three primary fetches run in parallel on load. Each hydrates its
-    // section independently so a slow or failing source never blocks the
-    // others. Sparkline scales are shared across rows (Opus honesty fix
-    // — auto-scaling per row exaggerates noise into drama).
-    // ═════════════════════════════════════════════════════════════════
-
-    const MARKED_URL = 'https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js';
-    const $ = (id) => document.getElementById(id);
-
-    const showErr = (host, msg) => {
-      host.innerHTML = `<div class="loading err">${msg}</div>`;
-    };
-
-    function escapeHtml(s) {
-      return String(s || '')
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
-    function hoursAgo(iso) {
-      const t = new Date(iso).getTime();
-      if (!isFinite(t)) return null;
-      return Math.round((Date.now() - t) / 3600000);
-    }
-
-    function fmtAge(hours) {
-      if (hours == null) return '–';
-      if (hours < 24) return `${hours}h`;
-      const d = Math.floor(hours / 24);
-      return d < 30 ? `${d}d` : `${Math.floor(d / 7)}w`;
-    }
-
-    // ─── Data holders shared across the three fetches ────────────
-    // We normalize state.json into a Board Row shape here, then
-    // whichever fetch finishes last populates the board.
-    const STATE = { rows: null, latestMd: null, indexRows: null, todayDate: null };
-
-    // ═════════════════════════════════════════════════════════════════
-    // Fetch 1: state.json → board rows + status bar
-    // ═════════════════════════════════════════════════════════════════
-    (async () => {
-      try {
-        const res = await fetch(`${RAW}/data/state.json`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const state = await res.json();
-
-        const entries = Object.entries(state);
-        $('status-tracked').textContent = String(entries.length);
-
-        // Rows are the tracked items. Escalating = streak >= 3 with
-        // rising magnitude (only possible once multi-day history exists).
-        const rows = entries.map(([id, snap]) => {
-          const history = Array.isArray(snap.mag_history) ? snap.mag_history : [];
-          const first = history[0] || 0;
-          const last = history[history.length - 1] || snap.mag || 0;
-          const escalating = (snap.streak || 0) >= 3 && last > first;
-          const pct = first > 0 ? ((last - first) / first) * 100 : 0;
-          return {
-            id,
-            title: snap.title || '(untitled)',
-            url: snap.url || '',
-            score: snap.score || 0,
-            mag: snap.mag || last,
-            magHistory: history,
-            streak: snap.streak || 1,
-            firstSeen: snap.first_seen || null,
-            escalating,
-            pct,
-          };
-        });
-
-        $('status-high').textContent = String(rows.filter((r) => r.score >= 3).length);
-
-        STATE.rows = rows;
-        renderBoardIfReady();
-      } catch (err) {
-        showErr($('board-body'), `Could not load state (${err.message})`);
-        $('status-tracked').textContent = '–';
-        $('status-high').textContent = '–';
-      }
-    })();
-
-    // ═════════════════════════════════════════════════════════════════
-    // Fetch 2: reports/latest.md → BRIEF + today's date + status window
-    // ═════════════════════════════════════════════════════════════════
-    (async () => {
-      const briefHost = $('brief-body');
-      try {
-        const [{ marked }, res] = await Promise.all([
-          import(MARKED_URL),
-          fetch(`${RAW}/reports/latest.md`, { cache: 'no-store' }),
-        ]);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        let md = await res.text();
-
-        // Strip the radar:nav header that only makes sense on GitHub.
-        md = md.replace(/<!-- radar:nav -->[\s\S]*?<!-- \/radar:nav -->\n*/g, '');
-
-        // Extract the report date from the "# AI Radar — YYYY-MM-DD" header.
-        const dateMatch = md.match(/^#\s*AI Radar\s*[—-]\s*(\d{4}-\d{2}-\d{2})/m);
-        if (dateMatch) {
-          STATE.todayDate = dateMatch[1];
-          const dHours = hoursAgo(dateMatch[1] + 'T13:00:00Z');
-          $('status-sync').textContent = fmtAge(dHours) + ' ago';
-        }
-
-        // ── Attribution ───────────────────────────────────────────
-        // The digest.md prompt doesn't yet embed the generating model
-        // by name — that's a follow-up PR on the ai-radar side. Until
-        // then, we honestly attribute it to the workflow's default
-        // backend (GitHub Models · gpt-4.1) and flag the timestamp.
-        // NOTE: when digest.md is updated to include a footer line
-        // like "Synthesized by <model> at <ISO>", parse it here.
-        const attributionText = STATE.todayDate
-          ? `machine synthesis · github models (gpt-4.1) · ${STATE.todayDate}`
-          : 'machine synthesis · github models (gpt-4.1)';
-        $('brief-attribution').textContent = attributionText;
-
-        marked.setOptions({ gfm: true, breaks: false });
-        // Strip the top-level H1 from the digest — the section header
-        // "brief" already frames it, and repeating "AI Radar — 2026-07-02"
-        // inside a page already titled AI Radar is diary redundancy.
-        md = md.replace(/^#\s*AI Radar[^\n]*\n/, '');
-
-        // ── Structured render ─────────────────────────────────────
-        // The digest repeats every item in three places (sections,
-        // insights, action items). Surface only the two parts that
-        // carry unique information: the top-line paragraph and the
-        // "new today" list. The full digest stays available behind a
-        // toggle. If the format ever changes and parsing fails, fall
-        // back to rendering the whole thing.
-        const topline = md.match(/\*\*Top-line:?\*\*\s*\n+([\s\S]*?)\n\s*---/);
-        const newToday = md.match(/\*\*New today\*\*\s*\n([\s\S]*?)(?:\n\s*---|\n\s*\*\*|\n###)/);
-
-        if (topline) {
-          const newItems = newToday
-            ? newToday[1].split('\n')
-                .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
-                .filter(Boolean)
-            : [];
-          briefHost.innerHTML = `
-            <p class="brief-lede">${marked.parseInline(topline[1].trim())}</p>
-            ${newItems.length ? `
-              <div class="brief-new-label">new today</div>
-              <ul class="brief-new">
-                ${newItems.map((item) => `<li>${marked.parseInline(item)}</li>`).join('')}
-              </ul>` : ''}
-            <details class="brief-full">
-              <summary>full digest</summary>
-              <div class="brief-full-body">${marked.parse(md)}</div>
-            </details>`;
-        } else {
-          briefHost.innerHTML = marked.parse(md);
-        }
-
-        // Open external links in a new tab.
-        briefHost.querySelectorAll('a[href^="http"]').forEach((a) => {
-          a.target = '_blank';
-          a.rel = 'noopener noreferrer';
-        });
-
-        renderBoardIfReady();
-      } catch (err) {
-        showErr(briefHost, `Could not load brief (${err.message}).`);
-      }
-    })();
-
-    // ═════════════════════════════════════════════════════════════════
-    // Fetch 3: reports/README.md → run log
-    // ═════════════════════════════════════════════════════════════════
-    (async () => {
-      try {
-        const res = await fetch(`${RAW}/reports/README.md`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const md = await res.text();
-
-        const rows = [];
-        for (const line of md.split('\n')) {
-          const m = line.match(/^\|\s*\[(\d{4}-\d{2}-\d{2})\]\([^)]+\)\s*\|\s*(.+?)\s*\|\s*$/);
-          if (m) rows.push({ date: m[1], teaser: m[2].replace(/…$/, '').trim() });
-        }
-
-        STATE.indexRows = rows;
-        renderRunLog();
-      } catch (err) {
-        showErr($('run-log-body'), `Could not load run log (${err.message}).`);
-      }
-    })();
-
-    function renderRunLog() {
-      const host = $('run-log-body');
-      if (!STATE.indexRows || STATE.indexRows.length === 0) {
-        host.innerHTML = `<div class="empty">no runs recorded yet</div>`;
-        return;
-      }
-      // Skip the newest (it's the current BRIEF above) and cap at 14.
-      // Older runs live in the repo; this drawer is a recency check,
-      // not an archive.
-      const past = STATE.indexRows.slice(1, 15);
-      $('run-log-count').textContent = `${STATE.indexRows.length - 1} prior run${STATE.indexRows.length - 1 === 1 ? '' : 's'}`;
-      host.innerHTML = past.map((row) => `
-        <a class="run-row" href="https://github.com/${RADAR_REPO}/blob/main/reports/${row.date}-digest.md"
-           target="_blank" rel="noopener noreferrer">
-          <time class="mono run-date">${row.date}</time>
-          <span class="run-teaser">${escapeHtml(row.teaser)}</span>
+      <div class="radar-edition">
+        <span class="radar-status" id="radar-status">
+          Reading publication…
+        </span>
+        <time id="radar-date">Latest edition</time>
+        <a
+          href="https://github.com/amaljithkuttamath/ai-radar"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Sources &amp; method ↗
         </a>
-      `).join('');
-    }
-
-    // ═════════════════════════════════════════════════════════════════
-    // THE BOARD
-    // ═════════════════════════════════════════════════════════════════
-
-    let currentSort = 'score';
-    let showAll = false;
-    let filterGroup = 'all';
-    // Open with a short, high-signal list. Ten rows is scannable;
-    // "show more" and "show all" are one click away.
-    const HIGH_SCORE = 3;
-    const FIRST_PAGE = 10;
-    const PAGE = 20;
-    let visibleCount = FIRST_PAGE;
-
-    // Source groups, derived from the id prefix. This is the one
-    // grouping the data actually supports; topic tags would be guesses
-    // from titles and belong in the pipeline, not the client.
-    const SOURCE_GROUPS = {
-      papers:      ['arxiv', 'hfpaper'],
-      models:      ['hfmodel', 'hfdataset'],
-      repos:       ['ghrepo'],
-      'lab posts': ['blog'],
-    };
-
-    function groupOf(id) {
-      const prefix = id.split(':')[0].toLowerCase();
-      for (const [group, prefixes] of Object.entries(SOURCE_GROUPS)) {
-        if (prefixes.includes(prefix)) return group;
-      }
-      return 'other';
-    }
-
-    function renderBoardIfReady() {
-      if (!STATE.rows) return;
-      renderFilters();
-      renderBoard(currentSort);
-    }
-
-    // Filter chips with live counts, computed over the current score
-    // pool so the numbers always match what the board can show.
-    function renderFilters() {
-      const host = $('board-filters');
-      const pool = showAll ? STATE.rows : STATE.rows.filter((r) => r.score >= HIGH_SCORE);
-      const counts = {};
-      pool.forEach((r) => {
-        const g = groupOf(r.id);
-        counts[g] = (counts[g] || 0) + 1;
-      });
-      const groups = ['all', ...Object.keys(SOURCE_GROUPS), ...(counts.other ? ['other'] : [])];
-      host.innerHTML = groups.map((g) => {
-        const n = g === 'all' ? pool.length : (counts[g] || 0);
-        if (g !== 'all' && n === 0) return '';
-        return `<button class="filter-chip" data-group="${g}"
-          data-active="${g === filterGroup}">${g} <span class="chip-count">${n}</span></button>`;
-      }).join('');
-      host.querySelectorAll('.filter-chip').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          filterGroup = btn.getAttribute('data-group');
-          visibleCount = FIRST_PAGE;
-          renderBoardIfReady();
-        });
-      });
-    }
-
-    function sparkline(history, sharedMax) {
-      const BLOCKS = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-      // Shared max across the whole board so trajectories are comparable
-      // row-to-row instead of each row dramatizing its own noise.
-      const max = sharedMax || Math.max(...history, 1);
-      return history.map((v) => {
-        const idx = Math.min(7, Math.max(0, Math.floor((v / max) * 7)));
-        return BLOCKS[idx];
-      }).join('');
-    }
-
-    // The trend cell only claims a trajectory when one exists. A single
-    // reading is labeled "new", not dressed up as a chart.
-    function trendCell(r, sharedMax) {
-      if (!r.magHistory || r.magHistory.length < 2) {
-        return '<span class="trend-new" title="first reading, no history yet">new</span>';
-      }
-      const hasDelta = Math.abs(r.pct) > 0.5;
-      const deltaStr = !hasDelta ? ''
-        : r.pct > 0 ? `▲${Math.round(r.pct)}%`
-        : `▼${Math.round(Math.abs(r.pct))}%`;
-      const hot = r.escalating ? ' spark-hot' : '';
-      const chip = r.escalating ? '<span class="chip chip-hot">rising</span>' : '';
-      return `<span class="spark${hot}">${sparkline(r.magHistory, sharedMax)}</span>
-        <span class="spark-delta">${deltaStr}</span>${chip}`;
-    }
-
-    function renderBoard(sort) {
-      const host = $('board-body');
-      if (!STATE.rows) return;
-      const all = STATE.rows.slice();
-      // Default view is high-signal only; "show all" reveals everything.
-      let pool = showAll ? all : all.filter((r) => r.score >= HIGH_SCORE);
-      if (filterGroup !== 'all') pool = pool.filter((r) => groupOf(r.id) === filterGroup);
-      const cmp = {
-        score: (a, b) => b.score - a.score || b.mag - a.mag,
-        age:   (a, b) => (b.firstSeen || '').localeCompare(a.firstSeen || '') || b.score - a.score,
-      }[sort] || ((a, b) => b.score - a.score);
-      pool.sort(cmp);
-
-      // The trend column only exists when the corpus has trajectories
-      // to show. With a young pipeline nearly every row has a single
-      // reading, and a column of identical "new" labels is noise, not
-      // information. Suppress the whole column until at least a few
-      // items have real multi-day history. Computed (and applied) before
-      // the empty-pool early return below so the static header's column
-      // layout never goes stale against the current filter/sort state.
-      const withHistory = pool.filter((r) => r.magHistory && r.magHistory.length > 1).length;
-      const showTrend = withHistory >= 3;
-      document.querySelector('.board').classList.toggle('no-trend', !showTrend);
-
-      const shown = pool.slice(0, visibleCount);
-      if (shown.length === 0) {
-        host.innerHTML = `<div class="empty">no items match the current filters.</div>`;
-        $('board-foot').textContent = '';
-        $('board-more').style.display = 'none';
-        return;
-      }
-
-      // Shared sparkline max: one scale across the board.
-      const sharedMax = Math.max(
-        1,
-        ...shown.flatMap((r) => (r.magHistory && r.magHistory.length ? r.magHistory : [r.mag || 0])),
-      );
-
-      host.innerHTML = shown.map((r) => `<a class="board-row ${r.escalating ? 'row-escalating' : ''}"
-                    href="${escapeHtml(r.url)}"
-                    target="_blank" rel="noopener noreferrer"
-                    role="row">
-          <span class="col-score" title="model relevance score, 0 to 5">${r.score}<span class="score-slash">/5</span></span>
-          <span class="col-item">
-            <span class="item-title">${escapeHtml(r.title)}</span>
-            <span class="item-meta">${escapeHtml(sourceLabel(r.id))}</span>
-          </span>
-          ${showTrend ? `<span class="col-trend">${trendCell(r, sharedMax)}</span>` : ''}
-          <span class="col-age mono">${r.firstSeen ? fmtAge(hoursAgo(r.firstSeen + 'T00:00:00Z')) : '–'}</span>
-        </a>`).join('');
-
-      const remaining = pool.length - shown.length;
-      const more = $('board-more');
-      if (remaining > 0) {
-        more.style.display = '';
-        more.textContent = `show ${Math.min(PAGE, remaining)} more (${remaining} left)`;
-      } else {
-        more.style.display = 'none';
-      }
-
-      const scopeStr = filterGroup === 'all' ? '' : ` in ${filterGroup}`;
-      $('board-foot').textContent = showAll
-        ? `showing ${shown.length} of ${pool.length}${scopeStr}, all scores`
-        : `showing ${shown.length} of ${pool.length}${scopeStr}, ranked by model score. Items scoring below ${HIGH_SCORE} are hidden.`;
-    }
-
-    function sourceLabel(id) {
-      const prefix = id.split(':')[0].toLowerCase();
-      return {
-        arxiv: 'arxiv',
-        hfpaper: 'hf · paper',
-        hfmodel: 'hf · model',
-        hfdataset: 'hf · dataset',
-        ghrepo: 'github',
-        blog: 'lab blog',
-      }[prefix] || prefix;
-    }
-
-    // ─── Sort + filter control wiring ────────────────────────────
-    document.querySelectorAll('.board-sort[data-sort]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        currentSort = btn.getAttribute('data-sort');
-        visibleCount = FIRST_PAGE;
-        document.querySelectorAll('.board-sort[data-sort]').forEach((b) => {
-          b.setAttribute('data-active', b === btn ? 'true' : 'false');
-        });
-        renderBoardIfReady();
-      });
-    });
-
-    $('board-toggle').addEventListener('click', (e) => {
-      e.preventDefault();
-      showAll = !showAll;
-      visibleCount = FIRST_PAGE;
-      const t = $('board-toggle');
-      t.setAttribute('data-active', String(showAll));
-      t.textContent = showAll ? 'top only' : 'show all';
-      renderBoardIfReady();
-    });
-
-    $('board-more').addEventListener('click', (e) => {
-      e.preventDefault();
-      visibleCount += PAGE;
-      renderBoard(currentSort);
-    });
+      </div>
+    </header>
+    <div class="radar-tabs" role="tablist" aria-label="Radar view">
+      <button
+        id="tab-briefing"
+        role="tab"
+        aria-selected="true"
+        aria-controls="panel-briefing"
+        data-view="briefing"
+      >
+        Briefing
+      </button>
+      <button
+        id="tab-evidence"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-evidence"
+        tabindex="-1"
+        data-view="evidence"
+      >
+        Evidence <span id="evidence-count"></span>
+      </button>
+      <button
+        id="tab-archive"
+        role="tab"
+        aria-selected="false"
+        aria-controls="panel-archive"
+        tabindex="-1"
+        data-view="archive"
+      >
+        Archive
+      </button>
+      <button
+        id="radar-refresh"
+        class="radar-refresh"
+        aria-label="Refresh Radar"
+      >
+        ↻
+      </button>
+    </div>
+    <section id="panel-briefing" role="tabpanel" aria-labelledby="tab-briefing">
+      <div id="radar-brief" aria-live="polite">
+        <p class="radar-loading">Opening the published briefing…</p>
+      </div>
+    </section>
+    <section
+      id="panel-evidence"
+      role="tabpanel"
+      aria-labelledby="tab-evidence"
+      hidden
+    >
+      <div class="evidence-heading">
+        <div>
+          <h2>Look at the source.</h2>
+          <p>
+            Observed items, ranked by the pipeline’s five evidence criteria. A
+            score is a selection signal, not a verdict on quality.
+          </p>
+        </div>
+        <div class="evidence-search">
+          <label for="evidence-search">Find an item</label>
+          <input
+            id="evidence-search"
+            type="search"
+            placeholder="Search papers, models, repos…"
+          />
+        </div>
+      </div>
+      <div class="evidence-controls">
+        <div
+          id="source-filters"
+          role="group"
+          aria-label="Filter by source"
+        ></div>
+        <label>
+          Sort{" "}
+          <select id="evidence-sort">
+            <option value="score">Top rated</option>
+            <option value="newest">First seen, newest</option>
+          </select>
+        </label>
+        <label class="score-check">
+          <input id="high-only" type="checkbox" /> Score 3+
+        </label>
+      </div>
+      <p id="evidence-result" class="radar-meta" role="status"></p>
+      <div id="evidence-list">
+        <p class="radar-loading">Reading the evidence index…</p>
+      </div>
+      <button id="evidence-more" class="radar-more" hidden>
+        Show more
+      </button>
+    </section>
+    <section
+      id="panel-archive"
+      role="tabpanel"
+      aria-labelledby="tab-archive"
+      hidden
+    >
+      <div class="evidence-heading">
+        <div>
+          <h2>A longer view.</h2>
+          <p>Earlier observations, with their original sources and context.</p>
+        </div>
+        <div class="evidence-search">
+          <label for="archive-search">Find an edition</label>
+          <input
+            id="archive-search"
+            type="search"
+            placeholder="Search a date or topic…"
+          />
+        </div>
+      </div>
+      <p id="archive-result" class="radar-meta" role="status"></p>
+      <div id="archive-list">
+        <p class="radar-loading">Reading the archive…</p>
+      </div>
+    </section>
+    <noscript>
+      <p>
+        JavaScript loads the current research data.{" "}
+        <a href="https://github.com/amaljithkuttamath/ai-radar/blob/main/reports/latest.md">
+          Read the published Markdown
+        </a>
+        .
+      </p>
+    </noscript>
+  </div>
+  <script>
+    import { bootRadar } from "../lib/radar/boot";
+    bootRadar();
   </script>
 </Base>
-
 <style is:global>
-  /*
-     is:global here is deliberate: half the DOM on this page is
-     generated by client-side JS after hydration (board rows, sort
-     chips). Astro's default scoped styles apply data-astro-cid-*
-     attributes only to elements Astro rendered at build time, so
-     dynamically-inserted elements would miss the scoping and appear
-     unstyled. Going global for this one page keeps JS-generated markup
-     consistent with the static markup.
-
-     The class names are all radar-specific (board-row, item-title,
-     etc.) so leakage into other pages is not a concern.
-
-     ══════════════════════════════════════════════════════════════════
-     Canvas: escape the site's 700px reading column for the instrument
-     surfaces, but keep the BRIEF prose in a comfortable measure.
-     ══════════════════════════════════════════════════════════════════ */
-
-  .radar-canvas {
-    /* Break out of the parent .container's max-width so the board can
-       breathe. We negative-margin against the site container. The board
-       goes to ~1024px; the BRIEF prose is still comfortable because it
-       has its own .brief-body max-width below. */
-    margin-left:  calc((100vw - min(1024px, 100vw - 2rem)) / 2 - 50vw + 50%);
-    margin-right: calc((100vw - min(1024px, 100vw - 2rem)) / 2 - 50vw + 50%);
-    width: min(1024px, 100vw - 2rem);
-    max-width: 1024px;
+  .radar-page {
+    --radar-line: var(--line-strong);
   }
-
-  @media (max-width: 900px) {
-    /* On smaller viewports, don't force width; fall back to container. */
-    .radar-canvas {
-      margin-left: 0;
-      margin-right: 0;
-      width: 100%;
-      max-width: 100%;
-    }
-  }
-
-  /* ── Hero ─────────────────────────────────────────────────────── */
-
-  .radar-hero {
-    padding: var(--space-2xl) 0 var(--space-lg);
-  }
-
-  .hero-row {
+  .radar-opening {
     display: flex;
-    align-items: baseline;
-    gap: var(--space-md);
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--space-xl);
+    padding: var(--space-2xl) 0 var(--space-xl);
   }
-
-  .hero-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-page-title);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    margin: 0;
+  .radar-opening h1 {
+    font-size: clamp(3rem, 6vw, 5rem);
+    line-height: 1;
+    letter-spacing: -0.045em;
+    margin: var(--space-md) 0;
   }
-
-  .live-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
+  .radar-opening p:not(.folio-label) {
     color: var(--fg-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-body-lg);
+    margin: 0;
+    line-height: 1.6;
   }
-
-  .live-dot {
-    width: 7px;
-    height: 7px;
+  .radar-edition {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-sm);
+    font-size: var(--text-small);
+  }
+  .radar-edition time {
+    font: 1.2rem var(--font-serif);
+  }
+  .radar-edition a {
+    color: var(--fg-muted);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .radar-edition a:hover {
+    color: var(--fg);
+  }
+  .radar-status {
+    font: var(--text-tag) var(--font-mono);
+    color: var(--fg-muted);
+  }
+  .radar-status[data-current="true"]::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--signal);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent);
-    animation: live-pulse 1.8s ease-out infinite;
+    margin-right: var(--space-sm);
   }
-
-  @keyframes live-pulse {
-    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent); }
-    70%  { box-shadow: 0 0 0 8px color-mix(in srgb, var(--signal) 0%, transparent); }
-    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 0%, transparent); }
-  }
-
-  .live-label { color: var(--signal); }
-
-  .hero-lede {
-    font-size: var(--text-body);
-    color: var(--fg-muted);
-    line-height: 1.6;
-    max-width: 640px;
-    margin: var(--space-sm) 0 0;
-  }
-
-  .hero-lede a {
-    color: var(--fg-muted);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--fg-muted) 40%, transparent);
-    text-underline-offset: 2px;
-  }
-
-  .hero-lede a:hover { color: var(--fg); }
-
-  /* ── Section head (shared across all sections) ────────────────── */
-  .section-head {
+  .radar-tabs {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.75rem;
+    gap: var(--space-xl);
+    border-bottom: 1px solid var(--radar-line);
+    margin-bottom: var(--space-xl);
   }
-
-  .section-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+  .radar-tabs button {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--fg-muted);
+    font: var(--text-body) var(--font-sans);
+    padding: var(--space-md) 0;
+    cursor: pointer;
+  }
+  .radar-tabs button:hover {
+    color: var(--fg);
+  }
+  .radar-tabs button[aria-selected="true"] {
+    border-bottom-color: var(--fg);
+    color: var(--fg);
+  }
+  .radar-tabs button span {
+    font: var(--text-tag) var(--font-mono);
+    margin-left: var(--space-sm);
+  }
+  .radar-tabs .radar-refresh {
+    margin-left: auto;
+    font-size: 1.5rem;
+    min-width: 40px;
+  }
+  .radar-page [hidden] {
+    display: none !important;
+  }
+  .radar-loading {
+    color: var(--fg-muted);
+    padding: var(--space-xl) 0;
+  }
+  .radar-error {
+    padding: var(--space-lg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+  }
+  .radar-error p {
     color: var(--fg-muted);
   }
-
-  .section-hint {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  /* ── Status bar ───────────────────────────────────────────────── */
-  .status-bar {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1px;
-    background: var(--fg-faint);
+  .radar-error button {
+    padding: var(--space-sm) var(--space-md);
     border: 1px solid var(--fg-faint);
-    border-radius: var(--radius-md);
-    overflow: hidden;
+    background: var(--bg-hover);
+    color: var(--fg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .brief-overview {
+    display: grid;
+    grid-template-columns: 1fr 210px;
+    gap: var(--space-2xl);
+    padding-bottom: var(--space-xl);
+    border-bottom: 1px solid var(--radar-line);
+  }
+  .brief-overview h2 {
+    font: var(--text-label) var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-muted);
+    margin: 0 0 var(--space-lg);
+  }
+  .brief-lead {
+    font: clamp(1.4rem, 2.3vw, 1.85rem)/1.55 var(--font-serif);
+    letter-spacing: -0.015em;
+    max-width: 48ch;
+  }
+  .brief-overview aside {
+    border-left: 1px solid var(--fg-faint);
+    padding-left: var(--space-lg);
+  }
+  .brief-overview aside p {
+    font-size: var(--text-small);
+    color: var(--fg-muted);
+    margin: var(--space-sm) 0 var(--space-lg);
+  }
+  .brief-overview aside a {
+    font-size: var(--text-small);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .radar-meta {
+    color: var(--fg-muted);
+    font: var(--text-tag)/1.7 var(--font-mono);
+  }
+  .radar-notice {
+    padding: var(--space-md);
+    border-left: 2px solid var(--signal);
+    background: var(--bg-elevated);
+    font-size: var(--text-small);
     margin-bottom: var(--space-lg);
   }
-
-  .status-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.65rem var(--space-md);
-    background: var(--bg);
-  }
-
-  .status-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-  }
-
-  .status-value {
-    font-family: var(--font-mono);
-    font-size: var(--text-body-lg);
-    color: var(--fg);
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* ── The board ────────────────────────────────────────────────── */
-  .board { margin-bottom: var(--space-xl); }
-
-  .board-controls {
-    display: flex;
-    gap: 0.3rem;
-  }
-
-  .board-sort {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
-    background: transparent;
-    border: 1px solid transparent;
-    padding: 0.2rem 0.5rem;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
-  }
-
-  .board-sort:hover { color: var(--fg); }
-
-  .board-sort[data-active="true"] {
-    color: var(--fg);
-    border-color: var(--fg-faint);
-  }
-
-  /* ── Source filter chips ──────────────────────────────────────── */
-  .board-filters {
-    display: flex;
-    gap: 0.3rem;
-    flex-wrap: wrap;
-    margin-bottom: 0.75rem;
-  }
-
-  .filter-chip {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
-    background: transparent;
-    border: 1px solid var(--fg-faint);
-    padding: 0.2rem 0.6rem;
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
-  }
-
-  .filter-chip:hover { color: var(--fg); border-color: var(--fg-muted); }
-
-  .filter-chip[data-active="true"] {
-    color: var(--fg);
-    border-color: var(--accent-color);
-  }
-
-  .chip-count {
-    color: var(--fg-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .board-header {
+  .radar-picks {
     display: grid;
-    grid-template-columns: 3rem minmax(0, 1fr) 10rem 3.5rem;
-    gap: var(--space-sm);
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-  }
-
-  .board-body {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .board-row {
-    display: grid;
-    /* minmax(0, 1fr) on the item column is critical: it lets the child
-       .item-title's text-overflow: ellipsis actually engage. Without it,
-       a long title (e.g. 300 chars of Chinese) blows out the whole grid. */
-    grid-template-columns: 3rem minmax(0, 1fr) 10rem 3.5rem;
-    gap: var(--space-sm);
-    align-items: center;
-    padding: 0.7rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    text-decoration: none;
-    color: var(--fg);
-    transition: background var(--duration) var(--ease);
-  }
-
-  .board-row:hover {
-    background: var(--bg-elevated);
-  }
-
-  .board-row.row-escalating {
-    /* Escalating rows earn the accent color on the score column,
-       not the whole row. Keeps chromatic hierarchy readable. */
-  }
-
-  .col-score {
-    font-family: var(--font-mono);
-    font-size: var(--text-body);
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
-    color: var(--fg);
-  }
-
-  .row-escalating .col-score { color: var(--signal); }
-
-  .score-slash {
-    color: var(--fg-muted);
-    font-weight: 400;
-    font-size: 0.7em;
-  }
-
-  .col-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;   /* Critical: allows child ellipsis to engage. */
-    overflow: hidden;
-  }
-
-  .item-title {
-    font-family: var(--font-serif);
-    font-size: var(--text-body);
-    font-weight: 500;
-    letter-spacing: -0.005em;
-    color: var(--fg);
-    /* Single-line truncate. The ellipsis relies on parent min-width: 0. */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
-  }
-
-  .item-meta {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: lowercase;
-    color: var(--fg-muted);
-    letter-spacing: 0.04em;
-  }
-
-  .col-trend {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-  }
-
-  .trend-new {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-  }
-
-  .spark {
-    font-family: var(--font-mono);
-    font-size: var(--text-body);
-    letter-spacing: 0.02em;
-    color: var(--fg);
-    line-height: 1;
-  }
-
-  .spark-hot { color: var(--signal); }
-
-  .spark-delta {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .chip {
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 0.08rem 0.35rem;
-    border-radius: 2px;
-    border: 1px solid transparent;
-    white-space: nowrap;
-  }
-
-  .chip-hot {
-    color: var(--signal);
-    border-color: color-mix(in srgb, var(--signal) 45%, transparent);
-  }
-
-  .col-age {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .board-more-wrap {
-    display: flex;
-    justify-content: center;
-    padding: 0.75rem 0 0;
-  }
-
-  .board-more {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    background: var(--bg-elevated);
-    border: 1px solid var(--fg-faint);
-    padding: 0.35rem 1rem;
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    transition: color var(--duration) var(--ease), border-color var(--duration) var(--ease);
-  }
-
-  .board-more:hover { color: var(--fg); border-color: var(--accent-color); }
-
-  .board-foot {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    color: var(--fg-muted);
-    margin: 0.6rem 0 0;
-    letter-spacing: 0.03em;
-  }
-
-  /* When the corpus has no multi-day history the trend column is
-     suppressed entirely (see renderBoard). Collapse the grid so the
-     item column absorbs the space. */
-  .board.no-trend .board-header,
-  .board.no-trend .board-row {
-    grid-template-columns: 3rem minmax(0, 1fr) 3.5rem;
-  }
-
-  .board.no-trend .col-trend { display: none; }
-
-  /* Compact the board on smaller screens.
-     On phones (< 780px) drop the seen column and give the trend column a
-     tight fixed width so the item column keeps as much room as possible.
-     Item titles wrap to two lines instead of ellipsising, since on a
-     phone the extra line is acceptable and truncation is more painful. */
-  @media (max-width: 780px) {
-    .board-header,
-    .board-row {
-      grid-template-columns: 2.25rem minmax(0, 1fr) 4.5rem;
-      gap: 0.5rem;
-      align-items: flex-start;
-      padding: 0.6rem 0;
-    }
-    .col-age,
-    .board-header .col-age {
-      display: none;
-    }
-    .item-title {
-      white-space: normal;
-      overflow: visible;
-      text-overflow: clip;
-      line-height: 1.35;
-    }
-    .col-trend { justify-content: flex-end; }
-    .col-trend .spark { font-size: var(--text-small); }
-    .chip { font-size: 0.6rem; padding: 0.05rem 0.25rem; }
-
-    .board.no-trend .board-header,
-    .board.no-trend .board-row {
-      grid-template-columns: 2.25rem minmax(0, 1fr);
-    }
-  }
-
-  /* ── Brief ────────────────────────────────────────────────────── */
-  .brief { margin-bottom: var(--space-xl); }
-
-  #brief-attribution {
-    color: var(--fg-muted);
-    /* Keep the attribution visible even when it's long — it's a
-       responsibility signal, not decoration. */
-  }
-
-  .brief-body {
-    max-width: 640px;  /* Comfortable reading measure inside the wide canvas. */
-    font-size: var(--text-body);
-    line-height: 1.7;
-    color: var(--fg);
-  }
-
-  /* Structured brief: lede, new-today list, collapsed full digest. */
-  .brief-lede {
-    font-family: var(--font-serif);
-    font-size: var(--text-body-lg);
-    line-height: 1.6;
-    color: var(--fg);
-    margin: 0 0 var(--space-md);
-  }
-
-  .brief-lede a {
-    color: var(--fg);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent);
-    text-underline-offset: 2px;
-  }
-
-  .brief-new-label {
-    font-family: var(--font-mono);
-    font-size: var(--text-tag);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    margin-bottom: 0.4rem;
-  }
-
-  .brief-new {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 var(--space-md);
-    border-top: 1px solid var(--fg-faint);
-  }
-
-  .brief-new li {
-    padding: 0.45rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    font-size: var(--text-small);
-    line-height: 1.5;
-    color: var(--fg-muted);
-  }
-
-  .brief-new li a {
-    color: var(--fg);
-    text-decoration: none;
-  }
-
-  .brief-new li a:hover { color: var(--accent-color); }
-
-  .brief-full summary {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    color: var(--fg-muted);
-    cursor: pointer;
-    padding: 0.3rem 0;
-    list-style: none;
-  }
-
-  .brief-full summary::before { content: '+ '; }
-  .brief-full[open] summary::before { content: '− '; }
-  .brief-full summary::-webkit-details-marker { display: none; }
-  .brief-full summary:hover { color: var(--fg); }
-
-  .brief-full-body {
-    padding-top: var(--space-sm);
-    border-top: 1px solid var(--fg-faint);
-    margin-top: 0.5rem;
-  }
-
-  .brief-body h2 {
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    margin: var(--space-xl) 0 var(--space-sm);
-    font-weight: 400;
-  }
-
-  .brief-body h3 {
-    font-family: var(--font-sans);
-    font-size: var(--text-subsection);
-    font-weight: 500;
-    margin: var(--space-lg) 0 var(--space-sm);
-  }
-
-  .brief-body p {
-    margin: 0 0 var(--space-md);
-    color: var(--fg-muted);
-  }
-
-  .brief-body ul,
-  .brief-body ol {
-    padding-left: var(--space-md);
-    margin: 0 0 var(--space-md);
-  }
-
-  .brief-body li {
-    margin: 0.25rem 0;
-    color: var(--fg-muted);
-  }
-
-  .brief-body a {
-    color: var(--fg);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent);
-    text-underline-offset: 2px;
-  }
-
-  .brief-body a:hover { text-decoration-color: var(--fg); }
-  .brief-body strong { color: var(--fg); font-weight: 500; }
-  .brief-body hr {
-    border: none;
-    border-top: 1px solid var(--fg-faint);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-xl);
     margin: var(--space-xl) 0;
   }
-
-  .brief-body code {
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    background: var(--bg-elevated);
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
+  .radar-pick {
+    border-top: 1px solid var(--radar-line);
+    padding-top: var(--space-lg);
   }
-
-  /* ── Run log ──────────────────────────────────────────────────── */
-  .run-log-drawer { max-width: 800px; }
-
-  .run-log-summary {
+  .radar-pick h3 {
+    font: 500 1.5rem/1.25 var(--font-serif);
+    letter-spacing: -0.02em;
+    margin: 0 0 var(--space-md);
+  }
+  .radar-pick h3 a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .radar-pick p {
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+  }
+  .radar-reading-title {
+    font-size: 1.8rem;
+    margin: var(--space-xl) 0 var(--space-lg);
+  }
+  .radar-actions {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    gap: var(--space-2xl);
+    padding: var(--space-xl) 0;
+    border-top: 1px solid var(--radar-line);
+  }
+  .radar-actions h2 {
+    font-size: 1.8rem;
+    margin: 0;
+  }
+  .radar-actions li {
+    margin: 0 0 var(--space-md) var(--space-lg);
+    color: var(--fg-muted);
+    font-size: var(--text-body);
+  }
+  .radar-actions a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .radar-full {
+    border-top: 1px solid var(--radar-line);
+    border-bottom: 1px solid var(--radar-line);
+    margin: var(--space-lg) 0;
+  }
+  .radar-full summary {
+    padding: var(--space-lg) 0;
+    cursor: pointer;
+    font-size: var(--text-body);
+  }
+  .radar-full summary span {
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    margin-left: var(--space-md);
+  }
+  .radar-prose {
+    max-width: 72ch;
+    font-size: 1rem;
+    line-height: 1.85;
+    padding: var(--space-md) 0 var(--space-xl);
+  }
+  .radar-prose p,
+  .radar-prose li {
+    color: var(--fg-muted);
+  }
+  .radar-prose strong {
+    color: var(--fg);
+  }
+  .radar-prose h2 {
+    font: 500 1.8rem var(--font-serif);
+    margin: var(--space-xl) 0 var(--space-lg);
+  }
+  .radar-prose h3 {
+    font: 500 1rem var(--font-sans);
+    margin: var(--space-xl) 0 var(--space-md);
+  }
+  .radar-prose a {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .radar-prose ul,
+  .radar-prose ol {
+    padding-left: var(--space-lg);
+  }
+  .radar-prose li {
+    margin-bottom: var(--space-sm);
+  }
+  .radar-prose pre,
+  .radar-prose table {
+    display: block;
+    overflow: auto;
+    max-width: 100%;
+  }
+  .radar-prose blockquote {
+    border-left: 2px solid var(--signal);
+    padding-left: var(--space-lg);
+  }
+  .radar-prose :is(p, li) {
+    overflow-wrap: anywhere;
+  }
+  .evidence-heading {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
-    cursor: pointer;
-    list-style: none;
-    padding: 0.3rem 0;
+    gap: var(--space-xl);
+    align-items: flex-end;
+    margin-bottom: var(--space-xl);
   }
-
-  .run-log-summary::-webkit-details-marker { display: none; }
-  .run-log-summary .section-label::before { content: '+ '; }
-  .run-log-drawer[open] .run-log-summary .section-label::before { content: '− '; }
-  .run-log-summary:hover .section-label { color: var(--fg); }
-
-  .run-log-body {
-    display: flex;
-    flex-direction: column;
-    border-top: 1px solid var(--fg-faint);
-    margin-top: 0.5rem;
-    max-width: 800px;
+  .evidence-heading h2 {
+    font-size: 2rem;
+    margin: 0 0 var(--space-sm);
   }
-
-  .run-row {
-    display: grid;
-    grid-template-columns: 5rem 1fr;
-    gap: var(--space-md);
-    padding: 0.5rem 0;
-    border-bottom: 1px solid var(--fg-faint);
-    text-decoration: none;
+  .evidence-heading p {
+    color: var(--fg-muted);
+    font-size: var(--text-small);
+    max-width: 65ch;
+    margin: 0;
+  }
+  .evidence-search {
+    flex: none;
+  }
+  .evidence-search label {
+    display: block;
+    font: var(--text-tag) var(--font-mono);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-sm);
+  }
+  .evidence-search input {
+    width: 280px;
+    max-width: 100%;
+    padding: 0.7rem var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--radar-line);
+    border-radius: var(--radius-sm);
+    font: var(--text-small) var(--font-sans);
     color: var(--fg);
-    transition: color var(--duration) var(--ease);
   }
-
-  .run-row:hover { color: var(--accent-color); }
-
-  .run-date {
+  .evidence-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-lg);
+  }
+  .evidence-controls #source-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin-right: auto;
+  }
+  .evidence-controls button {
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
     color: var(--fg-muted);
-    font-size: var(--text-tag);
-    letter-spacing: 0.03em;
+    padding: var(--space-sm) 0.65rem;
+    font: var(--text-small) var(--font-sans);
+    cursor: pointer;
   }
-
-  .run-teaser {
+  .evidence-controls button[aria-pressed="true"] {
+    border-color: var(--radar-line);
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+  .evidence-controls button:hover {
+    color: var(--fg);
+  }
+  .evidence-controls label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
     font-size: var(--text-small);
     color: var(--fg-muted);
-    line-height: 1.5;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-
-  .run-row:hover .run-teaser { color: var(--fg); }
-
-  /* ── Loading / empty / error ──────────────────────────────────── */
-  .loading,
-  .empty {
-    padding: 0.65rem 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-small);
-    color: var(--fg-muted);
-    letter-spacing: 0.03em;
+  .evidence-controls select {
+    background: var(--bg);
+    color: var(--fg);
+    font: var(--text-small) var(--font-sans);
+    border: 1px solid var(--fg-faint);
+    padding: var(--space-sm);
+    border-radius: var(--radius-sm);
+  }
+  .evidence-controls input {
+    accent-color: var(--fg);
+  }
+  .evidence-row {
+    display: grid;
+    grid-template-columns: 50px 1fr 120px;
+    gap: var(--space-lg);
+    padding: var(--space-lg) 0;
     border-bottom: 1px solid var(--fg-faint);
+    align-items: baseline;
   }
-
-  .loading.err { color: var(--danger); }
+  .evidence-row:hover {
+    border-color: var(--fg);
+  }
+  .evidence-score {
+    font: 1.3rem var(--font-serif);
+  }
+  .evidence-score small {
+    font: var(--text-tag) var(--font-mono);
+    color: var(--fg-muted);
+  }
+  .evidence-row h3 {
+    font: 500 1rem/1.5 var(--font-sans);
+    margin: 0 0 var(--space-xs);
+  }
+  .evidence-row p {
+    font: var(--text-tag) var(--font-mono);
+    color: var(--fg-muted);
+    margin: 0;
+  }
+  .evidence-row time {
+    color: var(--fg-muted);
+    text-align: right;
+    font: var(--text-tag) var(--font-mono);
+  }
+  .radar-more {
+    display: block;
+    margin: var(--space-xl) auto;
+    padding: var(--space-sm) var(--space-lg);
+    border: 1px solid var(--radar-line);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--fg);
+    font: var(--text-small) var(--font-sans);
+    cursor: pointer;
+  }
+  .archive-row {
+    display: grid;
+    grid-template-columns: 140px 1fr auto;
+    gap: var(--space-xl);
+    width: 100%;
+    text-align: left;
+    color: var(--fg);
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--fg-faint);
+    padding: var(--space-lg) 0;
+    cursor: pointer;
+  }
+  .archive-row:hover {
+    border-color: var(--fg);
+  }
+  .archive-row time {
+    font: var(--text-label) var(--font-mono);
+    color: var(--fg-muted);
+  }
+  .archive-row p {
+    font: var(--text-body)/1.7 var(--font-serif);
+    margin: 0;
+  }
+  .radar-back {
+    border: 0;
+    background: none;
+    color: var(--fg);
+    font: var(--text-small) var(--font-sans);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+    margin-bottom: var(--space-lg);
+  }
+  @media (max-width: 760px) {
+    .radar-opening {
+      align-items: flex-start;
+      padding-top: var(--space-xl);
+    }
+    .radar-edition {
+      max-width: 160px;
+      text-align: right;
+    }
+    .brief-overview {
+      grid-template-columns: 1fr;
+      gap: var(--space-lg);
+    }
+    .brief-overview aside {
+      border-left: 0;
+      border-top: 1px solid var(--fg-faint);
+      padding: var(--space-md) 0 0;
+    }
+    .brief-overview aside p {
+      display: inline;
+      margin-right: var(--space-md);
+    }
+    .radar-picks {
+      grid-template-columns: 1fr;
+      gap: var(--space-md);
+    }
+    .radar-pick h3 {
+      font-size: 1.4rem;
+    }
+    .radar-actions {
+      grid-template-columns: 1fr;
+      gap: var(--space-lg);
+    }
+    .evidence-heading {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .evidence-search input {
+      width: 100%;
+    }
+    .evidence-row {
+      grid-template-columns: 36px 1fr;
+      gap: var(--space-md);
+    }
+    .evidence-row time {
+      grid-column: 2;
+      text-align: left;
+    }
+    .archive-row {
+      grid-template-columns: 1fr auto;
+      gap: var(--space-sm);
+    }
+    .archive-row p {
+      grid-column: 1;
+    }
+    .archive-row > span {
+      grid-column: 2;
+      grid-row: 1;
+    }
+  }
+  @media (max-width: 440px) {
+    .radar-opening {
+      flex-direction: column;
+      gap: var(--space-lg);
+    }
+    .radar-edition {
+      align-items: flex-start;
+      max-width: none;
+      text-align: left;
+    }
+    .radar-opening p br {
+      display: none;
+    }
+    .radar-tabs {
+      gap: var(--space-lg);
+    }
+    .radar-tabs button {
+      font-size: var(--text-small);
+    }
+  }
 </style>
