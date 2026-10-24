@@ -1,4 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ExplanationContext } from "./ChangeExplanation";
+import {
+  chartChanges,
+  changeKey,
+  changeQuestion,
+  type ChartChange,
+} from "../../lib/chitti/chart-insights";
 import { describeChange } from "../../lib/chitti/workspace/changes";
 import type { ViewEdit } from "../../lib/chitti/workspace/steering";
 import { ChittiAgent } from "../../lib/chitti/workspace/agent";
@@ -48,6 +55,12 @@ function initialConfig(): Config {
 export default function Workspace() {
   const [config, setConfig] = useState(initialConfig);
   const [agent] = useState(() => new ChittiAgent(config));
+  const explanationRuns = useRef<
+    Record<string, { view: string; change: ChartChange }>
+  >({});
+  const [explanations, setExplanations] = useState<
+    Record<string, { change: ChartChange; analysis: Analysis }>
+  >({});
   const [turns, setTurns] = useState<Analysis[]>([]);
   const [selected, setSelected] = useState(
     DEMOS[0] ? `example:${DEMOS[0].id}` : "",
@@ -79,6 +92,15 @@ export default function Workspace() {
         const snapshot = state as WorkspaceState;
         if (snapshot.analysis) {
           const next = snapshot.analysis;
+          const target = explanationRuns.current[next.id];
+          if (target) {
+            setExplanations((previous) => ({
+              ...previous,
+              [target.view]: { change: target.change, analysis: next },
+            }));
+            if (!snapshot.question) setClarification(null);
+            return;
+          }
           setTurns((previous) => {
             const found = previous.some((t) => t.id === next.id);
             return found
@@ -94,7 +116,7 @@ export default function Workspace() {
         const operations = event.value.operations;
         if (operations[0]?.createSurface?.surfaceId === "question")
           setClarification({ runId: input.runId, operations });
-        else {
+        else if (!explanationRuns.current[input.runId]) {
           setSurfaces((previous) => ({
             ...previous,
             [input.runId]: operations,
@@ -163,6 +185,7 @@ export default function Workspace() {
     force = false,
     context: ShareStateV1 | null = useCurrent ? active?.result || null : null,
     edit?: ViewEdit,
+    detail?: ChartChange,
   ) => {
     if (busy.current || !text.trim()) return;
     busy.current = true;
@@ -172,13 +195,18 @@ export default function Workspace() {
     setReceipt(false);
     const id = crypto.randomUUID();
     activeRun.current = id;
-    setLatestRequest(id);
-    setNavigationNote("");
-    setRedo([]);
-    parents.current[id] = selected;
+    if (detail) {
+      explanationRuns.current[id] = { view: selected, change: detail };
+      setLatestRequest("");
+    } else {
+      setLatestRequest(id);
+      setNavigationNote("");
+      setRedo([]);
+      parents.current[id] = selected;
+      setQuestion("");
+      setUseCurrent(true);
+    }
     contexts.current[id] = context;
-    setQuestion("");
-    setUseCurrent(true);
     agent.useWorkspace(context, edit);
     if (force) agent.escalate();
     agent.addMessage({
@@ -189,7 +217,26 @@ export default function Workspace() {
     try {
       await agent.runAgent({ runId: id });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Analysis failed.");
+      const message =
+        error instanceof Error ? error.message : "Analysis failed.";
+      if (detail)
+        setExplanations((previous) => {
+          const current = previous[selected];
+          return current
+            ? {
+                ...previous,
+                [selected]: {
+                  ...current,
+                  analysis: {
+                    ...current.analysis,
+                    phase: "error",
+                    status: message,
+                  },
+                },
+              }
+            : previous;
+        });
+      else setNotice(message);
     } finally {
       busy.current = false;
       setRunning(false);
@@ -199,6 +246,36 @@ export default function Workspace() {
   const steerResult = (action: ActionPayload) => {
     if (busy.current || !active?.result) return;
     const value = action.context.value;
+    if (
+      action.name === "explain-change" &&
+      typeof value === "string" &&
+      active.result.spec
+    ) {
+      const detail = chartChanges(active.result.spec).find(
+        (c) => changeKey(c) === value,
+      );
+      if (
+        detail &&
+        explanations[selected] &&
+        changeKey(explanations[selected].change) === value
+      ) {
+        setExplanations((previous) => {
+          const next = { ...previous };
+          delete next[selected];
+          return next;
+        });
+        return;
+      }
+      if (detail)
+        void submit(
+          changeQuestion(detail),
+          true,
+          active.result,
+          undefined,
+          detail,
+        );
+      return;
+    }
     if (action.name === "focus" && typeof value === "string")
       void submit(`Focus on ${value}`, false, active.result, {
         kind: "series",
@@ -302,6 +379,32 @@ export default function Workspace() {
       setNotice("Clipboard unavailable. Use the CSV or Markdown download.");
     }
   };
+  const explanation = explanations[selected];
+  const inlineExplanation = explanation
+    ? {
+        ...explanation,
+        onClose: () =>
+          setExplanations((previous) => {
+            const next = { ...previous };
+            delete next[selected];
+            return next;
+          }),
+        onRetry: () =>
+          void submit(
+            changeQuestion(explanation.change),
+            true,
+            active?.result || null,
+            undefined,
+            explanation.change,
+          ),
+        onConnect: () => setSettings(true),
+        onStop: () => agent.stop(),
+        clarification:
+          clarification?.runId === explanation.analysis.id ? (
+            <Surface operations={clarification.operations} onAction={respond} />
+          ) : null,
+      }
+    : null;
   const composerView = (
     <>
       <form
@@ -652,13 +755,15 @@ export default function Workspace() {
                     </section>
                   )}
                   {operations ? (
-                    <Surface
-                      key={selected}
-                      operations={operations}
-                      onAction={steerResult}
-                      disabled={running}
-                      inlineComposer
-                    />
+                    <ExplanationContext.Provider value={inlineExplanation}>
+                      <Surface
+                        key={selected}
+                        operations={operations}
+                        onAction={steerResult}
+                        disabled={running}
+                        inlineComposer
+                      />
+                    </ExplanationContext.Provider>
                   ) : active.phase === "running" ? (
                     <div className="cw-pending">
                       <span className="cw-pulse" />

@@ -1068,3 +1068,73 @@
 .cw-chart-changes {
   margin-top: 4px;
 }
+.cw-chart-changes button[aria-expanded="true"] {
+  border-color: var(--cw-accent);
+  background: var(--cw-panel);
+}
+.cw-change-explanation {
+  display: grid;
+  grid-template-columns: minmax(155px, 1fr) 3fr;
+  gap: 14px;
+  margin: 6px 0 10px;
+  padding: 10px;
+  border-left: 2px solid var(--cw-accent);
+  background: var(--cw-panel);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+.cw-explanation-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cw-explanation-evidence strong {
+  font-weight: 500;
+}
+.cw-explanation-evidence strong span {
+  margin-left: 8px;
+}
+.cw-explanation-evidence > span,
+.cw-explanation-evidence small {
+  color: var(--fg-muted);
+  font-size: 0.63rem;
+}
+.cw-explanation-body {
+  min-width: 0;
+}
+.cw .cw-explanation-body p {
+  margin: 0 0 5px;
+  font-size: inherit;
+}
+.cw-explanation-answer {
+  max-height: 180px;
+  overflow: auto;
+}
+.cw-explanation-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+}
+.cw-explanation-actions button,
+.cw-explanation-sources {
+  font-size: 0.62rem;
+}
+.cw-explanation-actions button {
+  padding: 3px 6px;
+}
+.cw-explanation-sources a {
+  display: block;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+  .cw-change-explanation {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .cw-explanation-evidence {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+  }
+}
