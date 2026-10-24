@@ -146,6 +146,10 @@ it("updates movement summaries and preserves the observation view while stepping
   );
   const doc = dom.window.document;
   await vi.waitFor(() =>
+    expect(doc.querySelectorAll(".connection-row")).toHaveLength(3),
+  );
+  (doc.querySelector("[data-show-tracking]") as HTMLButtonElement).click();
+  await vi.waitFor(() =>
     expect(doc.querySelectorAll(".thread-name")).toHaveLength(3),
   );
   (

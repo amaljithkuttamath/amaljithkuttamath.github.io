@@ -1,3 +1,4 @@
+import { renderConnections } from "./connections";
 import { dateLabel, escapeHTML as esc, safeURL } from "./data";
 export const MOVEMENTS = ["new", "gaining", "fading"] as const;
 export type Movement = (typeof MOVEMENTS)[number];
@@ -189,7 +190,7 @@ function eventLabel(event: ThreadEvent) {
     (event.kind === "gaining" ? "Up" : "Down")
   );
 }
-export function renderEvolution(
+export function renderTracking(
   host: HTMLElement,
   dates: string[],
   selected: string,
@@ -281,7 +282,10 @@ export function renderEvolution(
   } else
     detail = `<p class="evolution-empty">${!visible.length || visible.some((date) => !editions.has(date)) ? "Reading research threads…" : "No named research history in these editions."}</p>`;
   host.innerHTML = `<div class="signal-layout evolution-layout"><div class="evolution-chart"><div class="evolution-chart-head"><span>Named work across editions</span><time>${esc(dateLabel(selected))}</time></div><div class="thread-map"><svg viewBox="0 0 560 230" preserveAspectRatio="none" role="img" aria-label="Research threads connected across recorded editions; each row is the same work.">${drawing}</svg>${nameButtons}</div><div class="evolution-dates">${visible.map((date, i) => `<button style="left:${(100 * x(i)) / 560}%" type="button" data-evolution-date="${date}" aria-label="Explore ${dateLabel(date)}" ${date === selected ? 'aria-current="date"' : ""}>${i === 0 || date.slice(0, 7) !== visible[i - 1].slice(0, 7) ? date.slice(5).replace("-", "/") : date.slice(8)}</button>`).join("")}</div></div><div class="evolution-details" aria-live="polite">${detail}</div></div><div class="signal-footer evolution-footer"><p>Same work connects. Dashed gaps = unreported. ○ = tracked.</p><a href="#briefing/${selected}">Read this edition ↓</a></div>`;
-  const redraw = () => renderEvolution(host, dates, selected, editions, onDate);
+  const redraw = () =>
+    host.dataset.evolutionMode === "tracking"
+      ? renderEvolution(host, dates, selected, editions, onDate)
+      : renderTracking(host, dates, selected, editions, onDate);
   host
     .querySelectorAll<HTMLButtonElement>("[data-evolution-date]")
     .forEach((button) => {
@@ -352,4 +356,34 @@ export function renderEvolution(
     [...host.querySelectorAll<HTMLButtonElement>("[data-trace]")]
       .find((button) => button.dataset.trace === focusTrace)
       ?.focus();
+}
+
+export function renderEvolution(
+  host: HTMLElement,
+  dates: string[],
+  selected: string,
+  editions: ReadonlyMap<string, Evolution | null>,
+  onDate: (date: string) => void,
+) {
+  const redraw = () => renderEvolution(host, dates, selected, editions, onDate);
+  if (host.dataset.evolutionMode === "tracking") {
+    renderTracking(host, dates, selected, editions, onDate);
+    const bar = document.createElement("div");
+    bar.className = "connection-toolbar";
+    bar.innerHTML =
+      '<span>Edition activity</span><button type="button">Paper connections</button>';
+    bar.querySelector("button")!.addEventListener("click", () => {
+      delete host.dataset.evolutionMode;
+      redraw();
+      host.querySelector<HTMLButtonElement>("[data-show-tracking]")?.focus();
+    });
+    host.prepend(bar);
+  } else
+    renderConnections(host, dates, selected, onDate, () => {
+      host.dataset.evolutionMode = "tracking";
+      redraw();
+      host
+        .querySelector<HTMLButtonElement>(".connection-toolbar button")
+        ?.focus();
+    });
 }

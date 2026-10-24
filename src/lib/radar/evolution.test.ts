@@ -3,7 +3,7 @@ import { JSDOM } from "jsdom";
 import { digestView } from "./digest";
 import {
   editionEvolution,
-  renderEvolution,
+  renderTracking as renderEvolution,
   sourceIdentity,
   researchThreads,
 } from "./evolution";
