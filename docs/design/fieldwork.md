@@ -51,3 +51,17 @@ feed even when the reader opens a historical briefing. Month controls filter the
 archive using real edition counts. About groups existing research repositories
 by the questions they address. Interaction provides personality; labels explain
 what controls do. Existing tool internals and routes remain unchanged.
+
+
+## Visual research field
+
+Replace the source/score matrix with one selectable mark per observation.
+Group marks by source or by their published evidence score; dot size encodes
+score. Category placement and intra-category spacing are layout only, not
+semantic similarity, inferred relationships, or embeddings. No network edges.
+Hover previews, clicking persists selection, arrow keys move spatially, and
+previous/next buttons support dense groups on touch screens. Changing grouping
+retains record identity. The source link stays visible while long descriptions
+scroll within a bounded inspector. Regrouping motion respects reduced motion.
+Desktop height is about 360px, below the previous matrix; mobile repacks in its
+own coordinate space to retain readable category labels.
