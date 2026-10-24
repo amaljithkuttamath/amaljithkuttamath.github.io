@@ -124,7 +124,28 @@ export function bootRadar() {
   }
   async function loadEvidence() {
     try {
-      rows = parseState(JSON.parse(await read("data/state.json")));
+      const [state, latest] = await Promise.all([
+        read("data/state.json"),
+        read("reports/latest.md").catch(() => null),
+      ]);
+      rows = parseState(JSON.parse(state));
+      let notes = new Map<string, string>();
+      if (latest) {
+        try {
+          const brief = digestView(latest, document);
+          if (!brief.degraded)
+            notes = new Map(
+              rows
+                .filter((row) => row.lastSeen <= brief.date)
+                .flatMap((row) => {
+                  const note = brief.notes.get(row.url);
+                  return note ? [[row.url, note] as [string, string]] : [];
+                }),
+            );
+        } catch {
+          /* Current observations remain usable if briefing notes are unavailable. */
+        }
+      }
       $("evidence-count").textContent = String(rows.length);
       const groups = ["All", ...new Set(rows.map((r) => r.group))];
       if (!groups.includes(group)) group = "All";
@@ -148,24 +169,28 @@ export function bootRadar() {
             renderEvidence();
           }),
         );
-      mountSignals(rows, (selectedGroup, minimum) => {
-        group = selectedGroup;
-        input("minimum-score").value = String(minimum);
-        input("evidence-search").value = "";
-        limit = 15;
-        $("source-filters")
-          .querySelectorAll<HTMLButtonElement>("button")
-          .forEach((b) =>
-            b.setAttribute("aria-pressed", String(b.dataset.group === group)),
-          );
-        renderEvidence();
-        location.hash = "evidence";
-        $("tab-evidence").focus();
-        $("tab-evidence").scrollIntoView({
-          block: "start",
-          behavior: "instant",
-        });
-      });
+      mountSignals(
+        rows,
+        (selectedGroup, minimum) => {
+          group = selectedGroup;
+          input("minimum-score").value = String(minimum);
+          input("evidence-search").value = "";
+          limit = 15;
+          $("source-filters")
+            .querySelectorAll<HTMLButtonElement>("button")
+            .forEach((b) =>
+              b.setAttribute("aria-pressed", String(b.dataset.group === group)),
+            );
+          renderEvidence();
+          location.hash = "evidence";
+          $("tab-evidence").focus();
+          $("tab-evidence").scrollIntoView({
+            block: "start",
+            behavior: "instant",
+          });
+        },
+        notes,
+      );
       renderEvidence();
     } catch (e) {
       if (document.getElementById("signal-total"))
@@ -174,6 +199,29 @@ export function bootRadar() {
         error($("signal-workspace"), e, loadEvidence);
       error($("evidence-list"), e, loadEvidence);
     }
+  }
+  function renderTimeline() {
+    const host = document.getElementById("radar-timeline");
+    if (!host) return;
+    const requested = location.hash.slice(1).split("/")[1];
+    const selected = validDate(requested || "") ? requested : editions[0]?.date;
+    const index = Math.max(
+      0,
+      editions.findIndex((edition) => edition.date === selected),
+    );
+    const start = Math.max(0, Math.min(index - 3, editions.length - 7));
+    const visible = editions.slice(start, start + 7).reverse();
+    host.innerHTML = editions.length
+      ? `<span>Timeline</span><button type="button" data-timeline-date="${editions[index + 1]?.date || ""}" aria-label="Previous edition" ${index >= editions.length - 1 ? "disabled" : ""}>←</button>${visible.map((edition) => `<a href="#briefing/${edition.date}" aria-label="Read ${dateLabel(edition.date)}" ${edition.date === selected ? 'aria-current="date"' : ""}>${edition.date.slice(5).replace("-", "/")}</a>`).join("")}<button type="button" data-timeline-date="${editions[index - 1]?.date || ""}" aria-label="Next edition" ${index === 0 ? "disabled" : ""}>→</button>`
+      : '<a href="#archive">Timeline unavailable</a>';
+    host
+      .querySelectorAll<HTMLButtonElement>("[data-timeline-date]")
+      .forEach((button) =>
+        button.addEventListener("click", () => {
+          if (button.dataset.timelineDate)
+            location.hash = `briefing/${button.dataset.timelineDate}`;
+        }),
+      );
   }
   function renderArchive() {
     const q = input("archive-search").value.toLowerCase().trim(),
@@ -230,13 +278,16 @@ export function bootRadar() {
           );
       }
       renderArchive();
+      renderTimeline();
     } catch (e) {
       error($("archive-list"), e, loadArchive);
+      renderTimeline();
     }
   }
   let briefKey = "";
   function route(force = false) {
     if (location.hash === "#main") return;
+    renderTimeline();
     const [part, date] = location.hash.slice(1).split("/"),
       view = ["evidence", "archive"].includes(part) ? part : "briefing";
     document

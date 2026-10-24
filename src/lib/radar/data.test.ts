@@ -8,7 +8,7 @@ import {
   safeURL,
   validDate,
 } from "./data";
-import { digestView } from "./digest";
+import { digestView, readingNote } from "./digest";
 const date = "2026-10-24";
 describe("Radar publication data", () => {
   it("does not invent a publication time from a date or show negative ages", () => {
@@ -88,5 +88,50 @@ describe("Radar publication data", () => {
     expect(d.actions).toContain("Read");
     expect(d.root.querySelector("blockquote")).not.toBeNull();
     dom.window.close();
+  });
+});
+
+describe("short published reading notes", () => {
+  it("prioritizes a stated lack of change over popularity", () => {
+    expect(
+      readingNote(
+        "Core framework repo (168k stars observed). No new release in window; tracked for ecosystem updates. · 4/5",
+      ),
+    ).toBe("No new release in window; tracked for ecosystem updates.");
+  });
+  it("keeps concrete uses, decimals, and qualifications without inventing a change", () => {
+    expect(
+      readingNote(
+        "SOTA low-bit quantization (INT8/FP8/INT4) and sparsity across PyTorch, TensorFlow, and ONNX Runtime. · 4/5",
+      ),
+    ).toBe("Low-bit quantization and sparsity across PyTorch.");
+    expect(
+      readingNote(
+        "A decision-focused benchmark with 1K–10K English samples, tagged for text-classification and official eval YAML. Useful for teams building agents.",
+      ),
+    ).toBe("A decision-focused benchmark with 1K–10K English samples.");
+    expect(
+      readingNote("Claims 85.2% F1 on a benchmark. For agent developers."),
+    ).toBe("Claims 85.2% F1 on a benchmark.");
+    expect(readingNote("Duplicate entry; same as above.")).toBe("");
+    expect(
+      readingNote("Works on text (not images). Uses an open license."),
+    ).toBe("Works on text (not images).");
+    expect(
+      readingNote(
+        "Improves measured accuracy on the original benchmark, but fails on every external benchmark.",
+      ),
+    ).toBe("");
+  });
+  it("matches notes by exact source URL and keeps the first valid duplicate", () => {
+    const doc = new JSDOM("").window.document;
+    const digest = digestView(
+      "# AI Radar — 2026-10-24\n\nSummary.\n\n## Main list\n\n**[Item](https://example.com/item)** — Tests structured choices. · 4/5\n\n**[Duplicate](https://example.com/item)** — Duplicate entry; same as above.",
+      doc,
+    );
+    expect(digest.notes.get("https://example.com/item")).toBe(
+      "Tests structured choices.",
+    );
+    expect(digest.notes.has("https://example.com/item-other")).toBe(false);
   });
 });

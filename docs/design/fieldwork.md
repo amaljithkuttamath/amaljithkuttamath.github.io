@@ -68,3 +68,6 @@ own coordinate space to retain readable category labels.
 
 
 Radar's first view now names the three highest-evidence observations beside the field, including source type, score, and an existing source description when available. Rank uses the same score/date/title ordering as Evidence; the list action includes all ties at the displayed cutoff. Clicking a title or mark replaces this shortlist with details in the same bounded sidebar, with a keyboard-accessible return. Dot opacity reflects evidence score. Desktop and mobile panel dimensions remain unchanged.
+
+
+Radar highlights now use short notes extracted from the latest published briefing by exact source URL. Explicit change/no-change statements take priority, otherwise a concise factual clause supplies context. No model call or hand-authored release claim is added; absent or stale context is stated. Format examples can be omitted, but qualifications are retained, and oversized qualified statements are not clipped into a misleading claim. The current observation field remains current when reading historical briefings. A compact timeline next to the view controls navigates actual archived editions, with previous/next controls and a moving seven-edition window.

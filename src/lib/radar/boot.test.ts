@@ -6,16 +6,21 @@ afterEach(() => {
   dom?.window.close();
   vi.unstubAllGlobals();
 });
-function openArchive(receipt: unknown) {
+function openArchive(
+  receipt: unknown,
+  archive = "",
+  state = "{}",
+  failNotes = false,
+) {
   dom = new JSDOM(
     `<main>
     <span id="radar-status">Reading publication…</span><time id="radar-date"></time>
-    <div id="radar-brief"></div><span id="evidence-count"></span>
+    <span id="signal-total"></span><div id="signal-workspace"></div><div id="radar-brief"></div><span id="evidence-count"></span>
     <div id="source-filters"></div><input id="evidence-search" />
     <select id="evidence-sort"><option>score</option></select><select id="minimum-score"><option value="0">All</option></select>
     <div id="evidence-result"></div><div id="evidence-list"></div><button id="evidence-more"></button>
     <input id="archive-search" /><div id="archive-result"></div><div id="archive-list"></div>
-    <button id="radar-refresh"></button></main>`,
+    <nav id="radar-timeline"></nav><button id="radar-refresh"></button></main>`,
     { url: "https://example.org/radar#archive" },
   );
   vi.stubGlobal("document", dom.window.document);
@@ -27,15 +32,20 @@ function openArchive(receipt: unknown) {
         url.endsWith("publication.json")
           ? JSON.stringify(receipt)
           : url.endsWith("state.json")
-            ? "{}"
-            : "",
+            ? state
+            : url.endsWith("README.md")
+              ? archive
+              : /^.*reports\/\d{4}-\d{2}-\d{2}-digest.md$/.test(url)
+                ? `# AI Radar — ${url.match(/(\d{4}-\d{2}-\d{2})-digest/)![1]}\n\nPublished summary.`
+                : "",
+        { status: failNotes && url.endsWith("latest.md") ? 503 : 200 },
       ),
   );
   vi.stubGlobal("fetch", fetcher);
   bootRadar();
   return fetcher;
 }
-it("shows receipt metadata when opening Archive without fetching the briefing", async () => {
+it("shows receipt metadata while separately loading latest notes for the current feed", async () => {
   const fetcher = openArchive({
     report: "reports/2026-10-24-digest.md",
     published_at: "2026-10-24T05:23:15Z",
@@ -49,7 +59,7 @@ it("shows receipt metadata when opening Archive without fetching the briefing", 
     dom.window.document.getElementById("radar-status")?.textContent,
   ).toMatch(/^Published/);
   expect(fetcher.mock.calls.some(([url]) => url.endsWith("latest.md"))).toBe(
-    false,
+    true,
   );
 });
 it("settles the metadata loading state when the receipt is malformed", async () => {
@@ -58,5 +68,64 @@ it("settles the metadata loading state when the receipt is malformed", async () 
     expect(
       dom.window.document.getElementById("radar-status")?.textContent,
     ).toBe("Publication time unavailable"),
+  );
+});
+
+it("exposes real edition dates and navigates the timeline across missing days", async () => {
+  const fetcher = openArchive(
+    { report: "reports/2026-10-24-digest.md" },
+    "| [2026-10-24](2026-10-24-digest.md) | Latest |\n| [2026-10-22](2026-10-22-digest.md) | Earlier |\n| [2026-10-21](2026-10-21-digest.md) | First |",
+  );
+  const doc = dom.window.document;
+  await vi.waitFor(() =>
+    expect(doc.querySelectorAll("#radar-timeline a")).toHaveLength(3),
+  );
+  expect(doc.querySelector("#radar-timeline [aria-current]")!.textContent).toBe(
+    "10/24",
+  );
+  expect(
+    (doc.querySelector('[aria-label="Next edition"]') as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  (
+    doc.querySelector('[aria-label="Previous edition"]') as HTMLButtonElement
+  ).click();
+  await vi.waitFor(() =>
+    expect(dom.window.location.hash).toBe("#briefing/2026-10-22"),
+  );
+  await vi.waitFor(() =>
+    expect(doc.getElementById("radar-date")!.textContent).toBe(
+      "October 22, 2026",
+    ),
+  );
+  expect(
+    fetcher.mock.calls.some(([url]) => url.endsWith("2026-10-22-digest.md")),
+  ).toBe(true);
+  expect(doc.querySelector("#radar-timeline [aria-current]")!.textContent).toBe(
+    "10/22",
+  );
+  expect(doc.querySelector('[href="#briefing/2026-10-23"]')).toBeNull();
+});
+
+it("keeps observations usable when published context cannot be fetched", async () => {
+  openArchive(
+    {},
+    "",
+    JSON.stringify({
+      "ghrepo:a": { title: "A", url: "https://github.com/a", score: 4 },
+    }),
+    true,
+  );
+  const doc = dom.window.document;
+  await vi.waitFor(() =>
+    expect(doc.getElementById("evidence-result")!.textContent).toBe(
+      "1 matching items / 1 observed",
+    ),
+  );
+  expect(doc.getElementById("signal-highlights")!.textContent).toContain(
+    "No change or use-case note in the latest briefing.",
+  );
+  expect(doc.querySelector("#evidence-list a")!.getAttribute("href")).toBe(
+    "https://github.com/a",
   );
 });
