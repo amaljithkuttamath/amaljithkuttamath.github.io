@@ -7,19 +7,9 @@ the `src/lib/chitti/` modules, the source-adapter interface, the layering rules,
 and how to add a new data source. Optional Jev routing and review use a hosted
 relay; planning, computation, and the workspace remain in the browser.
 
-Phase A was a **behavior-identical** refactor: the former monoliths `tools.ts`
-(~1840 lines) and `agent.ts` (~2535 lines) were split by responsibility into
-focused modules. `tools.ts` and `agent.ts` are now thin **re-export facades** —
-every prior `import { … } from './tools'` / `'./agent'` still resolves, and the
-full test suite passes unmodified.
-
-Phase B was the same kind of refactor for the **UI monolith**: the single
-~3740-line client `<script>` in `src/pages/apps/chitti.astro` was split into
-`src/lib/chitti/ui/` modules behind a thin bootstrap. The `.astro` file now keeps
-only its markup, CSS, the PWA-registration inline script, and one
-`<script>import '../../lib/chitti/ui/boot';</script>`. Everything moved verbatim —
-only import/export plumbing changed — so the page renders pixel-equivalently and
-the 472 tests pass unmodified. See the **UI layer** section below.
+The page mounts one React workspace. The browser engine emits AG-UI events;
+A2UI v0.9 surfaces render only registered analysis and clarification components.
+There is no required server or arbitrary generated UI code.
 
 ## Module map
 
@@ -51,7 +41,7 @@ the 472 tests pass unmodified. See the **UI layer** section below.
 | `planner.ts` | The gated planner heuristic (`needsPlan` + helpers, `countCountryMentions`), `parsePlanBrief`, `matchStepToEvent`, `PlanStep`/`InsightBrief`. |
 | `verifier.ts` | `verify` (the second-LLM check) + `parseVerifierVerdict` + verdict types. |
 | `spec.ts` | `normalizeSpec` — guard a model chart spec into a valid `ChartSpec`. |
-| `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`ui/actions.ts`). |
+| `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`Workspace.tsx`). |
 | `abort.ts` | `AbortedError` — the user-cancel sentinel (loop + refresh pipeline). |
 | `dashboards-agent.ts` | Agent-side dashboard glue: `resolveTileRef`, the session-less refresh pipeline (`refreshDashboard`/`refreshTile`/`refetchCitation`), `buildCitation`, `indicatorName`, `defaultDashboardTitle`. |
 | `session.ts` | **The session core**: `createSession` + its per-turn closures (`ask`/`agentPass`/`dispatch`/`routeFetch`/`runSubAgent`/`makeLlm`/`runPlan`/`runVerify`), session state, session types (`ChittiSession`/`SessionOptions`/`AgentCallbacks`/`AgentOutput`), `runAgent`, `buildRejectionSteer`. |
@@ -61,64 +51,29 @@ Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.t
 `chart-format.ts`, `share.ts`, `codec.ts`, `dashboard.ts`, `dashboard-share.ts`,
 `sw-cache.ts`, `a11y.ts`.
 
-### UI layer (`ui/`)
-
-The browser client. Every module is loaded (transitively) by the single
-`<script>` in `chitti.astro`, which does nothing but `import './boot'`. These
-run in the browser only; the lib layers above are shared with the test suite.
+### Workspace and protocol layers
 
 | Module | Responsibility |
 | --- | --- |
-| `ui/dom.ts` | Pure DOM/string helpers: `$`/`q`, `esc`/`escapeHtml`/`inlineMd`/`mdToHtml`, `cssVar`, `prefersReducedMotion`, the `format*`/`fmt*` formatters, `fileExt`. No state. |
-| `ui/chart-option.ts` | `buildOption` — the pure `ChartSpec → ECharts option` builder (theme via `cssVar`, formatting via `chart-format`). |
-| `ui/state.ts` | **The one shared-state module**: all DOM element handles, the per-turn `TurnBlock` interface, the live-chart registries (`allTurns`/`liveChartTurns`/`liveDashCharts`), the `dashStore` localStorage handle, `INDICATOR_MAP`, and the run-lifecycle scalars as a shared `run` object (`session`/`running`/`runController`). |
-| `ui/trace.ts` | `renderTrace` + the plan card, verify stamp, nested-receipt cards, panel summary, and inline `write_file` rows (`renderFiles`). |
-| `ui/charts.ts` | ECharts lifecycle: `loadECharts` (CDN import cache), `renderChart`, the chart↔table linking glue, and the theme/resize observers (registered on import). |
-| `ui/evidence.ts` | The data table (+ chart↔row hover), citations ledger, confidence-tinted finding, verification cue, running token/cost total. |
-| `ui/actions.ts` | Answer-share permalink build + clipboard (`shareTurn`/`buildShareUrl`/`writeClipboard`/`copyToClipboard`), shared by the turn UI and the dashboards copy paths. |
-| `ui/turns.ts` | `createTurnBlock` (clones the turn template, wires CSV/share/pin), `setStatus`, `renderQuestion`. |
-| `ui/config.ts` | Config-sheet logic: provider/model pickers, key field, source picker, RLM toggle, sheet open/close + focus trap. Owns `sourcesLocked`/`modelPickAll`/`RLM_HINT_DEFAULT`/`vv`. Its event listeners stay in `boot.ts`. |
-| `ui/dashboards-view.ts` | Pin picker, dashboards grid + detail view, tile cards, refresh log, share/export/import, read-only shared-dashboard render. Owns its private state (`currentDashId`/`sharedDashState`/`pinContext`/…); exposes `syncDashboardsAfterTurn`/`resetSharedDashState` so `boot` never reaches into it. |
-| `ui/restore.ts` | Restore-on-load: `#share=` answer and `#dash=` dashboard fragments + their invalid-link error states, driving the app's own render path. |
-| `ui/composer.ts` | The run flow: `handleAskSubmit` (turn creation → `session.ask` streaming → stop control → terminal-state rendering) and the "+ new question" two-step reset. Owns the `newQuestion*` state. |
-| `ui/debug-seam.ts` | `installDebugSeam()` — the `?chittidebug` `__chittiDebug` test seam (render/dashboard/stop hooks). Render helpers only; screenshot harnesses depend on it. |
-| `ui/boot.ts` | **The bootstrap**: imports the modules, registers every top-level DOM event listener (config sheet, provider/model, sources, dash nav, composer, new-question), runs the init sequence (`maybeRestoreFromFragment`, `updateDashNavCount`, `installDebugSeam`), in the same order the monolith did. No render/agent logic of its own. |
+| `workspace/agent.ts` | `AbstractAgent` adapter: runs, state snapshots, text, A2UI custom events, cancellation, and input replies. Provider credentials remain private configuration. |
+| `workspace/model.ts` | Whitelisted result surfaces, clarification payloads, analysis state and safe source URLs. |
+| `components/chitti/Workspace.tsx` | React conversation beside a persistent result; history selection, configuration, sharing and exports. |
+| `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog. Replies dispatch A2UI actions into the waiting agent tool. |
+| `components/chitti/Result.tsx` | Finding, chart/data/source tabs and honest verification status. |
+| `components/chitti/Chart.tsx` | Lazy bundled ECharts, theme/resize lifecycle and cleanup. No CDN runtime. |
+| `components/chitti/Settings.tsx` | Provider, model, source scope and optional per-tab key storage. |
+| `components/chitti/Dashboards.tsx` | Existing local dashboard schema, pinning, imports, exports, shared snapshots and refresh. |
+| `ui/dom.ts`, `ui/chart-option.ts` | Retained pure formatting/chart helpers. The old DOM bootstrap and mutable UI globals are retired. |
 
-## UI layering (bottom → top), and no cycles
+`/apps/chitti/catalog.json` publishes the renderer's actual catalog. AG-UI is
+currently an in-process adapter, not an HTTP agent endpoint. A2UI result surfaces
+carry sanitized JSON strings; the catalog never accepts HTML or executable code.
+`request_input` pauses the current in-memory run, accepts a matching request ID,
+and rejects on Stop. It is not a durable checkpoint across page reloads.
 
-```
-state.ts (els + TurnBlock + run + registries)   dom.ts   chart-option.ts
-  trace · actions · charts · config · evidence
-    turns · dashboards-view
-      restore · composer
-        debug-seam
-          boot.ts   (wiring + init only)
-```
-
-Rules that keep the UI layer honest:
-
-- **State lives in exactly one module.** `state.ts` owns every piece of
-  cross-module mutable/shared state. Reassigned scalars are properties of the
-  exported `run` object (an ESM `let` binding can't be reassigned by an importer,
-  so the object gives every module a live read/write handle without a `window`
-  global). The registries (`allTurns`, …) are exported `const` arrays mutated in
-  place. The only browser global is `window.__chittiDebug`, exactly as before.
-- **Module-private state stays private.** `config` owns `sourcesLocked` (boot
-  reads it live via the ESM binding, never writes it); `dashboards-view` owns
-  `currentDashId`/`sharedDashState` and exposes `syncDashboardsAfterTurn`/
-  `resetSharedDashState` accessors rather than letting `boot` touch them;
-  `composer` owns `newQuestion*`.
-- **Cross-module function calls form cycles** (e.g. `turns → actions`,
-  `charts ⇄ evidence` via the hover glue, `restore → {turns, charts, evidence,
-  trace, dashboards-view}`). ESM tolerates them because every reference is inside
-  a function body, evaluated only when the user acts — never at module-init time.
-- **`boot.ts` is the composition root**: it imports downward and is imported by
-  nothing. It holds the event-listener *registrations* (so their order is
-  byte-for-byte unchanged) while the handler *bodies* live in the topical modules.
-- **Astro style scoping**: JS-built DOM is outside Astro's component-style scope,
-  so the CSS in `chitti.astro` already targets it via `:global(...)` — an
-  established pattern that the split preserves (moving JS out of the `.astro`
-  script changes nothing here, since bundled scripts were never style-scoped).
+Tests cover the actual protocol processor/action round trip, follow-up routing,
+key-free source filtering, stop-before-start and stop-while-waiting, credential
+exclusion, and the real session's input-tool continuation with a stubbed model.
 
 ## The `SourceAdapter` interface (`sources/types.ts`)
 

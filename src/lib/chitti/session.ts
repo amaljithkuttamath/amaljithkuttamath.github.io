@@ -225,6 +225,7 @@ export function buildRejectionSteer(
 }
 
 export interface SessionOptions {
+  requestInput?: (question: {question: string; options: string[]}, signal?: AbortSignal) => Promise<string>;
   // Opt-in hosted typed routing/review; the main generative model is unchanged.
   jev?: JevConfig;
   // Active database ids (from tools.ts SOURCES). Empty/omitted → all sources.
@@ -254,7 +255,9 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
   const dashboardStore: DashboardStorage | null =
     opts?.dashboardStore ??
     (typeof localStorage !== 'undefined' ? (localStorage as unknown as DashboardStorage) : null);
-  const toolSchemas = schemasForSources(opts?.sources);
+  const requestInput = opts?.requestInput;
+  const toolSchemas = [...schemasForSources(opts?.sources)];
+  if (requestInput) toolSchemas.push({name:'request_input', description:'Ask the user to resolve an ambiguity before fetching or comparing data. Use a short question and 2 to 5 distinct options. The user may also type an answer.', parameters:{type:'object', properties:{question:{type:'string'},options:{type:'array',items:{type:'string'}}},required:['question','options']}});
   const messages: ChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(activeSources, rlmEnabled) },
   ];
@@ -827,6 +830,15 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       try {
         let result = '';
         switch (tc.name) {
+          case 'request_input': {
+            if (!requestInput) throw new Error('Interactive input is unavailable.');
+            const question = typeof a.question === 'string' ? a.question.trim() : '';
+            if(!Array.isArray(a.options)||a.options.length>5)throw new Error('Provide 2 to 5 short options.');
+            const options = Array.isArray(a.options) ? [...new Set(a.options.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))] : [];
+            if (!question || question.length > 500 || options.length < 2 || options.length > 5 || options.some(x => x.length > 120)) throw new Error('Provide one question (up to 500 characters) and 2 to 5 short options.');
+            result = JSON.stringify({answer:await requestInput({question,options},signal)});
+            break;
+          }
           case 'find_series': {
             let { hits, receipt } = await findSeriesWithReceipt(
               String(a.query ?? ''),

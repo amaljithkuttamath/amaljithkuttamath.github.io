@@ -10,6 +10,7 @@
 // is delivered. This is the one place the OKF shape is defined, so the format
 // can never drift between what's tested and what's copied.
 import type { ChartSpec, Citation } from './tools';
+import type { ShareVerification } from './share';
 import type { VerificationVerdict } from './verifier';
 
 export interface OkfFindingInput {
@@ -17,7 +18,7 @@ export interface OkfFindingInput {
   finding: string;
   spec: ChartSpec | null;
   citations: Citation[];
-  verification: VerificationVerdict | null;
+  verification: ShareVerification | VerificationVerdict | null;
   // ISO timestamp for the front-matter `created` field. Passed in (never
   // Date.now() here) so the output is deterministic and unit-testable.
   createdAt: string;
@@ -52,7 +53,7 @@ function fmtYearRange(yr: Citation['yearRange']): string {
 
 // The verification line, mirroring the app's own honest states. Never claims a
 // pass the verdict didn't assert.
-function verificationLine(v: VerificationVerdict): string {
+function verificationLine(v: ShareVerification | VerificationVerdict): string {
   if (v.engine === 'jev') return v.status === 'verified' ? 'Jev checks passed (model judgment; uncalibrated thresholds)' : 'Jev review: ' + v.status;
   const label =
     v.status === 'verified'

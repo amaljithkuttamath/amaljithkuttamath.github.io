@@ -85,3 +85,10 @@ describe('classifyRequest — cacheable classes', () => {
     expect(classify('https://example.com/some.js')).toBe('bypass');
   });
 });
+
+
+it('never caches mutable development modules', () => {
+  for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+    expect(classifyRequest({url:`http://${host}:4322/node_modules/.vite/deps/react.js?v=test`,selfOrigin:`http://${host}:4322`,method:'GET'})).toBe('bypass');
+  }
+});
