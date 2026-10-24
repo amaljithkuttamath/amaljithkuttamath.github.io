@@ -7,7 +7,9 @@ import {
   DataZoomComponent,
   ToolboxComponent,
   AriaComponent,
+  MarkPointComponent,
 } from "echarts/components";
+import { LabelLayout } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 use([
   LineChart,
@@ -19,6 +21,8 @@ use([
   DataZoomComponent,
   ToolboxComponent,
   AriaComponent,
+  MarkPointComponent,
   CanvasRenderer,
+  LabelLayout,
 ]);
 export { init };

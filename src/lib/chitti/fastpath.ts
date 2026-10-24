@@ -447,9 +447,7 @@ export function buildFastSpec(plan: FastPathPlan, rows: DataRow[], label: string
 }
 
 const num = (n: number): string =>
-  Math.abs(n) >= 1000
-    ? Math.round(n).toLocaleString('en-US')
-    : Number(n.toFixed(Math.abs(n) < 10 ? 1 : 0)).toLocaleString('en-US');
+  n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 // A factual sentence derived ENTIRELY from the fetched rows — first and last
 // values, the change between them. It states what the data says and stops.

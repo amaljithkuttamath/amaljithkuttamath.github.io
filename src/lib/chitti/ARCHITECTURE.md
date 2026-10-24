@@ -87,6 +87,15 @@ accessible selector. Questions sent from a result seed a new engine session with
 that selected chart, rows and citation ledger; the engine reads `workspace.csv`,
 `workspace-view.json`, and `citations.json`. A fresh pull replaces overlapping
 recorded rows. The composer can detach from the current view for a fresh query.
+Line charts fit one shared, explicitly labelled y range by default, with a zero
+baseline toggle; bars retain their zero baseline. `chart-insights.ts` derives
+up to three largest observed steps (one per series) from plotted time points.
+Gaps retain their actual dates; duplicate time coordinates and missing-value
+transitions are excluded. Clickable callouts and plot markers send the selected
+series, values and interval through the existing A2UI action, with the current
+workspace's full evidence. Percentage deltas are percentage points, not relative
+percent changes. No causal explanation is inferred locally.
+
 There is still no durable background agent or remote workspace service.
 
 Tests cover the actual protocol processor/action round trip, follow-up routing,
