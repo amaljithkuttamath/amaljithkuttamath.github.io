@@ -1,6 +1,6 @@
 <section class="signal-desk" aria-labelledby="signal-title">
   <div class="signal-topline">
-    <h2 id="signal-title">Research evolution</h2>
+    <h2 id="signal-title">Research threads</h2>
     <div class="signal-view-switch" role="group" aria-label="Research view">
       <button type="button" data-signal-view="evolution" aria-pressed="true">
         Evolution
@@ -25,6 +25,105 @@
   </div>
 </section>
 <style is:global>
+  .thread-map {
+    position: relative;
+    min-width: 0;
+  }
+  .thread-name {
+    position: absolute;
+    top: calc(var(--thread-row) * 23.48% + 7%);
+    left: 0;
+    width: 31%;
+    padding: 0 3px 0 0;
+    border: 0;
+    background: none;
+    color: var(--desk-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+  .thread-name strong {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    font: 500 0.78rem/1.15 var(--font-sans);
+    white-space: normal;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  .thread-name span {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font: 0.58rem/1.4 var(--font-sans);
+    margin-top: 3px;
+  }
+  .thread-name[aria-pressed="true"] {
+    color: var(--bg);
+  }
+  .thread-name:hover strong {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .research-thread {
+    opacity: 0.65;
+  }
+  .research-thread[data-active="true"] {
+    opacity: 1;
+  }
+  .thread-connection {
+    stroke: var(--bg);
+    stroke-width: 1;
+    opacity: 0.45;
+  }
+  .thread-gap {
+    stroke-dasharray: 3 4;
+  }
+  .thread-event {
+    fill: var(--bg);
+  }
+  .thread-event text {
+    font: 10px var(--font-mono);
+    fill: var(--desk-muted);
+  }
+  .thread-event .thread-tracked {
+    fill: var(--fg);
+    stroke: var(--bg);
+    stroke-width: 1.4;
+  }
+  .thread-purpose {
+    color: var(--desk-muted);
+    font: 0.7rem/1.4 var(--font-sans);
+    margin: 0 0 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .thread-milestone[data-current] {
+    border-left: 2px solid var(--bg);
+    padding-left: 6px;
+  }
+  @media (max-width: 700px) {
+    .thread-name strong {
+      font-size: 0.68rem;
+      line-height: 1.1;
+    }
+    .thread-name span {
+      font-size: 0.53rem;
+      line-height: 1.2;
+      margin-top: 2px;
+    }
+    .thread-event text {
+      font-size: 15px;
+    }
+    .thread-purpose {
+      font-size: 0.64rem;
+      margin-bottom: 6px;
+    }
+  }
+
   .signal-view-switch {
     display: flex;
     gap: 12px;
@@ -62,32 +161,11 @@
     height: 198px;
     overflow: visible;
   }
-  .evolution-lane-label {
-    font: 12px var(--font-sans);
-    fill: var(--bg);
-  }
-  .evolution-baseline {
-    stroke: var(--desk-line);
-    stroke-width: 1;
-  }
-  .evolution-path {
-    stroke: var(--bg);
-    stroke-width: 1.5;
-    opacity: 0.5;
-  }
   .evolution-cursor {
     stroke: var(--bg);
     stroke-width: 1;
     opacity: 0.3;
     stroke-dasharray: 2 3;
-  }
-  .evolution-dot {
-    fill: var(--bg);
-  }
-  .evolution-value,
-  .evolution-unknown {
-    font: 11px var(--font-mono);
-    fill: var(--desk-muted);
   }
   .evolution-dates {
     position: relative;
@@ -114,31 +192,6 @@
     border-left: 1px solid var(--desk-line);
     display: flex;
     flex-direction: column;
-  }
-  .evolution-summary {
-    flex: 1;
-    min-height: 0;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--desk-line);
-  }
-  .evolution-summary:last-child {
-    border-bottom: 0;
-  }
-  .evolution-category {
-    display: flex;
-    width: 100%;
-    justify-content: space-between;
-    gap: 8px;
-    border: 0;
-    padding: 0 0 5px;
-    background: none;
-    color: var(--bg);
-    font: 0.7rem var(--font-sans);
-    cursor: pointer;
-  }
-  .evolution-category span {
-    font: 0.6rem var(--font-mono);
-    color: var(--desk-muted);
   }
   .evolution-item {
     display: block;
@@ -239,25 +292,11 @@
     .evolution-chart svg {
       height: 162px;
     }
-    .evolution-lane-label {
-      font-size: 18px;
-    }
-    .evolution-value,
-    .evolution-unknown {
-      font-size: 17px;
-    }
     .evolution-details {
       height: 164px;
       padding: 0;
       border-left: 0;
       border-top: 1px solid var(--desk-line);
-    }
-    .evolution-summary {
-      padding: 4px 0;
-    }
-    .evolution-category {
-      padding-bottom: 3px;
-      font-size: 0.65rem;
     }
     .evolution-item strong {
       font-size: 0.75rem;

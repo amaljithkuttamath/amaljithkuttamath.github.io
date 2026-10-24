@@ -1,7 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { digestView } from "./digest";
-import { editionEvolution, renderEvolution, sourceIdentity } from "./evolution";
+import {
+  editionEvolution,
+  renderEvolution,
+  sourceIdentity,
+  researchThreads,
+} from "./evolution";
 let dom: JSDOM;
 afterEach(() => {
   dom?.window.close();
@@ -36,7 +41,8 @@ it("extracts explicit reported moves and preserves score drops with positive tra
   expect(data.buckets.new).toHaveLength(1);
   expect(data.buckets.gaining[0].detail).toBe("traction +0.8%");
   expect(data.buckets.fading[0].detail).toBe("score −1, traction +0.3%");
-  expect(JSON.stringify(data)).not.toContain("Unrelated");
+  expect(JSON.stringify(data.buckets)).not.toContain("Unrelated");
+  expect(data.mentions?.[0].title).toBe("Unrelated");
 });
 it("distinguishes explicit zero moves from missing change data", () => {
   dom = new JSDOM("");
@@ -86,13 +92,13 @@ it("traces a named item across dates without turning missing observations into d
   ]);
   const dates = ["2026-10-23", "2026-10-22", "2026-10-21"];
   renderEvolution(host, dates, current.date, editions, onDate);
-  expect(host.querySelectorAll(".evolution-summary")).toHaveLength(3);
+  expect(host.querySelectorAll(".thread-name")).toHaveLength(4);
   (
     host.querySelector('[data-trace="arxiv:2610.18773"]') as HTMLButtonElement
   ).click();
   expect(host.textContent).toContain("Gaining traction +0.8%");
   expect(host.textContent).toContain("Fading traction −0.9%");
-  expect(host.textContent).toContain("No matching change recorded");
+  expect(host.querySelectorAll(".thread-milestone")).toHaveLength(2);
   expect(host.querySelector(".evolution-path")).toBeNull();
   expect(
     host.querySelector(".evolution-detail-head a")!.getAttribute("href"),
@@ -122,6 +128,48 @@ it("traces a named item across dates without turning missing observations into d
   );
   expect(host.querySelector(".evolution-details h3")!.textContent).toBe("Jeva");
   expect(host.querySelector(".evolution-path")).toBeNull();
-  (host.querySelector("[data-reset]") as HTMLButtonElement).click();
-  expect(host.querySelectorAll(".evolution-summary")).toHaveLength(3);
+  (host.querySelector("[data-all-threads]") as HTMLButtonElement).click();
+  expect(host.textContent).toContain("No research threads recorded.");
+});
+
+it("connects source identity across dates, keeping cumulative tracking separate from daily moves", () => {
+  dom = new JSDOM("");
+  const first = read(
+    "## What changed\n### New today\n- [Paper: A shared topic](https://arxiv.org/abs/1234.56789v1) — method released",
+    "2026-10-21",
+  );
+  const second = read(
+    "## What changed\n### Cooled\n- [Paper](http://arxiv.org/abs/1234.56789) — traction −0.9%\n## Story arcs\n- [Paper](https://arxiv.org/abs/1234.56789) — traction +50% since first seen.\n- [Different: A shared topic](https://example.org/different) — tracked independently.",
+    "2026-10-22",
+  );
+  const third = read(
+    "## Story arcs\n- [Paper](https://arxiv.org/abs/1234.56789) — seen 3 runs, traction +60% since first seen.",
+    "2026-10-24",
+  );
+  const dates = [first.date, second.date, "2026-10-23", third.date];
+  const editions = new Map([
+    [first.date, first],
+    [second.date, second],
+    [third.date, third],
+  ]);
+  const threads = researchThreads(dates, editions);
+  expect(threads).toHaveLength(2);
+  expect(threads[0].events.map((event) => event.kind)).toEqual([
+    "new",
+    "fading",
+    "tracked",
+  ]);
+  expect(threads[0].events[1].detail).toBe("traction −0.9%");
+  expect(threads[0].events[2].detail).toContain("since first seen");
+  const host = dom.window.document.createElement("div");
+  vi.stubGlobal("document", dom.window.document);
+  renderEvolution(host, dates.toReversed(), third.date, editions, vi.fn());
+  expect(host.querySelectorAll(".thread-connection")).toHaveLength(2);
+  expect(host.querySelectorAll(".thread-gap")).toHaveLength(1);
+  expect(
+    [...host.querySelectorAll(".thread-connection")].every(
+      (line) => line.getAttribute("data-source") === "arxiv:1234.56789",
+    ),
+  ).toBe(true);
+  expect(host.querySelectorAll(".evolution-path")).toHaveLength(0);
 });
