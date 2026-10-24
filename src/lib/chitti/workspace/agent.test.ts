@@ -24,15 +24,13 @@ function question(agent: ChittiAgent, text = "Explain this measure") {
 describe("AG-UI browser adapter", () => {
   it("runs a key-free lookup, respects the source selection and keeps credentials out of events", async () => {
     const demo = DEMOS[0].state;
-    const runFastPath = vi
-      .fn()
-      .mockResolvedValue({
-        spec: demo.spec,
-        rows: demo.rows,
-        citations: demo.citations,
-        summary: demo.answer,
-        trace: [],
-      });
+    const runFastPath = vi.fn().mockResolvedValue({
+      spec: demo.spec,
+      rows: demo.rows,
+      citations: demo.citations,
+      summary: demo.answer,
+      trace: [],
+    });
     const createSession = vi.fn();
     const agent = new ChittiAgent(config, { runFastPath, createSession });
     const events: unknown[] = [];
@@ -154,4 +152,69 @@ describe("AG-UI browser adapter", () => {
     agent.reset();
     expect(() => agent.configure(config)).not.toThrow();
   });
+});
+it("publishes a draft before completion and sends the chosen workspace to the engine", async () => {
+  const demo = DEMOS[0].state;
+  let finish!: (value: any) => void;
+  const createSession = vi.fn(
+    (_cfg: import("../providers").ProviderConfig, _opts?: SessionOptions) =>
+      ({
+        ask: vi.fn(
+          async (_q: string, cb: import("../session").AgentCallbacks) => {
+            cb.onPreview!({
+              chartSpec: demo.spec,
+              rows: demo.rows,
+              citations: demo.citations,
+            });
+            return new Promise((resolve) => {
+              finish = resolve;
+            });
+          },
+        ),
+      }) as any,
+  );
+  const agent = new ChittiAgent(config, {
+    createSession,
+    runFastPath: vi.fn(),
+  });
+  const surfaces: unknown[] = [];
+  agent.subscribe({
+    onCustomEvent: ({ event }) => {
+      if (event.name === "a2ui") surfaces.push(event.value);
+    },
+  });
+  agent.useWorkspace(demo);
+  question(agent, "Explain this view");
+  const pending = agent.runAgent({ runId: "draft" });
+  await vi.waitFor(() => expect(surfaces).toHaveLength(1));
+  expect(agent.state.analysis.phase).toBe("running");
+  expect(agent.state.analysis.result.spec).toEqual(demo.spec);
+  expect(agent.state.analysis.result.verification).toBeNull();
+  expect(createSession.mock.calls[0][1]!.workspace).toEqual(demo);
+  finish({
+    ...output,
+    chartSpec: demo.spec,
+    rows: demo.rows,
+    citations: demo.citations,
+  });
+  await pending;
+  expect(agent.state.analysis.phase).toBe("done");
+  expect(surfaces).toHaveLength(2);
+});
+it("routes view edits through the agent without spending a key or fetching data", async () => {
+  const createSession = vi.fn(),
+    runFastPath = vi.fn();
+  const agent = new ChittiAgent(
+    { ...config, apiKey: "" },
+    { createSession, runFastPath },
+  );
+  const demo = DEMOS[0].state;
+  const name = demo.spec!.series[0].name;
+  agent.useWorkspace(demo, { kind: "series", name });
+  question(agent, `Focus on ${name}`);
+  await agent.runAgent();
+  expect(agent.state.analysis.origin).toBe("view");
+  expect(agent.state.analysis.result.spec.series).toHaveLength(1);
+  expect(createSession).not.toHaveBeenCalled();
+  expect(runFastPath).not.toHaveBeenCalled();
 });

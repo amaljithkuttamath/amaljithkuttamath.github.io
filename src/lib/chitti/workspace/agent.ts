@@ -7,8 +7,9 @@ import {
   type ChittiSession,
   type SessionOptions,
 } from "../session";
+import { editView, type ViewEdit } from "./steering";
 import { parseFastPath, runFastPath } from "../fastpath";
-import { cleanShareState } from "../share";
+import { cleanShareState, type ShareStateV1 } from "../share";
 import {
   resultSurface,
   questionSurface,
@@ -20,6 +21,8 @@ import {
 /** One adapter translates the existing source/agent engine to standard AG-UI events.
  * Credentials stay in private configuration, never in state, messages, or surfaces. */
 export class ChittiAgent extends AbstractAgent {
+  private workspace: ShareStateV1 | null = null;
+  private viewEdit: ViewEdit | null = null;
   private session: ChittiSession | null = null;
   private settings: Settings;
   private controller: AbortController | null = null;
@@ -46,7 +49,16 @@ export class ChittiAgent extends AbstractAgent {
       throw new Error("Start a new analysis to change model or sources.");
     this.settings = settings;
   }
+  useWorkspace(result: ShareStateV1 | null, edit?: ViewEdit) {
+    if (this.isRunning)
+      throw new Error("Wait for the current run or stop it first.");
+    this.workspace = result ? cleanShareState(result) : null;
+    if (!this.workspace) this.session = null;
+    this.viewEdit = edit || null;
+  }
   reset() {
+    this.workspace = null;
+    this.viewEdit = null;
     this.stop();
     this.session = null;
     this.forceAgent = false;
@@ -75,6 +87,12 @@ export class ChittiAgent extends AbstractAgent {
       const last = [...input.messages].reverse().find((m) => m.role === "user");
       const question =
         typeof last?.content === "string" ? last.content.trim() : "";
+      const forceAgent = this.forceAgent;
+      this.forceAgent = false;
+      const workspace = this.workspace;
+      const viewEdit = this.viewEdit;
+      this.workspace = null;
+      this.viewEdit = null;
       const startedAt = Date.now();
       const cfg = { ...this.settings, sources: [...this.settings.sources] };
       const analysis: Analysis = {
@@ -164,8 +182,23 @@ export class ChittiAgent extends AbstractAgent {
           if (!question) throw new Error("Enter a data question.");
           if (!cfg.sources.length)
             throw new Error("Select at least one data source in Settings.");
+          if (workspace && viewEdit) {
+            const result = editView(workspace, viewEdit);
+            if (!result)
+              throw new Error("This view cannot be changed that way.");
+            patch({
+              result,
+              origin: "view",
+              phase: "done",
+              status: "View updated; no model or new fetch",
+            });
+            surface(resultSurface(result));
+            return;
+          }
           const plan =
-            !this.session && !this.forceAgent ? parseFastPath(question) : null;
+            !workspace && !this.session && !forceAgent
+              ? parseFastPath(question)
+              : null;
           if (plan) {
             const timeout = AbortSignal.timeout(20_000);
             const signal = AbortSignal.any([controller.signal, timeout]);
@@ -228,7 +261,9 @@ export class ChittiAgent extends AbstractAgent {
             status: "Planning analysis",
             model: cfg.model,
           });
+          if (workspace) this.session = null;
           this.session ||= this.dependencies.createSession(cfg, {
+            workspace: workspace || undefined,
             sources: cfg.sources,
             rlm: cfg.rlm,
             jev: cfg.jev,
@@ -244,6 +279,23 @@ export class ChittiAgent extends AbstractAgent {
               onFiles: (files) => patch({ files: { ...files } }),
               onChart: () =>
                 patch({ status: "Chart prepared; checking evidence" }),
+              onPreview: (preview) => {
+                if (controller.signal.aborted) return;
+                const result = cleanShareState({
+                  v: 1,
+                  q: question,
+                  answer: "",
+                  spec: preview.chartSpec,
+                  rows: preview.rows,
+                  citations: preview.citations,
+                  verification: null,
+                  ts: new Date().toISOString(),
+                });
+                if (result) {
+                  patch({ result, status: "Draft chart; checking evidence" });
+                  surface(resultSurface(result));
+                }
+              },
               onStatus: (status) => patch({ status }),
               onModel: (model) => patch({ model }),
             },
@@ -253,10 +305,13 @@ export class ChittiAgent extends AbstractAgent {
             v: 1,
             q: question,
             answer: output.finding,
-            spec: output.chartSpec,
+            spec: output.chartSpec || workspace?.spec || null,
             rows: output.rows,
             citations: output.citations,
-            verification: output.aborted ? null : output.verification,
+            verification:
+              output.aborted || (!output.chartSpec && workspace?.spec)
+                ? null
+                : output.verification,
             ts: new Date().toISOString(),
           });
           analysis.result = result;

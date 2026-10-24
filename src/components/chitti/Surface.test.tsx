@@ -59,3 +59,34 @@ describe("A2UI surfaces", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
 });
+it("updates an existing surface in place without losing the data filter, and dispatches result actions", async () => {
+  const onAction = vi.fn();
+  const demo = DEMOS[0].state;
+  const { rerender } = render(
+    <Surface operations={resultSurface(demo)} onAction={onAction} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: /Data/ }));
+  fireEvent.change(screen.getByLabelText("Filter rows"), {
+    target: { value: "zz-no-country" },
+  });
+  rerender(
+    <Surface
+      operations={resultSurface({ ...demo, answer: "Updated draft" })}
+      onAction={onAction}
+    />,
+  );
+  await screen.findByText("Updated draft");
+  expect(screen.getByText("No matching rows.")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Ask about this view"), {
+    target: { value: "Compare this with 2000" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Update this view" }));
+  await vi.waitFor(() =>
+    expect(onAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "ask-view",
+        context: { value: "Compare this with 2000" },
+      }),
+    ),
+  );
+});

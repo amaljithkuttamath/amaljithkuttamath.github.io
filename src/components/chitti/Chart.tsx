@@ -2,7 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { ChartSpec } from "../../lib/chitti/tools";
 import { buildOption } from "../../lib/chitti/ui/chart-option";
 import { chartAriaLabel } from "../../lib/chitti/a11y";
-export default function Chart({ spec }: { spec: ChartSpec }) {
+export default function Chart({
+  spec,
+  onSelect,
+}: {
+  spec: ChartSpec;
+  onSelect?: (name: string) => void;
+}) {
+  const select = useRef(onSelect);
+  select.current = onSelect;
   const host = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -18,6 +26,16 @@ export default function Chart({ spec }: { spec: ChartSpec }) {
         if (disposed || !host.current) return;
         chart = init(host.current);
         chart.setOption(buildOption(spec));
+        chart.on("click", (params) => {
+          if (params.componentType !== "series") return;
+          if (spec.series.length > 1 && typeof params.seriesName === "string")
+            select.current?.(params.seriesName);
+          else if (
+            ["bar", "grouped-bar"].includes(spec.type) &&
+            typeof params.name === "string"
+          )
+            select.current?.(params.name);
+        });
         resize.observe(host.current);
         theme.observe(document.documentElement, {
           attributes: true,

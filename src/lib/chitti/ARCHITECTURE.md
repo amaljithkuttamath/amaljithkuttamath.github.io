@@ -71,6 +71,20 @@ carry sanitized JSON strings; the catalog never accepts HTML or executable code.
 `request_input` pauses the current in-memory run, accepts a matching request ID,
 and rejects on Stop. It is not a durable checkpoint across page reloads.
 
+A rendered chart now emits an evidence-bearing draft immediately through `onPreview`,
+before the final finding and verification. Repeated A2UI updates reuse the surface
+processor so the current tab and filter stay open. Drafts carry no verification.
+
+The result's focus and recent-period controls dispatch A2UI actions into AG-UI
+runs. They change the chart using recorded values, retain the full source rows
+and timestamps, and discard the old conclusion/verdict. Each revision links back
+to its exact parent view. Chart clicks have the same focus action as the keyboard
+accessible selector. Questions sent from a result seed a new engine session with
+that selected chart, rows and citation ledger; the engine reads `workspace.csv`,
+`workspace-view.json`, and `citations.json`. A fresh pull replaces overlapping
+recorded rows. The composer can detach from the current view for a fresh query.
+There is still no durable background agent or remote workspace service.
+
 Tests cover the actual protocol processor/action round trip, follow-up routing,
 key-free source filtering, stop-before-start and stop-while-waiting, credential
 exclusion, and the real session's input-tool continuation with a stubbed model.

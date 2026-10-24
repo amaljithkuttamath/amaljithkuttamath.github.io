@@ -15,7 +15,7 @@ export interface Analysis {
   question: string;
   phase: Phase;
   status: string;
-  origin: "direct" | "agent" | "example" | "shared";
+  origin: "direct" | "agent" | "example" | "shared" | "view";
   result: ShareStateV1 | null;
   trace: TraceEvent[];
   files: Record<string, string>;
