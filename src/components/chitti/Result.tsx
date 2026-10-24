@@ -1,9 +1,29 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, createContext, useContext } from "react";
 import type { ShareStateV1 } from "../../lib/chitti/share";
 import { safeLink } from "../../lib/chitti/workspace/model";
 import { mdToHtml } from "../../lib/chitti/ui/dom";
+import { recentStart } from "../../lib/chitti/workspace/steering";
 import Chart from "./Chart";
-export function Result({ result }: { result: ShareStateV1 }) {
+export const ResultInteraction = createContext(true);
+export function Result({
+  result,
+  onSteer,
+}: {
+  result: ShareStateV1;
+  onSteer?: (name: string, value: string) => void;
+}) {
+  const enabled = useContext(ResultInteraction);
+  const [steer, setSteer] = useState("");
+  const choices =
+    result.spec && result.spec.series.length > 1
+      ? result.spec.series.map((s) => s.name)
+      : result.spec && ["bar", "grouped-bar"].includes(result.spec.type)
+        ? [
+            ...new Set(
+              result.spec.series.flatMap((s) => s.data.map(([x]) => String(x))),
+            ),
+          ]
+        : [];
   const [tab, setTab] = useState("Chart");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -18,6 +38,70 @@ export function Result({ result }: { result: ShareStateV1 }) {
   );
   return (
     <div className="cw-result">
+      {onSteer && (
+        <fieldset className="cw-steering" disabled={!enabled}>
+          <legend>Work with this view</legend>
+          <div className="cw-view-controls">
+            {choices.length > 1 && (
+              <label>
+                Focus{" "}
+                <select
+                  aria-label="Focus chart"
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) onSteer("focus", e.target.value);
+                  }}
+                >
+                  <option value="">Choose a series or category</option>
+                  {choices.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {recentStart(result) !== null && (
+              <button onClick={() => onSteer("recent", "")}>
+                Last 10 years
+              </button>
+            )}
+            <button
+              onClick={() =>
+                onSteer(
+                  "ask-view",
+                  "What changed in this view? Quantify the changes and distinguish what the sources show from what they cannot explain.",
+                )
+              }
+            >
+              Explain changes
+            </button>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (steer.trim()) {
+                onSteer("ask-view", steer.trim());
+                setSteer("");
+              }
+            }}
+          >
+            <input
+              aria-label="Ask about this view"
+              value={steer}
+              onChange={(e) => setSteer(e.target.value)}
+              placeholder="Ask about this view or change it…"
+              maxLength={2000}
+            />
+            <button
+              disabled={!enabled || !steer.trim()}
+              aria-label="Update this view"
+            >
+              ↗
+            </button>
+          </form>
+        </fieldset>
+      )}
       {result.answer && (
         <div
           className="cw-finding"
@@ -86,7 +170,14 @@ export function Result({ result }: { result: ShareStateV1 }) {
       >
         {tab === "Chart" &&
           (result.spec ? (
-            <Chart spec={result.spec} />
+            <Chart
+              spec={result.spec}
+              onSelect={
+                enabled && onSteer
+                  ? (name) => onSteer("focus", name)
+                  : undefined
+              }
+            />
           ) : (
             <p className="cw-empty">No chart was produced for this answer.</p>
           ))}

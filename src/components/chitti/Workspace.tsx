@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ViewEdit } from "../../lib/chitti/workspace/steering";
 import { ChittiAgent } from "../../lib/chitti/workspace/agent";
 import { DEMOS } from "../../lib/chitti/demos";
 import {
@@ -51,6 +52,9 @@ export default function Workspace() {
     DEMOS[0] ? `example:${DEMOS[0].id}` : "",
   );
   const [question, setQuestion] = useState("");
+  const [useCurrent, setUseCurrent] = useState(true);
+  const parents = useRef<Record<string, string>>({});
+  const contexts = useRef<Record<string, ShareStateV1 | null>>({});
   const [running, setRunning] = useState(false),
     [settings, setSettings] = useState(false),
     [dashboards, setDashboards] = useState(false);
@@ -148,7 +152,14 @@ export default function Workspace() {
     },
     [agent],
   );
-  const submit = async (text = question, force = false) => {
+  const submit = async (
+    text = question,
+    force = false,
+    context: ShareStateV1 | null = useCurrent && active?.origin !== "example"
+      ? active?.result || null
+      : null,
+    edit?: ViewEdit,
+  ) => {
     if (busy.current || !text.trim()) return;
     busy.current = true;
     setRunning(true);
@@ -157,7 +168,11 @@ export default function Workspace() {
     setReceipt(false);
     const id = crypto.randomUUID();
     activeRun.current = id;
+    parents.current[id] = selected;
+    contexts.current[id] = context;
     setQuestion("");
+    setUseCurrent(true);
+    agent.useWorkspace(context, edit);
     if (force) agent.escalate();
     agent.addMessage({
       id: crypto.randomUUID(),
@@ -173,6 +188,21 @@ export default function Workspace() {
       setRunning(false);
       activeRun.current = "";
     }
+  };
+  const steerResult = (action: ActionPayload) => {
+    if (busy.current || !active?.result) return;
+    const value = action.context.value;
+    if (action.name === "focus" && typeof value === "string")
+      void submit(`Focus on ${value}`, false, active.result, {
+        kind: "series",
+        name: value,
+      });
+    if (action.name === "recent")
+      void submit("Show the last 10 years", false, active.result, {
+        kind: "recent",
+      });
+    if (action.name === "ask-view" && typeof value === "string" && value.trim())
+      void submit(value.slice(0, 2000), true, active.result);
   };
   const newAnalysis = () => {
     if (busy.current) return;
@@ -240,9 +270,8 @@ export default function Workspace() {
       <header className="cw-header">
         <div>
           <h1>
-            Chitti<span>Data workspace</span>
+            Chitti<span>Work with the data</span>
           </h1>
-          <p>Ask a question. Compare the data. Inspect the evidence.</p>
         </div>
         <div className="cw-actions">
           <button
@@ -271,10 +300,10 @@ export default function Workspace() {
           <div className="cw-messages" aria-live="polite">
             {turns.filter((t) => t.origin !== "shared").length === 0 && (
               <div className="cw-welcome">
-                <p>Compare countries, trace a trend, or test a relationship.</p>
+                <p>Ask for data, or start with the open example.</p>
                 <p>
-                  Simple lookups run directly. Open-ended analysis uses your
-                  model.
+                  Focus a series or change the period in the workspace. Ask
+                  about the view to continue with your model.
                 </p>
               </div>
             )}
@@ -306,7 +335,13 @@ export default function Workspace() {
                       </button>
                       <button
                         disabled={running}
-                        onClick={() => void submit(t.question)}
+                        onClick={() =>
+                          void submit(
+                            t.question,
+                            false,
+                            contexts.current[t.id] || null,
+                          )
+                        }
                       >
                         Retry
                       </button>
@@ -315,7 +350,13 @@ export default function Workspace() {
                   {t.phase === "error" && (
                     <button
                       disabled={running}
-                      onClick={() => void submit(t.question)}
+                      onClick={() =>
+                        void submit(
+                          t.question,
+                          false,
+                          contexts.current[t.id] || null,
+                        )
+                      }
                     >
                       Retry
                     </button>
@@ -341,6 +382,17 @@ export default function Workspace() {
                 ? "Continue this analysis"
                 : "Ask a data question"}
             </label>
+            {active?.result && active.origin !== "example" && (
+              <label className="cw-context-toggle">
+                <input
+                  type="checkbox"
+                  checked={useCurrent}
+                  disabled={running}
+                  onChange={(e) => setUseCurrent(e.target.checked)}
+                />
+                Use current view
+              </label>
+            )}
             <textarea
               id="cw-question"
               ref={composer}
@@ -353,7 +405,11 @@ export default function Workspace() {
                   void submit();
                 }
               }}
-              placeholder="Compare life expectancy in Japan, Italy and Spain since 1960"
+              placeholder={
+                useCurrent && active?.result && active.origin !== "example"
+                  ? "Ask about the current view…"
+                  : "Compare life expectancy in Japan, Italy and Spain since 1960"
+              }
             />
             <div>
               <span>
@@ -432,7 +488,11 @@ export default function Workspace() {
                   <span className="cw-pulse" />
                   {turns.find((t) => t.id === activeRun.current)?.status ||
                     "Starting analysis"}
-                  <span>Result updates here when ready</span>
+                  <span>
+                    {selected === activeRun.current
+                      ? "Draft · Stop to steer"
+                      : "Preparing next revision"}
+                  </span>
                 </p>
               )}
               {notice && (
@@ -449,9 +509,11 @@ export default function Workspace() {
                           ? "Recorded example"
                           : active.origin === "shared"
                             ? "Shared snapshot"
-                            : active.origin === "direct"
-                              ? "Direct lookup"
-                              : "Agent analysis"}
+                            : active.origin === "view"
+                              ? "Adjusted view"
+                              : active.origin === "direct"
+                                ? "Direct lookup"
+                                : "Agent analysis"}
                       </span>
                       <h2>{active.question}</h2>
                       <p
@@ -465,6 +527,16 @@ export default function Workspace() {
                           : ""}
                       </p>
                     </div>
+                    {active.origin === "view" && (
+                      <button
+                        disabled={running}
+                        onClick={() => {
+                          setSelected(parents.current[selected] || "");
+                        }}
+                      >
+                        Previous view
+                      </button>
+                    )}
                     <button
                       onClick={() => setReceipt(!receipt)}
                       aria-expanded={receipt}
@@ -545,7 +617,12 @@ export default function Workspace() {
                     </section>
                   )}
                   {operations ? (
-                    <Surface key={selected} operations={operations} />
+                    <Surface
+                      key={selected}
+                      operations={operations}
+                      onAction={steerResult}
+                      disabled={running}
+                    />
                   ) : active.phase === "running" ? (
                     <div className="cw-pending">
                       <span className="cw-pulse" />

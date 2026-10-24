@@ -43,7 +43,11 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
   await act(async () =>
     resolve({
       plan: parseFastPath(question)!,
-      hit: {id:"SP.DYN.LE00.IN",name:"Life expectancy",source:"worldbank"},
+      hit: {
+        id: "SP.DYN.LE00.IN",
+        name: "Life expectancy",
+        source: "worldbank",
+      },
       spec: previous.state.spec!,
       rows: previous.state.rows,
       citations: previous.state.citations,
@@ -55,4 +59,26 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
   expect(screen.queryByRole("heading", { name: previous.question })).toBeNull();
   expect(screen.getByRole("button", { name: "View result" })).toBeTruthy();
   expect(screen.getByText("Result from the test source")).toBeTruthy();
+});
+it("lets the user steer a recorded result and return to the exact parent view without a key", async () => {
+  render(<Workspace />);
+  const demo = DEMOS[2];
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${demo.id}` },
+  });
+  const series = demo.state.spec!.series[0].name;
+  const focus = await screen.findByLabelText("Focus chart");
+  fireEvent.change(focus, { target: { value: series } });
+  await screen.findByText(
+    `Showing ${series}. Original source rows retained in Data.`,
+  );
+  expect(
+    screen.getByText(
+      `Showing ${series}. Original source rows retained in Data.`,
+    ),
+  ).toBeTruthy();
+  expect(runFastPath).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Previous view" }));
+  await screen.findByRole("heading", { name: demo.question });
+  expect(screen.getByLabelText("Focus chart")).toBeTruthy();
 });

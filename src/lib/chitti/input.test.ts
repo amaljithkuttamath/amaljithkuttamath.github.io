@@ -66,3 +66,46 @@ describe("request_input tool", () => {
     );
   });
 });
+it("streams the real render_chart tool with recorded workspace evidence before the answer is done", async () => {
+  const { DEMOS } = await import("./demos");
+  const workspace = DEMOS[0].state;
+  mock.mockResolvedValueOnce(
+    turn("render_chart", workspace.spec! as unknown as Record<string, unknown>),
+  );
+  mock.mockResolvedValueOnce(
+    turn("finish_explanation", { explanation: "View inspected." }),
+  );
+  const onPreview = vi.fn();
+  const onFiles = vi.fn();
+  const session = createSession(
+    { provider: "openrouter", model: "test", apiKey: "test" },
+    { workspace },
+  );
+  await session.ask("Explain this view", { ...callbacks, onPreview, onFiles });
+  expect(onPreview).toHaveBeenCalledWith({
+    chartSpec: workspace.spec,
+    rows: workspace.rows,
+    citations: workspace.citations,
+  });
+  const files = onFiles.mock.calls.at(-1)![0];
+  expect(files["workspace.csv"]).toContain(workspace.rows[0].country);
+  expect(JSON.parse(files["workspace-view.json"]).chart).toEqual(
+    workspace.spec,
+  );
+  expect(JSON.parse(files["citations.json"])).toEqual(workspace.citations);
+});
+it("replaces overlapping recorded values when new source rows arrive", async () => {
+  const { replaceWorkspaceRows } = await import("./session");
+  const old = {
+    country: "Japan",
+    iso3: "JPN",
+    indicator: "life",
+    year: 2020,
+    value: 80,
+  };
+  const other = { ...old, indicator: "population", value: 100 };
+  expect(replaceWorkspaceRows([old, other], [{ ...old, value: 81 }])).toEqual([
+    other,
+    { ...old, value: 81 },
+  ]);
+});

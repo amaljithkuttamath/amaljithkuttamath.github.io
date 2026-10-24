@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   A2uiSurface,
   createComponentImplementation,
@@ -18,17 +18,22 @@ import {
 } from "../../lib/chitti/workspace/catalog";
 import { CATALOG_ID } from "../../lib/chitti/workspace/model";
 import { cleanShareState } from "../../lib/chitti/share";
-import { Result } from "./Result";
+import { Result, ResultInteraction } from "./Result";
 
 const resultComponent = createComponentImplementation(
   resultApi,
-  ({ props }) => {
+  ({ props, context }) => {
     let result = null;
     try {
       result = cleanShareState(JSON.parse(props.resultJSON));
     } catch {}
     return result ? (
-      <Result result={result} />
+      <Result
+        result={result}
+        onSteer={(name, value) =>
+          void context.dispatchAction({ event: { name, context: { value } } })
+        }
+      />
     ) : (
       <p role="alert">The analysis result could not be validated.</p>
     );
@@ -95,33 +100,56 @@ export const analysisCatalog = new Catalog(CATALOG_ID, "v0.9", [
 export default function Surface({
   operations,
   onAction,
+  disabled = false,
 }: {
   operations: unknown[];
   onAction?: (action: ActionPayload) => void;
+  disabled?: boolean;
 }) {
   const [model, setModel] =
     useState<SurfaceModel<ReactCatalogComponent> | null>(null);
   const [error, setError] = useState("");
+  const callback = useRef(onAction);
+  callback.current = onAction;
+  const processor = useRef<MessageProcessor<ReactCatalogComponent> | null>(
+    null,
+  );
+  useEffect(
+    () => () => {
+      processor.current?.dispose();
+      processor.current = null;
+    },
+    [],
+  );
   useEffect(() => {
-    const processor = new MessageProcessor<ReactCatalogComponent>(
-      [analysisCatalog],
-      onAction,
-    );
     try {
       if (!boundedSurface(operations)) throw new Error("Invalid surface");
-      processor.processMessages(operations as ProcessableMessagePayload);
-      setModel([...processor.model.surfacesMap.values()][0] || null);
+      processor.current ||= new MessageProcessor<ReactCatalogComponent>(
+        [analysisCatalog],
+        (action) => callback.current?.(action),
+      );
+      const p = processor.current;
+      const id = (operations[0] as { createSurface: { surfaceId: string } })
+        .createSurface.surfaceId;
+      // Update the existing surface so tabs, filters and focus survive a draft.
+      p.processMessages(
+        (p.model.surfacesMap.has(id)
+          ? operations.slice(1)
+          : operations) as ProcessableMessagePayload,
+      );
+      setModel(p.model.surfacesMap.get(id) || null);
       setError("");
     } catch {
       setModel(null);
       setError("This interface could not be validated. Retry the analysis.");
     }
-    return () => processor.dispose();
-  }, [operations, onAction]);
+  }, [operations]);
   return error ? (
     <p role="alert">{error}</p>
   ) : model ? (
-    <A2uiSurface surface={model} />
+    <ResultInteraction.Provider value={!disabled}>
+      <A2uiSurface surface={model} />
+    </ResultInteraction.Provider>
   ) : (
     <p role="status">Preparing result…</p>
   );
