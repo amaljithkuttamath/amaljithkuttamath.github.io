@@ -5,7 +5,7 @@ import Mechanism from "../components/Mechanism.astro";
 const tools = [
   {
     title: "Tokenizer Arena",
-    text: "Five vocabularies. The same sentence. Different decisions.",
+    text: "Compare the token IDs produced by five model vocabularies.",
     href: "/apps/tokenizer",
     kind: "Language",
   },
@@ -32,23 +32,38 @@ const tools = [
 
 <Base
   wide
-  title="Amaljith Kuttamath | Fieldwork in AI"
-  description="Tools, experiments, and research by Amaljith Kuttamath. Open up language models, inspect the evidence, and build systems worth trusting."
+  title="Amaljith Kuttamath | AI agents and model experiments"
+  description="Browser-based data agents, language model experiments, and interpretability research by Amaljith Kuttamath."
 >
   <section class="experimental-opening">
     <div class="experimental-heading">
-      <h1>
-        Language,
-        <br />
-        taken apart.
-      </h1>
-      <div>
+      <div class="opening-intro">
+        <p class="opening-role">Amaljith Kuttamath · AI engineer</p>
+        <h1>
+          AI agents and
+          <br />
+          model experiments.
+        </h1>
         <p>
-          I’m Amal. I build tools to inspect language models, test their
-          decisions, and make the mechanisms visible.
+          I build tools for retrieving data, evaluating model outputs, and
+          inspecting language models. The projects below run in your browser.
         </p>
-        <a href="#work">
-          Explore the work <span aria-hidden="true">↓</span>
+      </div>
+      <div class="project-launcher" aria-label="Start with a project">
+        <a href="/apps/chitti">
+          <strong>Chitti</strong>
+          <span>Analyze public data with citations.</span>
+          <b aria-hidden="true">↗</b>
+        </a>
+        <a href="/apps/probability-xray">
+          <strong>Probability X-ray</strong>
+          <span>Inspect next-token probabilities.</span>
+          <b aria-hidden="true">↗</b>
+        </a>
+        <a href="/radar">
+          <strong>AI Radar</strong>
+          <span>Browse AI papers, models, and code.</span>
+          <b aria-hidden="true">↗</b>
         </a>
       </div>
     </div>
@@ -60,8 +75,8 @@ const tools = [
     aria-labelledby="selected-heading"
   >
     <div class="folio-section-head">
-      <h2 id="selected-heading">Selected instruments</h2>
-      <p>Open a tool. Inspect what it does.</p>
+      <h2 id="selected-heading">Tools you can use</h2>
+      <p>Browser-based tools</p>
     </div>
     <div class="selected-grid">
       <a class="project-lead" href="/apps/chitti">
@@ -70,17 +85,13 @@ const tools = [
           <span aria-hidden="true">↗</span>
         </div>
         <h3>Chitti</h3>
-        <p class="project-question">
-          Ask about the world.
-          <br />
-          Follow the evidence.
-        </p>
+        <p class="project-question">Public-data analysis</p>
         <Mechanism kind="agent" />
         <p class="project-description">
           An agent that retrieves public data, computes, charts, and checks its
           answer. The sources and calculations stay inspectable.
         </p>
-        <span class="project-action">Open the workspace</span>
+        <span class="project-action">Open Chitti</span>
       </a>
       <a class="project-side" href="/apps/probability-xray">
         <div class="project-context">
@@ -89,16 +100,12 @@ const tools = [
         </div>
         <Mechanism kind="model" />
         <h3>Probability X-ray</h3>
-        <p class="project-question">
-          See the uncertainty
-          <br />
-          between the words.
-        </p>
+        <p class="project-question">Next-token probabilities</p>
         <p class="project-description">
           Generate text with a local model and inspect the probability behind
           each token. Runs on WebGPU.
         </p>
-        <span class="project-action">Look inside</span>
+        <span class="project-action">Open Probability X-ray</span>
       </a>
     </div>
     <div class="folio-rows">
@@ -118,7 +125,7 @@ const tools = [
   >
     <div class="folio-section-head">
       <h2 id="experiments-heading">Experiments</h2>
-      <p>Two ways to look inside a transformer</p>
+      <p>Training and interpretability</p>
     </div>
     <div class="folio-rows">
       <a class="folio-row" href="/lab/microgpt">
@@ -144,8 +151,8 @@ const tools = [
       <span class="folio-label">Daily reading</span>
       <h2>AI Radar</h2>
       <p>
-        A considered brief of AI research and releases, with the evidence one
-        layer below.
+        A daily machine-generated briefing with source links, observation data,
+        and an archive.
       </p>
     </div>
     <a class="folio-link" href="/radar">
@@ -155,24 +162,24 @@ const tools = [
 </Base>
 <style>
   .experimental-opening {
-    padding: var(--space-xl) 0 var(--space-2xl);
+    padding: 24px 0 28px;
   }
   .experimental-heading {
     display: grid;
-    grid-template-columns: 1.5fr 1fr;
+    grid-template-columns: 1.3fr 1fr;
     gap: var(--space-2xl);
     align-items: end;
-    margin-bottom: var(--space-xl);
+    margin-bottom: 24px;
   }
   .experimental-heading h1 {
-    font: 500 clamp(3.5rem, 7.4vw, 6.5rem)/0.98 var(--font-sans);
-    letter-spacing: -0.075em;
+    font: 500 clamp(2.1rem, 3.8vw, 3.4rem)/1.05 var(--font-sans);
+    letter-spacing: -0.055em;
     margin: 0;
   }
   .experimental-heading > div {
     padding-bottom: var(--space-sm);
-    max-width: 36ch;
-    justify-self: end;
+    max-width: none;
+    justify-self: stretch;
   }
   .experimental-heading p {
     color: var(--fg-muted);
@@ -230,7 +237,7 @@ const tools = [
     margin: 0 0 var(--space-sm);
   }
   .project-question {
-    font: 500 2.7rem/1.1 var(--font-serif);
+    font: 500 1.6rem/1.15 var(--font-serif);
     letter-spacing: -0.03em;
     margin-bottom: var(--space-md);
   }
@@ -251,7 +258,7 @@ const tools = [
     margin-bottom: var(--space-lg);
   }
   .selected-grid :global(svg) {
-    max-height: 200px;
+    max-height: 130px;
   }
   .radar-entry {
     display: flex;
@@ -284,7 +291,7 @@ const tools = [
       justify-self: start;
     }
     .experimental-heading h1 {
-      font-size: clamp(3.4rem, 12vw, 5rem);
+      font-size: clamp(2rem, 8vw, 3rem);
     }
     .experimental-heading p {
       margin-bottom: var(--space-md);
@@ -303,6 +310,59 @@ const tools = [
       flex-direction: column;
       align-items: flex-start;
       gap: var(--space-lg);
+    }
+  }
+  .experimental-heading {
+    align-items: center;
+  }
+  .experimental-heading .opening-intro p {
+    max-width: 57ch;
+    font-size: 0.9rem;
+    line-height: 1.65;
+    margin: 14px 0 0;
+  }
+  .experimental-heading .opening-intro .opening-role {
+    margin: 0 0 12px;
+    font-size: 0.75rem;
+  }
+  .project-launcher {
+    border-top: 1px solid var(--line-strong);
+  }
+  .experimental-heading .project-launcher a {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 16px;
+    padding: 13px 0;
+    text-decoration: none;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .project-launcher a:hover strong {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .project-launcher strong {
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+  .experimental-heading .project-launcher span {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 0.78rem;
+    grid-column: 1;
+  }
+  .project-launcher b {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    align-self: center;
+    font-weight: 400;
+  }
+  @media (max-width: 760px) {
+    .experimental-heading > div {
+      max-width: none;
+      width: 100%;
+    }
+    .experimental-heading {
+      gap: 20px;
     }
   }
 </style>

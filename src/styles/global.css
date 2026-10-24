@@ -451,7 +451,7 @@ hr {
 
 footer {
   padding: var(--space-xl) 0 var(--space-2xl);
-  margin-top: var(--space-3xl);
+  margin-top: 40px;
   border-top: 1px solid var(--fg-faint);
 }
 
@@ -1010,7 +1010,7 @@ footer a:hover {
 /* Shared editorial shell. Instrument pages retain their existing working width. */
 :root {
   --folio-w: 1120px;
-  --text-display: clamp(2.8rem, 5.7vw, 5rem);
+  --text-display: clamp(2rem, 3.5vw, 3.2rem);
   --line-strong: color-mix(in srgb, var(--fg) 22%, transparent);
 }
 .container.folio-shell {
@@ -1068,7 +1068,7 @@ footer a:hover {
   justify-content: space-between;
   align-items: flex-end;
   gap: var(--space-xl);
-  margin-top: var(--space-3xl);
+  margin-top: 40px;
   padding: var(--space-xl) 0;
   border-top: 1px solid var(--line-strong);
 }
@@ -1090,7 +1090,7 @@ footer a:hover {
   outline-offset: 5px;
 }
 .folio-hero {
-  padding: var(--space-3xl) 0 var(--space-2xl);
+  padding: 28px 0 32px;
 }
 .folio-hero h1 {
   font-size: var(--text-display);
@@ -1150,7 +1150,7 @@ footer a:hover {
   text-decoration-color: var(--fg);
 }
 .folio-section {
-  margin-top: var(--space-3xl);
+  margin-top: 40px;
 }
 .folio-section-head {
   display: flex;
@@ -1261,4 +1261,18 @@ footer a:hover {
   .site-nav .nav-links a {
     padding: var(--space-sm) var(--space-xs);
   }
+}
+
+/* Compact shared chrome leaves the first screen for the work itself. */
+.site-nav {
+  min-height: 70px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+.folio-section-head h2 {
+  font-size: 1.65rem;
+}
+.folio-label {
+  text-transform: none;
+  letter-spacing: 0.02em;
 }

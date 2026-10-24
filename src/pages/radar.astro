@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import SignalDesk from "../components/SignalDesk.astro";
 ---
 
 <Base
@@ -10,11 +11,11 @@ import Base from "../layouts/Base.astro";
   <div class="radar-page">
     <header class="radar-opening">
       <div>
-        <p class="folio-label">A daily observation</p>
+        <p class="folio-label">Daily AI research feed</p>
         <h1>AI Radar</h1>
         <p>
-          What is changing in AI, <br />
-          and what is worth looking at.
+          AI papers, models, and code. Inspect the sources, then read the daily
+          synthesis.
         </p>
       </div>
       <div class="radar-edition">
@@ -22,6 +23,9 @@ import Base from "../layouts/Base.astro";
           Reading publication…
         </span>
         <time id="radar-date">Latest edition</time>
+        <a href="#briefing" id="jump-briefing">
+          Read daily briefing ↓
+        </a>
         <a
           href="https://github.com/amaljithkuttamath/ai-radar"
           target="_blank"
@@ -31,6 +35,7 @@ import Base from "../layouts/Base.astro";
         </a>
       </div>
     </header>
+    <SignalDesk />
     <div class="radar-tabs" role="tablist" aria-label="Radar view">
       <button
         id="tab-briefing"
@@ -82,7 +87,7 @@ import Base from "../layouts/Base.astro";
     >
       <div class="evidence-heading">
         <div>
-          <h2>Look at the source.</h2>
+          <h2>Source observations</h2>
           <p>
             Observed items, ranked by the pipeline’s five evidence criteria. A
             score is a selection signal, not a verdict on quality.
@@ -110,8 +115,13 @@ import Base from "../layouts/Base.astro";
             <option value="newest">First seen, newest</option>
           </select>
         </label>
-        <label class="score-check">
-          <input id="high-only" type="checkbox" /> Score 3+
+        <label>
+          Score{" "}
+          <select id="minimum-score">
+            <option value="0">All scores</option>
+            <option value="3">3 or higher</option>
+            <option value="4">4 or higher</option>
+          </select>
         </label>
       </div>
       <p id="evidence-result" class="radar-meta" role="status"></p>
@@ -130,8 +140,8 @@ import Base from "../layouts/Base.astro";
     >
       <div class="evidence-heading">
         <div>
-          <h2>A longer view.</h2>
-          <p>Earlier observations, with their original sources and context.</p>
+          <h2>Earlier editions</h2>
+          <p>Browse by month, date, or topic.</p>
         </div>
         <div class="evidence-search">
           <label for="archive-search">Find an edition</label>
@@ -142,6 +152,12 @@ import Base from "../layouts/Base.astro";
           />
         </div>
       </div>
+      <div
+        id="archive-months"
+        class="archive-months"
+        role="group"
+        aria-label="Browse editions by month"
+      ></div>
       <p id="archive-result" class="radar-meta" role="status"></p>
       <div id="archive-list">
         <p class="radar-loading">Reading the archive…</p>
@@ -171,17 +187,17 @@ import Base from "../layouts/Base.astro";
     justify-content: space-between;
     align-items: flex-end;
     gap: var(--space-xl);
-    padding: var(--space-2xl) 0 var(--space-xl);
+    padding: 24px 0;
   }
   .radar-opening h1 {
-    font-size: clamp(3rem, 6vw, 5rem);
+    font: 500 clamp(2rem, 3.4vw, 3.1rem)/1 var(--font-sans);
     line-height: 1;
     letter-spacing: -0.045em;
     margin: var(--space-md) 0;
   }
   .radar-opening p:not(.folio-label) {
     color: var(--fg-muted);
-    font-size: var(--text-body-lg);
+    font-size: 0.9rem;
     margin: 0;
     line-height: 1.6;
   }
@@ -279,15 +295,15 @@ import Base from "../layouts/Base.astro";
   }
   .brief-overview h2 {
     font: var(--text-label) var(--font-mono);
-    text-transform: uppercase;
+    text-transform: none;
     letter-spacing: 0.04em;
     color: var(--fg-muted);
     margin: 0 0 var(--space-lg);
   }
   .brief-lead {
-    font: clamp(1.4rem, 2.3vw, 1.85rem)/1.55 var(--font-serif);
+    font: 1.15rem/1.65 var(--font-serif);
     letter-spacing: -0.015em;
-    max-width: 48ch;
+    max-width: 72ch;
   }
   .brief-overview aside {
     border-left: 1px solid var(--fg-faint);
@@ -325,7 +341,7 @@ import Base from "../layouts/Base.astro";
     padding-top: var(--space-lg);
   }
   .radar-pick h3 {
-    font: 500 1.5rem/1.25 var(--font-serif);
+    font: 500 1.25rem/1.3 var(--font-serif);
     letter-spacing: -0.02em;
     margin: 0 0 var(--space-md);
   }
@@ -340,7 +356,7 @@ import Base from "../layouts/Base.astro";
     overflow-wrap: anywhere;
   }
   .radar-reading-title {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     margin: var(--space-xl) 0 var(--space-lg);
   }
   .radar-actions {
@@ -351,7 +367,7 @@ import Base from "../layouts/Base.astro";
     border-top: 1px solid var(--radar-line);
   }
   .radar-actions h2 {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     margin: 0;
   }
   .radar-actions li {
@@ -662,6 +678,65 @@ import Base from "../layouts/Base.astro";
     }
     .radar-tabs button {
       font-size: var(--text-small);
+    }
+  }
+  .archive-months {
+    display: flex;
+    gap: 6px;
+    margin: 20px 0;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .archive-months button {
+    flex: 1;
+    min-width: 90px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line-strong);
+    background: none;
+    color: var(--fg-muted);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: 0.7rem var(--font-mono);
+  }
+  .archive-months button::before {
+    content: "";
+    width: var(--edition-width);
+    height: 4px;
+    background: currentColor;
+    min-width: 2px;
+  }
+  .archive-months button[aria-pressed="true"] {
+    background: var(--fg);
+    color: var(--bg);
+  }
+  .archive-months button:hover {
+    border-color: var(--fg);
+  }
+  .radar-opening > div:first-child {
+    max-width: 65ch;
+  }
+  .radar-opening h1 {
+    margin: 8px 0 12px;
+  }
+  .radar-opening .folio-label {
+    margin: 0;
+  }
+  @media (max-width: 700px) {
+    .radar-edition {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 16px;
+    }
+    .radar-edition time {
+      font-size: 1rem;
+    }
+    .radar-opening {
+      gap: 16px;
     }
   }
 </style>

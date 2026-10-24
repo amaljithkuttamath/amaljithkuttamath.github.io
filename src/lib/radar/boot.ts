@@ -11,6 +11,7 @@ import {
   type Row,
 } from "./data";
 import { digestView } from "./digest";
+import { mountSignals } from "./signals";
 export function bootRadar() {
   const $ = (id: string) => document.getElementById(id)!;
   const input = (id: string) => $(id) as HTMLInputElement;
@@ -87,7 +88,7 @@ export function bootRadar() {
       const d = digestView(md, document);
       currentDate = d.date;
       status(d.date, d.degraded);
-      host.innerHTML = `${date !== "latest" ? '<button class="radar-back" id="latest-edition">Back to the latest edition</button>' : ""}${d.degraded ? '<p class="radar-notice">Synthesis was unavailable for this edition. The published fallback remains visible below.</p>' : ""}<div class="brief-overview"><div><h2>The short version</h2><div class="brief-lead">${d.lead}</div></div><aside><span class="folio-label">About this edition</span><p>${d.minutes} minute full read</p><p>${d.degraded ? "Deterministic fallback" : "Machine-generated briefing"}<br/>Check claims against the linked sources.</p><a href="${REPO}/blob/main/reports/${d.date}-digest.md" target="_blank" rel="noopener noreferrer">Original Markdown ↗</a></aside></div>${d.stories.length ? `<h2 class="radar-reading-title">A closer look</h2><div class="radar-picks">${d.stories.map((s) => `<article class="radar-pick"><h3><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></h3><p>${s.body}</p></article>`).join("")}</div>` : ""}${d.actions ? `<section class="radar-actions"><h2>Worth a next step</h2><div>${d.actions}</div></section>` : ""}<details class="radar-full"><summary>Read the full briefing <span>${d.minutes} min</span></summary><div id="full-brief"></div></details>`;
+      host.innerHTML = `${date !== "latest" ? '<button class="radar-back" id="latest-edition">Back to the latest edition</button>' : ""}${d.degraded ? '<p class="radar-notice">Synthesis was unavailable for this edition. The published fallback remains visible below.</p>' : ""}<div class="brief-overview"><div><h2>Daily synthesis</h2><div class="brief-lead">${d.lead}</div></div><aside><span class="folio-label">About this edition</span><p>${d.minutes} minute full read</p><p>${d.degraded ? "Deterministic fallback" : "Machine-generated briefing"}<br/>Check claims against the linked sources.</p><a href="${REPO}/blob/main/reports/${d.date}-digest.md" target="_blank" rel="noopener noreferrer">Original Markdown ↗</a></aside></div>${d.stories.length ? `<h2 class="radar-reading-title">Selected sources</h2><div class="radar-picks">${d.stories.map((s) => `<article class="radar-pick"><h3><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></h3><p>${s.body}</p></article>`).join("")}</div>` : ""}${d.actions ? `<section class="radar-actions"><h2>Suggested actions</h2><div>${d.actions}</div></section>` : ""}<details class="radar-full"><summary>Read the full briefing <span>${d.minutes} min</span></summary><div id="full-brief"></div></details>`;
       $("full-brief").replaceWith(d.root);
       $("latest-edition")?.addEventListener("click", () => {
         location.hash = "briefing";
@@ -104,11 +105,13 @@ export function bootRadar() {
         input("evidence-search").value,
         group,
         input("evidence-sort").value,
-        input("high-only").checked,
+        false,
       ),
-      shown = filtered.slice(0, limit);
+      minimum = Number(input("minimum-score").value),
+      qualified = filtered.filter((r) => r.score >= minimum),
+      shown = qualified.slice(0, limit);
     $("evidence-result").textContent =
-      `${filtered.length} matching items / ${rows.length} observed`;
+      `${qualified.length} matching items / ${rows.length} observed`;
     $("evidence-list").innerHTML =
       shown
         .map(
@@ -117,7 +120,7 @@ export function bootRadar() {
         )
         .join("") ||
       '<p class="radar-loading">No matching items. Try a broader search or another source.</p>';
-    $("evidence-more").hidden = limit >= filtered.length;
+    $("evidence-more").hidden = limit >= qualified.length;
   }
   async function loadEvidence() {
     try {
@@ -145,8 +148,30 @@ export function bootRadar() {
             renderEvidence();
           }),
         );
+      mountSignals(rows, (selectedGroup, minimum) => {
+        group = selectedGroup;
+        input("minimum-score").value = String(minimum);
+        input("evidence-search").value = "";
+        limit = 15;
+        $("source-filters")
+          .querySelectorAll<HTMLButtonElement>("button")
+          .forEach((b) =>
+            b.setAttribute("aria-pressed", String(b.dataset.group === group)),
+          );
+        renderEvidence();
+        location.hash = "evidence";
+        $("tab-evidence").focus();
+        $("tab-evidence").scrollIntoView({
+          block: "start",
+          behavior: "instant",
+        });
+      });
       renderEvidence();
     } catch (e) {
+      if (document.getElementById("signal-total"))
+        $("signal-total").textContent = "Evidence unavailable";
+      if (document.getElementById("signal-workspace"))
+        error($("signal-workspace"), e, loadEvidence);
       error($("evidence-list"), e, loadEvidence);
     }
   }
@@ -154,6 +179,11 @@ export function bootRadar() {
     const q = input("archive-search").value.toLowerCase().trim(),
       found = editions.filter((e) =>
         `${e.date} ${e.teaser}`.toLowerCase().includes(q),
+      );
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-month]")
+      .forEach((b) =>
+        b.setAttribute("aria-pressed", String(q === b.dataset.month)),
       );
     $("archive-result").textContent =
       `${found.length} ${found.length === 1 ? "edition" : "editions"}`;
@@ -176,6 +206,29 @@ export function bootRadar() {
   async function loadArchive() {
     try {
       editions = parseArchive(await read("reports/README.md"));
+      const months = [...new Set(editions.map((e) => e.date.slice(0, 7)))];
+      const counts = months.map(
+        (m) => editions.filter((e) => e.date.startsWith(m)).length,
+      );
+      if (document.getElementById("archive-months")) {
+        $("archive-months").innerHTML = months
+          .map(
+            (month, i) =>
+              `<button type="button" data-month="${month}" aria-pressed="false" style="--edition-width:${(100 * counts[i]) / Math.max(...counts)}%"><span>${new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(month + "-01T12:00:00Z"))}</span><span>${counts[i]} editions</span></button>`,
+          )
+          .join("");
+        $("archive-months")
+          .querySelectorAll<HTMLButtonElement>("button")
+          .forEach((b) =>
+            b.addEventListener("click", () => {
+              input("archive-search").value =
+                input("archive-search").value === b.dataset.month
+                  ? ""
+                  : b.dataset.month!;
+              renderArchive();
+            }),
+          );
+      }
       renderArchive();
     } catch (e) {
       error($("archive-list"), e, loadArchive);
@@ -221,7 +274,7 @@ export function bootRadar() {
         buttons[next].click();
       });
     });
-  for (const id of ["evidence-search", "evidence-sort", "high-only"])
+  for (const id of ["evidence-search", "evidence-sort", "minimum-score"])
     $(id).addEventListener("input", () => {
       limit = 15;
       renderEvidence();
@@ -266,6 +319,10 @@ export function bootRadar() {
     route(true);
   }
   $("radar-refresh").addEventListener("click", refresh);
+  document.getElementById("jump-briefing")?.addEventListener("click", () => {
+    $("tab-briefing").focus();
+    $("tab-briefing").scrollIntoView({ block: "start", behavior: "instant" });
+  });
   window.addEventListener("hashchange", () => route());
   refresh();
   // A long-lived tab must not keep the freshness signal after its receipt ages out.

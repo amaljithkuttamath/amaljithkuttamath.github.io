@@ -5,30 +5,35 @@ const research = [
   {
     href: "https://github.com/amaljithkuttamath/trust-bench",
     title: "trust-bench",
+    lens: "features circuits",
     detail:
       "Interpretability toolkit probing SAE features, activations, and circuits in Llama 3.1 8B.",
   },
   {
     href: "https://github.com/amaljithkuttamath/jlens-replication",
     title: "jlens-replication",
+    lens: "circuits",
     detail:
       "Replicating Anthropic's Jacobian lens on small open-weight models with free compute.",
   },
   {
     href: "https://github.com/amaljithkuttamath/sae-explorer",
     title: "sae-explorer",
+    lens: "features",
     detail:
       "Investigating a Gemma 2 2B SAE feature associated with conjunctions across six languages.",
   },
   {
     href: "https://github.com/amaljithkuttamath/mlx-interp",
     title: "mlx-interp",
+    lens: "features local",
     detail:
       "Mechanistic interpretability tools for Apple MLX. Sparse autoencoders on Apple Silicon.",
   },
   {
     href: "https://github.com/amaljithkuttamath/autoresearch-mlx-qwen-3-5",
     title: "hybrid-attention-mlx",
+    lens: "local",
     detail:
       "From-scratch MLX implementation of Qwen3.5 hybrid DeltaNet + full-attention architecture.",
   },
@@ -42,16 +47,16 @@ const research = [
 >
   <header class="about-opening folio-hero">
     <div>
-      <p class="folio-label">A little background</p>
+      <p class="folio-label">Amaljith Kuttamath</p>
       <h1>
-        I like knowing
+        Retrieval, evaluation,
         <br />
-        why it works.
+        and interpretability.
       </h1>
       <p class="folio-intro">
-        I’m Amaljith Kuttamath. I build AI systems and tools for understanding
-        them. The questions that stick with me tend to start where a
-        good-looking answer stops.
+        I build data agents and retrieval systems, and study how language models
+        represent information. My projects connect practical engineering with
+        experiments in model behavior.
       </p>
     </div>
     <figure>
@@ -59,42 +64,38 @@ const research = [
       <figcaption>Amaljith Kuttamath / AI engineer</figcaption>
     </figure>
   </header>
-  <section class="about-story">
-    <h2>
-      From physical systems
-      <br />
-      to model internals.
-    </h2>
-    <div>
-      <p>
-        I started at ISRO, then co-founded RadianArc, building digital twins for
-        predictive maintenance on industrial machinery.
-      </p>
-      <p>
-        Retrieval systems and knowledge graphs for healthcare pulled me toward a
-        different kind of machinery: language models, the representations inside
-        them, and the gap between a confident answer and a justified one.
-      </p>
-      <p>
-        I completed an MS in Data Analytics at George Mason University, with a
-        thesis on RAG systems for healthcare. The work here grows out of those
-        questions: what a model sees, how its decisions behave, and how to make
-        a system easier to inspect.
-      </p>
-      <a href="/resume.pdf" class="folio-link">
-        Read my résumé
-      </a>
-    </div>
-  </section>
   <section class="folio-section" aria-labelledby="research-title">
     <div class="folio-section-head">
-      <h2 id="research-title">Threads I keep pulling</h2>
+      <h2 id="research-title">Research projects</h2>
       <p>Research libraries &amp; replications</p>
     </div>
-    <div class="folio-rows">
+    <div
+      class="research-lenses"
+      role="group"
+      aria-label="Explore research by question"
+    >
+      <button type="button" data-lens="all" aria-pressed="true">
+        All research
+      </button>
+      <button type="button" data-lens="features" aria-pressed="false">
+        What does a feature represent?
+      </button>
+      <button type="button" data-lens="circuits" aria-pressed="false">
+        How does information travel?
+      </button>
+      <button type="button" data-lens="local" aria-pressed="false">
+        Can I run it locally?
+      </button>
+    </div>
+    <p class="research-context" id="research-context" role="status">
+      Five open research projects. Choose a question to follow the relevant
+      work.
+    </p>
+    <div class="folio-rows research-results">
       {research.map((r) => (
         <a
           class="folio-row"
+          data-research={r.lens}
           href={r.href}
           target="_blank"
           rel="noopener noreferrer"
@@ -106,8 +107,27 @@ const research = [
       ))}
     </div>
   </section>
+  <section class="about-story">
+    <h2>Background</h2>
+    <div>
+      <p>
+        I started at ISRO, then co-founded RadianArc, building digital twins for
+        predictive maintenance on industrial machinery.
+      </p>
+      <p>
+        I later worked on retrieval systems and knowledge graphs for healthcare.
+      </p>
+      <p>
+        I completed an MS in Data Analytics at George Mason University, with a
+        thesis on RAG systems for healthcare.
+      </p>
+      <a href="/resume.pdf" class="folio-link">
+        Read my résumé
+      </a>
+    </div>
+  </section>
   <section class="about-record folio-section">
-    <h2>A few points of reference</h2>
+    <h2>Education and publications</h2>
     <dl>
       <div>
         <dt>Education</dt>
@@ -142,11 +162,7 @@ const research = [
     </dl>
   </section>
   <section id="work-together" class="about-end folio-section">
-    <h2>
-      Have a question
-      <br />
-      worth building for?
-    </h2>
+    <h2>Work with me</h2>
     <div>
       <p>
         I work on retrieval, evaluation, and model-backed products. We start
@@ -154,7 +170,7 @@ const research = [
         a working slice and test it.
       </p>
       <p>
-        For a project, a research conversation, or a useful disagreement:
+        Project and research enquiries:
         <br />
         <a class="folio-link" href="mailto:kuttamath.amaljith@gmail.com">
           kuttamath.amaljith@gmail.com
@@ -178,26 +194,59 @@ const research = [
       },
     })}
   />
+  <script>
+    const questions: Record<string, string> = {
+      all: "Five open research projects. Choose a question to follow the relevant work.",
+      features:
+        "Sparse autoencoders turn activations into features we can inspect. These projects probe what those features encode.",
+      circuits:
+        "Follow information through activations and connections: circuit analysis and Jacobian-lens replication.",
+      local:
+        "Experiments built around Apple MLX: interpretability tools and a from-scratch hybrid-attention implementation.",
+    };
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-lens]")
+      .forEach((button) =>
+        button.addEventListener("click", () => {
+          const lens = button.dataset.lens!;
+          document
+            .querySelectorAll<HTMLButtonElement>("[data-lens]")
+            .forEach((b) =>
+              b.setAttribute("aria-pressed", String(b === button)),
+            );
+          document
+            .querySelectorAll<HTMLElement>("[data-research]")
+            .forEach(
+              (row) =>
+                (row.hidden =
+                  lens !== "all" &&
+                  !row.dataset.research!.split(" ").includes(lens)),
+            );
+          document.getElementById("research-context")!.textContent =
+            questions[lens];
+        }),
+      );
+  </script>
 </Base>
 <style>
   .about-opening {
     display: grid;
-    grid-template-columns: 1.3fr 0.8fr;
-    gap: var(--space-3xl);
+    grid-template-columns: 1fr 180px;
+    gap: 32px;
     align-items: center;
   }
   .about-opening .folio-label {
     margin-bottom: var(--space-lg);
   }
   .about-opening h1 {
-    max-width: 15ch;
+    max-width: 24ch;
   }
   .about-opening figure {
     margin: 0;
   }
   .about-opening img {
     width: 100%;
-    height: 360px;
+    height: 180px;
     object-fit: cover;
     object-position: center 30%;
     border-radius: var(--radius-md);
@@ -217,7 +266,7 @@ const research = [
     padding-top: var(--space-xl);
   }
   .about-story h2 {
-    font-size: 2.2rem;
+    font-size: 1.8rem;
     line-height: 1.2;
     margin: 0;
   }
@@ -259,7 +308,7 @@ const research = [
     padding-top: var(--space-xl);
   }
   .about-end h2 {
-    font-size: 2.6rem;
+    font-size: 2rem;
     line-height: 1.1;
     margin: 0;
   }
@@ -284,6 +333,68 @@ const research = [
     .about-record dl {
       grid-template-columns: 1fr;
       gap: var(--space-lg);
+    }
+  }
+  .research-lenses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0;
+  }
+  .research-lenses button {
+    border: 1px solid var(--line-strong);
+    background: none;
+    color: var(--fg-muted);
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    font: 0.78rem var(--font-sans);
+    cursor: pointer;
+  }
+  .research-lenses button[aria-pressed="true"] {
+    background: var(--fg);
+    color: var(--bg);
+    border-color: var(--fg);
+  }
+  .research-lenses button:hover {
+    border-color: var(--fg);
+  }
+  .research-context {
+    color: var(--fg-muted);
+    font-size: 0.85rem;
+    max-width: 85ch;
+    line-height: 1.6;
+    min-height: 2.8em;
+  }
+  .research-results [hidden] {
+    display: none;
+  }
+  .about-story {
+    margin-top: 40px;
+  }
+  .about-opening + .folio-section {
+    margin-top: 0;
+  }
+  .about-opening .folio-intro {
+    font-size: 0.95rem;
+    max-width: 66ch;
+  }
+  .about-opening .folio-label {
+    margin-bottom: 12px;
+  }
+  @media (max-width: 760px) {
+    .about-opening {
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+    .about-opening figure {
+      display: none;
+    }
+    .research-lenses {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .research-lenses button {
+      text-align: left;
     }
   }
 </style>
