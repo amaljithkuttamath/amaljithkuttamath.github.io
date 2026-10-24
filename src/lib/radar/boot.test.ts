@@ -11,11 +11,12 @@ function openArchive(
   archive = "",
   state = "{}",
   failNotes = false,
+  reportBodies: Record<string, string> = {},
 ) {
   dom = new JSDOM(
     `<main>
     <span id="radar-status">Reading publication…</span><time id="radar-date"></time>
-    <span id="signal-total"></span><div id="signal-workspace"></div><div id="radar-brief"></div><span id="evidence-count"></span>
+    <h2 id="signal-title"></h2><div id="evolution-workspace"></div><button data-signal-view="evolution"></button><button data-signal-view="observations"></button><span id="signal-total"></span><div id="signal-workspace"></div><div id="radar-brief"></div><span id="evidence-count"></span>
     <div id="source-filters"></div><input id="evidence-search" />
     <select id="evidence-sort"><option>score</option></select><select id="minimum-score"><option value="0">All</option></select>
     <div id="evidence-result"></div><div id="evidence-list"></div><button id="evidence-more"></button>
@@ -36,7 +37,7 @@ function openArchive(
             : url.endsWith("README.md")
               ? archive
               : /^.*reports\/\d{4}-\d{2}-\d{2}-digest.md$/.test(url)
-                ? `# AI Radar — ${url.match(/(\d{4}-\d{2}-\d{2})-digest/)![1]}\n\nPublished summary.`
+                ? `# AI Radar — ${url.match(/(\d{4}-\d{2}-\d{2})-digest/)![1]}\n\nPublished summary.\n\n${reportBodies[url.match(/(\d{4}-\d{2}-\d{2})-digest/)![1]] || ""}`
                 : "",
         { status: failNotes && url.endsWith("latest.md") ? 503 : 200 },
       ),
@@ -128,4 +129,50 @@ it("keeps observations usable when published context cannot be fetched", async (
   expect(doc.querySelector("#evidence-list a")!.getAttribute("href")).toBe(
     "https://github.com/a",
   );
+});
+
+it("updates movement summaries and preserves the observation view while stepping through editions", async () => {
+  openArchive(
+    {},
+    "| [2026-10-24](2026-10-24-digest.md) | Latest |\n| [2026-10-23](2026-10-23-digest.md) | Earlier |",
+    "{}",
+    false,
+    {
+      "2026-10-24":
+        "## What changed\nNo new, climbing, or cooled items detected since the previous run.",
+      "2026-10-23":
+        "## What changed\n### New today\n- [New work](https://example.com/new) — benchmark\n### Climbing\n- [Rising work](https://example.com/rising) — traction +2.9%\n### Cooled\n- [Cooling work](https://example.com/cooling) — score −1, traction +0.3%",
+    },
+  );
+  const doc = dom.window.document;
+  await vi.waitFor(() =>
+    expect(doc.querySelectorAll(".evolution-empty")).toHaveLength(3),
+  );
+  (
+    doc.querySelector('[data-evolution-date="2026-10-23"]') as HTMLButtonElement
+  ).click();
+  await vi.waitFor(() =>
+    expect(doc.querySelector(".evolution-details")!.textContent).toContain(
+      "Rising work",
+    ),
+  );
+  expect(doc.querySelector(".evolution-details")!.textContent).toContain(
+    "score −1, traction +0.3%",
+  );
+  expect(
+    doc
+      .querySelector("[data-evolution-date][aria-current]")!
+      .getAttribute("data-evolution-date"),
+  ).toBe("2026-10-23");
+  (
+    doc.querySelector('[data-signal-view="observations"]') as HTMLButtonElement
+  ).click();
+  expect(doc.getElementById("evolution-workspace")!.hidden).toBe(true);
+  expect(doc.getElementById("signal-workspace")!.hidden).toBe(false);
+  expect(doc.getElementById("radar-timeline")!.hidden).toBe(false);
+  (
+    doc.querySelector('[data-signal-view="evolution"]') as HTMLButtonElement
+  ).click();
+  expect(doc.getElementById("evolution-workspace")!.hidden).toBe(false);
+  expect(doc.getElementById("radar-timeline")!.hidden).toBe(true);
 });

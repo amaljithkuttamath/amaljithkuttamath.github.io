@@ -1,13 +1,277 @@
 <section class="signal-desk" aria-labelledby="signal-title">
   <div class="signal-topline">
-    <h2 id="signal-title">Research observations</h2>
-    <span id="signal-total">Loading observations…</span>
+    <h2 id="signal-title">Research evolution</h2>
+    <div class="signal-view-switch" role="group" aria-label="Research view">
+      <button type="button" data-signal-view="evolution" aria-pressed="true">
+        Evolution
+      </button>
+      <button
+        type="button"
+        data-signal-view="observations"
+        aria-pressed="false"
+      >
+        Observations
+      </button>
+    </div>
+    <span id="signal-total" hidden>
+      Loading observations…
+    </span>
   </div>
-  <div id="signal-workspace">
+  <div id="evolution-workspace">
+    <p class="signal-wait">Reading research changes…</p>
+  </div>
+  <div id="signal-workspace" hidden>
     <p class="signal-wait">Loading the published observations…</p>
   </div>
 </section>
 <style is:global>
+  .signal-view-switch {
+    display: flex;
+    gap: 12px;
+    margin-left: auto;
+  }
+  .signal-view-switch button {
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    padding: 3px 0;
+    color: var(--desk-muted);
+    font: 0.72rem var(--font-sans);
+    cursor: pointer;
+  }
+  .signal-view-switch button[aria-pressed="true"] {
+    color: var(--bg);
+    border-color: var(--bg);
+  }
+  .evolution-chart {
+    min-width: 0;
+    height: 254px;
+    display: grid;
+    grid-template-rows: 28px 198px 28px;
+  }
+  .evolution-chart-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font: 0.6rem var(--font-mono);
+    color: var(--desk-muted);
+    align-items: center;
+  }
+  .evolution-chart svg {
+    width: 100%;
+    height: 198px;
+    overflow: visible;
+  }
+  .evolution-lane-label {
+    font: 12px var(--font-sans);
+    fill: var(--bg);
+  }
+  .evolution-baseline {
+    stroke: var(--desk-line);
+    stroke-width: 1;
+  }
+  .evolution-path {
+    stroke: var(--bg);
+    stroke-width: 1.5;
+    opacity: 0.5;
+  }
+  .evolution-cursor {
+    stroke: var(--bg);
+    stroke-width: 1;
+    opacity: 0.3;
+    stroke-dasharray: 2 3;
+  }
+  .evolution-dot {
+    fill: var(--bg);
+  }
+  .evolution-value,
+  .evolution-unknown {
+    font: 11px var(--font-mono);
+    fill: var(--desk-muted);
+  }
+  .evolution-dates {
+    position: relative;
+  }
+  .evolution-dates button {
+    position: absolute;
+    transform: translateX(-50%);
+    background: none;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    color: var(--desk-muted);
+    font: 0.6rem var(--font-mono);
+    padding: 4px 2px;
+    cursor: pointer;
+  }
+  .evolution-dates button[aria-current] {
+    border-color: var(--bg);
+    color: var(--bg);
+  }
+  .evolution-details {
+    height: 254px;
+    min-width: 0;
+    padding-left: 24px;
+    border-left: 1px solid var(--desk-line);
+    display: flex;
+    flex-direction: column;
+  }
+  .evolution-summary {
+    flex: 1;
+    min-height: 0;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--desk-line);
+  }
+  .evolution-summary:last-child {
+    border-bottom: 0;
+  }
+  .evolution-category {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+    border: 0;
+    padding: 0 0 5px;
+    background: none;
+    color: var(--bg);
+    font: 0.7rem var(--font-sans);
+    cursor: pointer;
+  }
+  .evolution-category span {
+    font: 0.6rem var(--font-mono);
+    color: var(--desk-muted);
+  }
+  .evolution-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    color: var(--bg);
+    padding: 0;
+    cursor: pointer;
+  }
+  .evolution-item strong {
+    display: block;
+    font: 500 0.83rem/1.3 var(--font-sans);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .evolution-item span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font: 0.68rem/1.35 var(--font-sans);
+    color: var(--desk-muted);
+    margin-top: 3px;
+  }
+  .evolution-item:hover strong {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .evolution-empty {
+    font: 0.72rem var(--font-sans);
+    color: var(--desk-muted);
+    margin: 4px 0;
+  }
+  .evolution-detail-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 4px 0 10px;
+    font: 0.65rem var(--font-mono);
+    color: var(--desk-muted);
+  }
+  .evolution-detail-head button,
+  .evolution-detail-head a,
+  .evolution-footer a {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--bg);
+    font: 0.7rem var(--font-sans);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .evolution-footer a {
+    white-space: nowrap;
+  }
+  .evolution-details h3 {
+    font: 500 0.86rem/1.3 var(--font-sans);
+    margin: 0 0 8px;
+  }
+  .evolution-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .evolution-history > div {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    border-top: 1px solid var(--desk-line);
+  }
+  .evolution-history time {
+    font: 0.6rem var(--font-mono);
+    color: var(--desk-muted);
+    padding-top: 2px;
+  }
+  .evolution-history p {
+    color: var(--bg);
+    font: 0.68rem/1.4 var(--font-sans);
+    margin: 0;
+  }
+  .evolution-history .evolution-item {
+    padding: 8px 0;
+    border-top: 1px solid var(--desk-line);
+  }
+  @media (max-width: 700px) {
+    .signal-view-switch {
+      margin-left: 0;
+    }
+    .evolution-chart {
+      height: 218px;
+      grid-template-rows: 28px 162px 28px;
+    }
+    .evolution-chart svg {
+      height: 162px;
+    }
+    .evolution-lane-label {
+      font-size: 18px;
+    }
+    .evolution-value,
+    .evolution-unknown {
+      font-size: 17px;
+    }
+    .evolution-details {
+      height: 164px;
+      padding: 0;
+      border-left: 0;
+      border-top: 1px solid var(--desk-line);
+    }
+    .evolution-summary {
+      padding: 4px 0;
+    }
+    .evolution-category {
+      padding-bottom: 3px;
+      font-size: 0.65rem;
+    }
+    .evolution-item strong {
+      font-size: 0.75rem;
+    }
+    .evolution-item span {
+      -webkit-line-clamp: 1;
+      font-size: 0.62rem;
+      margin-top: 1px;
+    }
+    .evolution-chart-head {
+      font-size: 0.55rem;
+    }
+  }
+
   .signal-desk {
     background: var(--fg);
     color: var(--bg);
