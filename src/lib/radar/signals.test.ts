@@ -142,7 +142,7 @@ it("shows ranked titles without hovering, opens details, and restores the shortl
   ]);
   expect(highlights.textContent).toContain("4/5");
   expect(highlights.querySelector("img")).toBeNull();
-  expect(highlights.textContent).toContain("<img");
+  expect(highlights.textContent).toContain("No change or use-case note");
   buttons[1].click();
   expect(highlights.hidden).toBe(true);
   expect(detail.hidden).toBe(false);
@@ -182,4 +182,22 @@ it("includes tied scores in the evidence handoff and handles a single observatio
   expect(
     dom.window.document.getElementById("signal-all-highlights")!.textContent,
   ).toBe("See all 1");
+});
+
+it("shows published context instead of repo slogans, escaping external notes", () => {
+  dom = new JSDOM(
+    '<span id="signal-total"></span><div id="signal-workspace"></div>',
+  );
+  vi.stubGlobal("document", dom.window.document);
+  mountSignals(
+    rows,
+    vi.fn(),
+    new Map([
+      [rows[0].url, "Tests structured choices. <img src=x onerror=alert(1)>"],
+    ]),
+  );
+  const highlights = dom.window.document.getElementById("signal-highlights")!;
+  expect(highlights.textContent).toContain("Tests structured choices.");
+  expect(highlights.querySelector("img")).toBeNull();
+  expect(highlights.querySelectorAll(".highlight-description")).toHaveLength(3);
 });

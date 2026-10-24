@@ -12,6 +12,7 @@ const cleanups = new WeakMap<HTMLElement, () => void>();
 export function mountSignals(
   rows: Row[],
   onExplore: (group: string, minimum: number) => void,
+  notes: ReadonlyMap<string, string> = new Map(),
 ) {
   const host = document.getElementById("signal-workspace");
   if (!host) return;
@@ -35,13 +36,16 @@ export function mountSignals(
   const ids = new Map(rows.map((row, i) => [row.id, `signal-dot-${i}`]));
   host.innerHTML = `<div class="signal-layout"><div class="signal-canvas"><div class="signal-modes" role="group" aria-label="Arrange observations"><button type="button" data-arrangement="source" aria-pressed="true">By source</button><button type="button" data-arrangement="score" aria-pressed="false">By score</button><span>Solid marks: 4–5/5 evidence</span></div><svg class="signal-field" viewBox="0 0 ${FIELD_WIDTH} ${FIELD_HEIGHT}" role="listbox" tabindex="0" aria-label="Research observations. Use arrow keys to select a mark, Home or End for the first or last item."><g class="field-groups" aria-hidden="true"></g><g class="field-points">${rows.map((row) => `<circle id="${ids.get(row.id)}" data-observation="${esc(row.id)}" data-score="${row.score}" style="--evidence-opacity:${Math.min(1, 0.2 + row.score * 0.2)}" role="option" aria-label="${esc(row.title)}, ${esc(row.group)}, evidence score ${row.score} out of 5" aria-selected="false" cx="0" cy="0" r="${1.65 + row.score * 0.32}"></circle>`).join("")}</g><circle class="field-selection" r="7" fill="none" aria-hidden="true" pointer-events="none"/><circle class="field-preview" r="7" fill="none" aria-hidden="true" pointer-events="none"/></svg></div><div class="signal-sidebar"><div id="signal-highlights" class="signal-highlights"><div class="signal-highlights-head"><h3>Highest evidence</h3><button type="button" id="signal-all-highlights">See all ${qualifying}</button></div><ol>${highlights
     .map((row) => {
-      const [title, ...description] = row.title.split(" — ");
+      const [title] = row.title.split(" — ");
+      const note =
+        notes.get(row.url) ||
+        "No change or use-case note in the latest briefing.";
       const name = title.replace(/ \(HF (?:Dataset|Model)\)$/, "");
-      return `<li><button type="button" data-highlight="${esc(row.id)}"><span class="highlight-meta">${esc(row.group)}<span>${row.score}/5</span></span><strong>${esc(name)}</strong>${description.length ? `<span class="highlight-description">${esc(description.join(" — "))}</span>` : ""}</button></li>`;
+      return `<li><button type="button" data-highlight="${esc(row.id)}"><span class="highlight-meta">${esc(row.group)}<span>${row.score}/5</span></span><strong>${esc(name)}</strong><span class="highlight-description">${esc(note)}</span></button></li>`;
     })
     .join(
       "",
-    )}</ol></div><div id="signal-detail" class="signal-inspector" hidden><button type="button" id="signal-back">← Highlights</button><div class="signal-inspector-head"><p id="signal-selection"></p><span id="signal-position"></span><div class="field-navigation"><button type="button" id="signal-prev" aria-label="Previous observation">←</button><button type="button" id="signal-next" aria-label="Next observation">→</button></div></div><div class="signal-item" id="signal-item"></div><a id="signal-source" class="signal-source" target="_blank" rel="noopener noreferrer">Open original source ↗</a><span class="sr-only" id="signal-announcement" role="status"></span></div></div></div><div class="signal-footer"><p>Select a title or mark to inspect. Arrow keys move between marks.</p><button type="button" id="signal-explore"></button></div>`;
+    )}</ol></div><div id="signal-detail" class="signal-inspector" hidden><button type="button" id="signal-back">← Highlights</button><div class="signal-inspector-head"><p id="signal-selection"></p><span id="signal-position"></span><div class="field-navigation"><button type="button" id="signal-prev" aria-label="Previous observation">←</button><button type="button" id="signal-next" aria-label="Next observation">→</button></div></div><div class="signal-item" id="signal-item"></div><a id="signal-source" class="signal-source" target="_blank" rel="noopener noreferrer">Open original source ↗</a><span class="sr-only" id="signal-announcement" role="status"></span></div></div></div><div class="signal-footer"><p>Notes from the latest briefing. Select a title or mark to inspect.</p><button type="button" id="signal-explore"></button></div>`;
   const svg = host.querySelector<SVGSVGElement>("svg")!,
     inspector = document.getElementById("signal-item")!,
     preview = host.querySelector<SVGCircleElement>(".field-preview")!;
@@ -65,7 +69,7 @@ export function mountSignals(
     document.getElementById("signal-selection")!.textContent = row.group;
     document.getElementById("signal-position")!.textContent =
       `${row.score}/5 evidence`;
-    inspector.innerHTML = `<h3>${esc(name)}</h3>${description.length ? `<p class="signal-description">${esc(description.join(" — "))}</p>` : ""}<dl><div><dt>First observed</dt><dd>${esc(row.firstSeen || "Unavailable")}</dd></div><div><dt>Last observed</dt><dd>${esc(row.lastSeen || "Unavailable")}</dd></div></dl><p class="signal-note">${esc(new URL(row.url).hostname)}</p>`;
+    inspector.innerHTML = `<h3>${esc(name)}</h3>${notes.has(row.url) ? `<p class="signal-description">${esc(notes.get(row.url))}</p>` : ""}${description.length ? `<p class="signal-description">${esc(description.join(" — "))}</p>` : ""}<dl><div><dt>First observed</dt><dd>${esc(row.firstSeen || "Unavailable")}</dd></div><div><dt>Last observed</dt><dd>${esc(row.lastSeen || "Unavailable")}</dd></div></dl><p class="signal-note">${esc(new URL(row.url).hostname)}</p>`;
     (document.getElementById("signal-source") as HTMLAnchorElement).href =
       row.url;
     inspector.scrollTop = 0;

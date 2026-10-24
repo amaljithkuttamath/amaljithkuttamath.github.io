@@ -36,43 +36,52 @@ import SignalDesk from "../components/SignalDesk.astro";
       </div>
     </header>
     <SignalDesk />
-    <div class="radar-tabs" role="tablist" aria-label="Radar view">
-      <button
-        id="tab-briefing"
-        role="tab"
-        aria-selected="true"
-        aria-controls="panel-briefing"
-        data-view="briefing"
+    <div class="radar-navigation">
+      <div class="radar-tabs" role="tablist" aria-label="Radar view">
+        <button
+          id="tab-briefing"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-briefing"
+          data-view="briefing"
+        >
+          Briefing
+        </button>
+        <button
+          id="tab-evidence"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-evidence"
+          tabindex="-1"
+          data-view="evidence"
+        >
+          Evidence <span id="evidence-count"></span>
+        </button>
+        <button
+          id="tab-archive"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-archive"
+          tabindex="-1"
+          data-view="archive"
+        >
+          Archive
+        </button>
+        <button
+          id="radar-refresh"
+          class="radar-refresh"
+          aria-label="Refresh Radar"
+        >
+          ↻
+        </button>
+      </div>
+      <nav
+        id="radar-timeline"
+        class="radar-timeline"
+        aria-label="Daily edition timeline"
       >
-        Briefing
-      </button>
-      <button
-        id="tab-evidence"
-        role="tab"
-        aria-selected="false"
-        aria-controls="panel-evidence"
-        tabindex="-1"
-        data-view="evidence"
-      >
-        Evidence <span id="evidence-count"></span>
-      </button>
-      <button
-        id="tab-archive"
-        role="tab"
-        aria-selected="false"
-        aria-controls="panel-archive"
-        tabindex="-1"
-        data-view="archive"
-      >
-        Archive
-      </button>
-      <button
-        id="radar-refresh"
-        class="radar-refresh"
-        aria-label="Refresh Radar"
-      >
-        ↻
-      </button>
+        <span>Loading timeline…</span>
+      </nav>
     </div>
     <section id="panel-briefing" role="tabpanel" aria-labelledby="tab-briefing">
       <div id="radar-brief" aria-live="polite">
@@ -232,11 +241,80 @@ import SignalDesk from "../components/SignalDesk.astro";
     background: var(--signal);
     margin-right: var(--space-sm);
   }
+  .radar-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    border-bottom: 1px solid var(--radar-line);
+    margin-bottom: var(--space-xl);
+  }
+  .radar-timeline {
+    padding: 0;
+    margin: 0;
+    border: 0;
+    flex-direction: row;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .radar-timeline span {
+    font: 0.65rem var(--font-mono);
+    color: var(--fg-muted);
+    margin-right: 4px;
+  }
+  .radar-timeline a,
+  .radar-timeline button {
+    font: 0.65rem var(--font-mono);
+    color: var(--fg-muted);
+    background: none;
+    border: 0;
+    padding: 12px 2px;
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .radar-timeline a {
+    border-bottom: 2px solid var(--line-strong);
+  }
+  .radar-timeline a[aria-current] {
+    color: var(--fg);
+    border-bottom-color: var(--fg);
+  }
+  .radar-timeline a:hover,
+  .radar-timeline button:hover {
+    color: var(--fg);
+  }
+  .radar-timeline button:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  @media (max-width: 980px) {
+    .radar-navigation {
+      flex-wrap: wrap;
+      gap: 0;
+    }
+    .radar-tabs {
+      width: 100%;
+    }
+    .radar-timeline {
+      width: 100%;
+      justify-content: space-between;
+      padding-bottom: 6px;
+      gap: 4px;
+    }
+    .radar-timeline span {
+      font-size: 0.6rem;
+    }
+    .radar-timeline a,
+    .radar-timeline button {
+      font-size: 0.6rem;
+    }
+  }
   .radar-tabs {
     display: flex;
     gap: var(--space-xl);
-    border-bottom: 1px solid var(--radar-line);
-    margin-bottom: var(--space-xl);
   }
   .radar-tabs button {
     border: 0;

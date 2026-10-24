@@ -1,6 +1,38 @@
 import { marked } from "marked";
 import createDOMPurify from "dompurify";
 import { safeURL, validDate } from "./data";
+/** Extract a short statement without manufacturing a release or recommendation. */
+export function readingNote(text: string) {
+  const clean = text.replace(/\s*[·•]\s*\d(?:\.\d+)?\/5\s*$/, "").trim();
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim());
+  const meaningful = sentences.filter(
+    (s) =>
+      !/^(?:duplicate entry|carryover|\d[\d.,kKmM]* (?:stars|downloads)|github:)/i.test(
+        s,
+      ),
+  );
+  const sentence =
+    meaningful.find((s) =>
+      /^(?:no new|no release|adds? |introduces? |replaces? )/i.test(s),
+    ) ||
+    meaningful[0] ||
+    "";
+  // Remove only enumerated format examples, never parenthetical qualifications.
+  const plain = sentence
+    .replace(/\s*\((?:[A-Z]+\d+)(?:\/[A-Z]+\d+)+\)/g, "")
+    .replace(/^(?:SOTA |state-of-the-art |leading )/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const clause =
+    plain.length > 70 &&
+    !/\b(?:but|however|only|except|unless|without|not)\b/i.test(plain)
+      ? plain.split(/[,;]/)[0].trim()
+      : plain;
+  if (!clause || clause.length > 70) return "";
+  return clause[0].toUpperCase() + clause.slice(1).replace(/[.;:]$/, "") + ".";
+}
 export function digestView(markdown: string, document: Document) {
   const html = marked.parse(
     markdown.replace(/<!-- radar:nav -->[\s\S]*?<!-- \/radar:nav -->/g, ""),
@@ -69,6 +101,16 @@ export function digestView(markdown: string, document: Document) {
   const candidates = [
     ...root.querySelectorAll("p > strong:first-child"),
   ].filter((s) => s.querySelector("a[href]"));
+  const notes = new Map<string, string>();
+  for (const candidate of candidates) {
+    const body = candidate.parentElement!.cloneNode(true) as HTMLElement;
+    body.querySelector("strong")?.remove();
+    const note = readingNote(
+      (body.textContent || "").replace(/^\s*[—–-]\s*/, ""),
+    );
+    const url = candidate.querySelector("a")!.href;
+    if (note && !notes.has(url)) notes.set(url, note);
+  }
   // Preserve source order while giving different published sections a place in the overview.
   const categories = new Set<string>();
   const selected = candidates
@@ -112,6 +154,7 @@ export function digestView(markdown: string, document: Document) {
     date,
     lead: lead?.innerHTML || "Open the full briefing to read this edition.",
     stories,
+    notes,
     sections,
     actions,
     degraded,
