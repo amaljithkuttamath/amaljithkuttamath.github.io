@@ -7,8 +7,9 @@ concise map — the authoritative deep-dive for the main app is
 ## What this repo is
 
 `amaljithkuttamath.github.io` — a personal site built with **Astro 5**, shipped
-as a **static site** to **GitHub Pages**. There is **no backend**: every page is
-prerendered, and the interactive apps run entirely in the browser.
+as a **static site** to **GitHub Pages**. Every page is prerendered. The optional
+ChatGPT subscription provider uses a local OAuth/Responses companion; see
+`docs/chitti-chatgpt.md`. The workspace, data tools and computation run in the browser.
 
 The largest, most complex piece is **Chitti** (`src/lib/chitti/`), a
 browser-only, bring-your-own-key (BYOK) data-analyst agent: it fetches real
@@ -73,8 +74,8 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   green. Provider/data hosts must always be `bypass` (never cached).
 - **Attribute-context HTML uses `escapeHtml` (escapes quotes), not `esc`.** `esc`
   only escapes `&<>`; using it inside an HTML attribute is an injection bug.
-- **BYOK / zero-backend / privacy.** No server, no telemetry, no secrets in the
-  repo. Keys live only in the browser; the share/export formats whitelist fields
+- **Provider privacy.** No telemetry or secrets in the repo. API keys live
+  only in the browser. ChatGPT OAuth tokens stay in the protected local companion; the share/export formats whitelist fields
   (never keys, trace, or the VFS).
 - **The fast path refuses rather than guesses.** `fastpath.ts` answers
   "indicator × countries × years" questions with NO model call — no key, no

@@ -450,7 +450,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           // Price against the model that actually served the nested call, not
           // cfg.model — OpenRouter's free-fallback chain can serve a different
           // one (matches the main-loop attribution).
-          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+          if (cfg.provider !== 'chatgpt') totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
           childEv.status = 'ok';
           childEv.durationMs = Date.now() - started;
           childEv.tokens = res.usage.input + res.usage.output;
@@ -495,7 +495,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         while (steps < MAX_SUBAGENT_CALLS) {
           throwIfAborted();
           const res = await complete(cfg, subMessages, subSchemas, completeDeps);
-          totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+          if (cfg.provider !== 'chatgpt') totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
           if (!res.toolCalls.length) {
             // No tool call — nudge once toward acting, counting it against the
             // step budget so a silent model can't loop forever.
@@ -1463,7 +1463,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         cb.onStatus(status, 'loading');
 
         const res = await complete(activeCfg, messages, toolSchemas, completeDeps);
-        totalCost += estimateCost(res.servedModel ?? activeCfg.model, res.usage);
+        if (activeCfg.provider !== 'chatgpt') totalCost += estimateCost(res.servedModel ?? activeCfg.model, res.usage);
 
         // Note (once per turn) when the free-fallback chain served this call
         // with a different model — visible in the trace and the rail label.
@@ -1618,7 +1618,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
           [],
           completeDeps
         );
-        totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+        if (cfg.provider !== 'chatgpt') totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
         state.finding = res.text.trim() || 'Analysis incomplete within the tool-call budget.';
       }
     }
@@ -1675,7 +1675,7 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         skipReceipt();
         return null;
       }
-      totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
+      if (cfg.provider !== 'chatgpt') totalCost += estimateCost(res.servedModel ?? cfg.model, res.usage);
       const brief = parsePlanBrief(res.text);
       if (!brief) {
         // Unusable brief → no plan card, but the muted receipt explains why.

@@ -451,9 +451,11 @@ export default function Workspace() {
         />
         <div>
           <span>
-            {config.apiKey
-              ? `${config.model} · ${config.sources.length} sources`
-              : "Direct lookups need no API key"}
+            {config.provider === "chatgpt" && config.chatgptAccount
+              ? `ChatGPT plan · ${config.model}`
+              : config.apiKey
+                ? `${config.model} · ${config.sources.length} sources`
+                : "Direct lookups need no API key"}
           </span>
           {running ? (
             <button type="button" onClick={() => agent.stop()}>
@@ -472,7 +474,9 @@ export default function Workspace() {
         </div>
       </form>
       <p className="cw-privacy">
-        Your key stays in this browser. Requests go to your selected provider.
+        {config.provider === "chatgpt"
+          ? "ChatGPT credentials stay in the local companion. Model requests use your ChatGPT plan."
+          : "Your key stays in this browser. Requests go to your selected provider."}
       </p>
     </>
   );
@@ -496,7 +500,14 @@ export default function Workspace() {
           </button>
           <button onClick={() => setSettings(true)}>
             Settings{" "}
-            <span className="cw-connection" data-connected={!!config.apiKey} />
+            <span
+              className="cw-connection"
+              data-connected={
+                config.provider === "chatgpt"
+                  ? !!config.chatgptAccount
+                  : !!config.apiKey
+              }
+            />
           </button>
         </div>
       </header>

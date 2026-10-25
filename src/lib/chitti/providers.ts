@@ -1,3 +1,4 @@
+import { chatGPTCompletion, chatGPTModels } from './chatgpt';
 // providers.ts — a tiny BYOK LLM client that speaks tool-calling to three
 // browser-reachable providers, normalised to one provider-agnostic shape:
 //
@@ -11,7 +12,7 @@
 // Everything runs in the browser. Keys are passed in per-call and never
 // persisted here — storage policy lives in the UI layer.
 
-export type ProviderId = 'openai' | 'anthropic' | 'openrouter';
+export type ProviderId = 'openai' | 'anthropic' | 'openrouter' | 'chatgpt';
 
 export interface ToolSchema {
   name: string;
@@ -60,6 +61,8 @@ export interface ProviderConfig {
   provider: ProviderId;
   model: string;
   apiKey: string;
+  // Public registration ID, never an OAuth token.
+  chatgptAccount?: string;
   // Set by the UI from the selected ModelOption.reasoning (OpenRouter only —
   // see ModelOption.reasoning). Gates whether complete() asks for reasoning
   // at all; requesting it on a model that doesn't support the param is a
@@ -114,6 +117,11 @@ export interface ProviderMeta {
 // be current; the live fetch will replace them within a second of page load.
 export const PROVIDERS: ProviderMeta[] = [
   {
+    id: 'chatgpt', label: 'ChatGPT subscription', models: [], defaultModel: '',
+    keyUrl: 'https://chatgpt.com/settings/usage', keyLabel: 'Manage ChatGPT access',
+    note: 'Sign in through the local companion to use your ChatGPT plan.',
+  },
+  {
     id: 'openrouter',
     label: 'OpenRouter',
     models: [
@@ -146,7 +154,7 @@ export const PROVIDERS: ProviderMeta[] = [
   },
   {
     id: 'openai',
-    label: 'OpenAI',
+    label: 'OpenAI API',
     models: [
       // Populated from api.openai.com/v1/models once a key is entered.
       { id: 'gpt-5-mini', label: 'gpt-5-mini' },
@@ -160,7 +168,7 @@ export const PROVIDERS: ProviderMeta[] = [
   },
   {
     id: 'anthropic',
-    label: 'Anthropic',
+    label: 'Anthropic API',
     models: [
       // Populated from api.anthropic.com/v1/models once a key is entered.
       { id: 'claude-haiku-latest', label: 'claude-haiku (latest)' },
@@ -238,6 +246,7 @@ export const RECOMMENDED_OPENROUTER_MODELS = new Set([
 ]);
 
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
+  chatgpt: '',
   openai: 'gpt-5-mini',
   anthropic: 'claude-haiku-latest',
   openrouter: 'nvidia/nemotron-3-ultra-550b-a55b:free',
@@ -252,7 +261,8 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
 const MODELS_CACHE = new Map<string, { at: number; models: ModelOption[] }>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 
-export async function fetchModels(provider: ProviderId, apiKey?: string): Promise<ModelOption[]> {
+export async function fetchModels(provider: ProviderId, apiKey?: string, account?: string): Promise<ModelOption[]> {
+  if (provider === 'chatgpt') return chatGPTModels(account);
   const cacheKey = provider + ':' + (apiKey || '');
   const cached = MODELS_CACHE.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
@@ -1170,6 +1180,7 @@ export async function complete(
   tools: ToolSchema[] = [],
   deps: CompleteDeps = {}
 ): Promise<CompletionResult> {
+  if (cfg.provider === 'chatgpt') return chatGPTCompletion({ account: cfg.chatgptAccount, model: cfg.model, messages, tools }, deps.signal);
   if (!cfg.apiKey) throw new Error('No API key provided. Enter a key in the BYOK strip.');
 
   const f: FetchLike = deps.fetch ?? ((u, i) => (globalThis.fetch as FetchLike)(u, i));

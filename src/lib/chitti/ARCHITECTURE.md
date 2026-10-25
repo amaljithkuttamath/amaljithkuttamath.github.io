@@ -11,6 +11,12 @@ The page mounts one React workspace. The browser engine emits AG-UI events;
 A2UI v0.9 surfaces render only registered analysis and clarification components.
 There is no required server or arbitrary generated UI code.
 
+The optional **ChatGPT subscription** provider uses a local Node companion
+(`scripts/chitti-chatgpt.mjs`, `scripts/chitti/`) for official OAuth and Responses
+transport. It holds protected credentials outside the site; the browser keeps only
+an account registration ID. `chatgpt.ts` is the browser client. No tools execute
+in the companion. See [setup and security details](../../../docs/chitti-chatgpt.md).
+
 ## Module map
 
 ### Data / source layer (`sources/` + siblings)
