@@ -21,8 +21,8 @@ then **Settings → Provider → ChatGPT subscription**. Click **Continue with C
 follow the ChatGPT link and authorize Chitti. Return and click **Check connection**,
 choose an available model, and **Apply settings**. Allow local network access if
 prompted by your browser. Browsers that block public websites from reaching
-loopback can use the local interface: run `npm run dev -- --host 127.0.0.1 --port 4322`
-in a second terminal and open `http://127.0.0.1:4322/apps/chitti/`.
+loopback can use the local interface: run `npm run build && npm run preview -- --host 127.0.0.1 --port 4323`
+in a second terminal and open `http://127.0.0.1:4323/apps/chitti/`.
 
 Account selection and model choice last until the page reloads. Reopen settings
 to select a saved account. Separate registrations are kept for each account or

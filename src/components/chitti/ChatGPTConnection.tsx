@@ -142,11 +142,14 @@ export default function ChatGPTConnection({
             second terminal:
           </p>
           <pre>
-            <code>npm run dev -- --host 127.0.0.1 --port 4322</code>
+            <code>
+              npm run build &amp;&amp; npm run preview -- --host 127.0.0.1
+              --port 4323
+            </code>
           </pre>
           <p>
             <a
-              href="http://127.0.0.1:4322/apps/chitti/"
+              href="http://127.0.0.1:4323/apps/chitti/"
               target="_blank"
               rel="noreferrer"
             >
