@@ -12,20 +12,23 @@ export async function companion<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   let response: Response;
+  const timeout = AbortSignal.timeout(path === "complete" ? 185_000 : 65_000);
   try {
     response = await fetch(`${base}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Chitti-Client": "1" },
       body: JSON.stringify(data),
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(185_000)])
-        : AbortSignal.timeout(15_000),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       credentials: "omit",
       cache: "no-store",
       redirect: "error",
     });
   } catch (e) {
     if (signal?.aborted) throw e;
+    if (timeout.aborted)
+      throw new Error(
+        "ChatGPT request timed out. Check the companion and retry.",
+      );
     throw new Error(
       "Start the Chitti companion, then reconnect. Allow local network access if your browser asks.",
     );
