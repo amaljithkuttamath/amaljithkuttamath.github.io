@@ -1138,3 +1138,28 @@
     align-items: baseline;
   }
 }
+
+.cw-chatgpt {
+  border-block: 1px solid var(--cw-line);
+  padding-block: 0.5rem;
+}
+.cw-chatgpt p {
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+.cw-chatgpt pre {
+  font-size: 0.75rem;
+  padding: 0.65rem;
+  overflow-x: auto;
+  background: var(--bg);
+}
+.cw-chatgpt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.cw-chatgpt-actions a {
+  font-size: 0.76rem;
+  padding: 0.4rem 0.6rem;
+}

@@ -1,3 +1,4 @@
+import ChatGPTConnection from "./ChatGPTConnection";
 import { useEffect, useRef, useState } from "react";
 import {
   PROVIDERS,
@@ -51,6 +52,7 @@ export default function Settings({
       provider: id,
       model: providerMeta(id).models[0]?.id || "",
       apiKey: "",
+      chatgptAccount: undefined,
       requestReasoning: false,
     });
     setModels(providerMeta(id).models);
@@ -60,14 +62,18 @@ export default function Settings({
     const version = ++loading.current;
     setStatus("Reading model catalog…");
     try {
-      const list = await fetchModels(draft.provider, draft.apiKey);
+      const list = await fetchModels(
+        draft.provider,
+        draft.apiKey,
+        draft.chatgptAccount,
+      );
       if (version === loading.current) {
         setModels(list);
         setStatus(`${list.length} models available.`);
       }
     } catch {
       if (version === loading.current)
-        setStatus("Catalog unavailable. Enter a model ID below.");
+        setStatus("Could not load models. Check the connection and retry.");
     }
   };
   return (
@@ -93,7 +99,7 @@ export default function Settings({
         </header>
         <p>
           Simple lookups work without a model. Analysis uses your chosen
-          provider and key.
+          provider connection.
         </p>
         {locked && (
           <p className="cw-notice">
@@ -101,37 +107,63 @@ export default function Settings({
             change it.
           </p>
         )}
+        <label>
+          Provider
+          <select
+            disabled={locked}
+            value={draft.provider}
+            onChange={(e) => changeProvider(e.target.value as ProviderId)}
+          >
+            {PROVIDERS.map((p) => (
+              <option value={p.id} key={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {draft.provider === "chatgpt" && (
+          <ChatGPTConnection
+            account={draft.chatgptAccount}
+            locked={locked}
+            onAccount={(id) => {
+              if (!locked) setDraft((d) => ({ ...d, chatgptAccount: id }));
+            }}
+            onModels={(list) => {
+              setModels(list);
+              if (!locked)
+                setDraft((d) => ({
+                  ...d,
+                  model: list.some((m) => m.id === d.model)
+                    ? d.model
+                    : list[0]?.id || "",
+                }));
+            }}
+          />
+        )}
         <fieldset disabled={locked}>
-          <label>
-            Provider
-            <select
-              value={draft.provider}
-              onChange={(e) => changeProvider(e.target.value as ProviderId)}
-            >
-              {PROVIDERS.map((p) => (
-                <option value={p.id} key={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            API key
-            <input
-              type="password"
-              value={draft.apiKey}
-              autoComplete="off"
-              onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-            />
-          </label>
-          <label className="cw-check">
-            <input
-              type="checkbox"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-            />
-            Remember in this tab until it closes
-          </label>
+          {draft.provider !== "chatgpt" && (
+            <>
+              <label>
+                API key
+                <input
+                  type="password"
+                  value={draft.apiKey}
+                  autoComplete="off"
+                  onChange={(e) =>
+                    setDraft({ ...draft, apiKey: e.target.value })
+                  }
+                />
+              </label>
+              <label className="cw-check">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Remember in this tab until it closes
+              </label>
+            </>
+          )}
           <label>
             Model
             <input
@@ -187,7 +219,7 @@ export default function Settings({
                 checked={draft.rlm}
                 onChange={(e) => setDraft({ ...draft, rlm: e.target.checked })}
               />
-              Allow nested model calls (uses your key)
+              Allow nested model calls (uses this provider)
             </label>
             <label className="cw-check">
               <input
@@ -218,7 +250,14 @@ export default function Settings({
           </button>
           <button
             type="submit"
-            disabled={locked || !draft.sources.length || !draft.model.trim()}
+            disabled={
+              locked ||
+              !draft.sources.length ||
+              !draft.model.trim() ||
+              (draft.provider === "chatgpt" &&
+                (!draft.chatgptAccount ||
+                  !models.some((m) => m.id === draft.model)))
+            }
           >
             Apply settings
           </button>

@@ -247,7 +247,7 @@ export class ChittiAgent extends AbstractAgent {
               directActive = false;
             }
           }
-          if (!cfg.apiKey.trim()) {
+          if (cfg.provider === "chatgpt" ? !cfg.chatgptAccount : !cfg.apiKey.trim()) {
             patch({
               phase: "needs-key",
               status:
@@ -315,7 +315,7 @@ export class ChittiAgent extends AbstractAgent {
             ts: new Date().toISOString(),
           });
           analysis.result = result;
-          analysis.cost = output.cost;
+          analysis.cost = cfg.provider === "chatgpt" ? undefined : output.cost;
           if (output.aborted || controller.signal.aborted) {
             analysis.phase = "stopped";
             analysis.status = "Stopped. Partial results retained.";

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "demos:refresh": "node scripts/gen-chitti-demos.mjs",
     "kb:refresh": "node scripts/gen-chitti-kb.mjs",
-    "mirror:refresh": "node scripts/gen-chitti-mirror.mjs"
+    "mirror:refresh": "node scripts/gen-chitti-mirror.mjs",
+    "chitti:connect": "node scripts/chitti-chatgpt.mjs"
   },
   "dependencies": {
     "@a2ui/react": "^0.14.0",
@@ -25,6 +26,7 @@
     "astro": "^5.18.0",
     "dompurify": "3.4.17",
     "echarts": "^6.1.0",
+    "jose": "^6.2.13",
     "marked": "18.1.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
