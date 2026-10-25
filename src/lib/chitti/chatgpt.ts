@@ -12,7 +12,9 @@ export async function companion<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   let response: Response;
-  const timeout = AbortSignal.timeout(path === "complete" ? 185_000 : 65_000);
+  const timeout = AbortSignal.timeout(
+    path === "complete" ? 185_000 : path === "status" ? 5_000 : 65_000,
+  );
   try {
     response = await fetch(`${base}/${path}`, {
       method: "POST",

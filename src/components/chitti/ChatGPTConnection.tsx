@@ -137,6 +137,22 @@ export default function ChatGPTConnection({
               npm run chitti:connect
             </code>
           </pre>
+          <p>
+            If this browser blocks the connection, run the local interface in a
+            second terminal:
+          </p>
+          <pre>
+            <code>npm run dev -- --host 127.0.0.1 --port 4322</code>
+          </pre>
+          <p>
+            <a
+              href="http://127.0.0.1:4322/apps/chitti/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open local Chitti ↗
+            </a>
+          </p>
           <a
             href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/blob/main/docs/chitti-chatgpt.md"
             target="_blank"
