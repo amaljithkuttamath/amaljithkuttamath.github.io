@@ -49,8 +49,10 @@ export function createCompanion({
   fetcher = fetch,
   verify = verifyIdentity,
   port = PORT,
+  openBrowser = async () => false,
 }) {
-  let pending,
+  let lastConnected,
+    pending,
     authBusy = false,
     lastAuth = 0;
   const refreshing = new Map(),
@@ -151,6 +153,7 @@ export function createCompanion({
           record,
         ];
         await persist();
+        lastConnected = client;
         success = true;
         message = "Connected. Return to Chitti and choose a model.";
       } catch {
@@ -191,6 +194,8 @@ export function createCompanion({
       const body = await jsonBody(req);
       if (url.pathname === "/status")
         return send(200, {
+          authorizing: authBusy || !!(pending && pending.expires > Date.now()),
+          lastConnected,
           accounts: store.accounts.map((a) => ({
             id: a.client_id,
             label: `${a.email || "ChatGPT account"} · ${a.client_id.slice(-6)}`,
@@ -212,7 +217,9 @@ export function createCompanion({
           account,
         );
         pending = attempt.pending;
-        return send(200, { url: attempt.url });
+        lastConnected = undefined;
+        const opened = await openBrowser(attempt.url).catch(() => false);
+        return send(200, { url: attempt.url, opened });
       }
       if (url.pathname === "/disconnect") {
         const a = accountFor(body.account);

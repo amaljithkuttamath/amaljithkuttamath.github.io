@@ -92,19 +92,14 @@ export default function Settings({
         }}
       >
         <header>
-          <h2>Model & sources</h2>
+          <h2>Model</h2>
           <button type="button" onClick={onClose} aria-label="Close settings">
             ×
           </button>
         </header>
-        <p>
-          Simple lookups work without a model. Analysis uses your chosen
-          provider connection.
-        </p>
         {locked && (
           <p className="cw-notice">
-            This session’s configuration is locked. Start a new analysis to
-            change it.
+            This analysis keeps its model. Start a new analysis to switch.
           </p>
         )}
         <label>
@@ -164,55 +159,91 @@ export default function Settings({
               </label>
             </>
           )}
-          <label>
-            Model
-            <input
-              list="cw-models"
-              value={draft.model}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  model: e.target.value,
-                  requestReasoning:
-                    models.find((m) => m.id === e.target.value)?.reasoning ===
-                    true,
-                })
-              }
-            />
-            <datalist id="cw-models">
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </datalist>
-          </label>
-          <button type="button" onClick={() => void load()}>
-            Load available models
-          </button>
-          <p role="status">{status}</p>
-          <legend>Data sources</legend>
-          <div className="cw-source-options">
-            {SOURCES.map((source) => (
-              <label className="cw-check" key={source.id}>
-                <input
-                  type="checkbox"
-                  checked={draft.sources.includes(source.id)}
+          <div className="cw-model-picker">
+            <label>
+              Model
+              {draft.provider === "chatgpt" ? (
+                <select
+                  value={draft.model}
+                  disabled={!models.length}
                   onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      sources: e.target.checked
-                        ? [...draft.sources, source.id]
-                        : draft.sources.filter((id) => id !== source.id),
-                    })
+                    setDraft({ ...draft, model: e.target.value })
                   }
-                />
-                {source.label}
-              </label>
-            ))}
+                >
+                  {!models.length && (
+                    <option value={draft.model}>
+                      {draft.model || "Connect to load your models"}
+                    </option>
+                  )}
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <input
+                    list="cw-models"
+                    value={draft.model}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        model: e.target.value,
+                        requestReasoning:
+                          models.find((m) => m.id === e.target.value)
+                            ?.reasoning === true,
+                      })
+                    }
+                  />
+                  <datalist id="cw-models">
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </>
+              )}
+            </label>
+            <button
+              type="button"
+              aria-label="Refresh models"
+              title="Refresh models"
+              onClick={() => void load()}
+            >
+              ↻
+            </button>
           </div>
+          {status && <p role="status">{status}</p>}
+          <details className="cw-source-settings">
+            <summary>
+              Data sources <span>{draft.sources.length} selected</span>
+            </summary>
+            <p>Results include links to the source records.</p>
+
+            <div className="cw-source-options">
+              {SOURCES.map((source) => (
+                <label className="cw-check" key={source.id}>
+                  <input
+                    type="checkbox"
+                    checked={draft.sources.includes(source.id)}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        sources: e.target.checked
+                          ? [...draft.sources, source.id]
+                          : draft.sources.filter((id) => id !== source.id),
+                      })
+                    }
+                  />
+                  {source.label}
+                </label>
+              ))}
+            </div>
+          </details>
           <details>
-            <summary>Agent options</summary>
+            <summary>Advanced</summary>
             <label className="cw-check">
               <input
                 type="checkbox"
@@ -259,7 +290,7 @@ export default function Settings({
                   !models.some((m) => m.id === draft.model)))
             }
           >
-            Apply settings
+            Use model
           </button>
         </footer>
       </form>

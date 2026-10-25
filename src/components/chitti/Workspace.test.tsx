@@ -61,7 +61,11 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
   );
   render(<Workspace />);
   const previous = DEMOS[0];
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${previous.id}` },
+  });
   await screen.findByRole("heading", { name: previous.question });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Use current view" }));
   const question = "Chart life expectancy in Japan since 1960";
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: question },
@@ -177,10 +181,13 @@ it("uses the restored evidence for the next model request after undo", async () 
 });
 it("keeps a model-key request beside the unchanged result", async () => {
   render(<Workspace />);
+  fireEvent.change(screen.getByLabelText("Open result"), {
+    target: { value: `example:${DEMOS[0].id}` },
+  });
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: "Explain the causal mechanism" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Analyze" }));
+  fireEvent.click(screen.getByRole("button", { name: "Update" }));
   await screen.findByRole("button", { name: "Connect model" });
   expect(screen.getByRole("heading", { name: DEMOS[0].question })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Current request" })).toBeTruthy();
@@ -318,4 +325,26 @@ it("stops an inline explanation and retries against the same evidence", async ()
     within(panel).getByRole("button", { name: "Stop explanation" }),
   );
   await within(panel).findByText("Stopped");
+});
+
+it("starts with the user's question and lets them deliberately open evidence", async () => {
+  render(<Workspace />);
+  expect(
+    screen.getByRole("heading", { name: "What do you want to find out?" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("Chart rendered")).toBeNull();
+  expect(screen.getAllByRole("textbox")).toHaveLength(1);
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Recorded analyses" })).getByRole(
+      "button",
+      {
+        name: new RegExp(
+          DEMOS[0].question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        ),
+      },
+    ),
+  );
+  await screen.findByRole("heading", { name: DEMOS[0].question });
+  fireEvent.click(screen.getByRole("tab", { name: /Sources/ }));
+  expect(screen.getAllByText(/World Bank/).length).toBeGreaterThan(0);
 });

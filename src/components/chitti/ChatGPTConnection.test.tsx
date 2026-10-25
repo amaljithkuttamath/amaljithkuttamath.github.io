@@ -52,7 +52,7 @@ it("offers the official sign-in link and allows restarting an expired attempt", 
   );
   expect(
     (
-      await screen.findByRole("link", { name: /Continue with ChatGPT/ })
+      await screen.findByRole("link", { name: /Open ChatGPT sign-in/ })
     ).getAttribute("href"),
   ).toContain("https://auth.openai.com/");
   expect(screen.getByRole("button", { name: "Restart sign-in" })).toBeTruthy();
@@ -77,4 +77,57 @@ it("does not replace the provider model after the component unmounts", async () 
   );
   expect(account).not.toHaveBeenCalled();
   expect(models).not.toHaveBeenCalled();
+});
+it("detects completed browser sign-in and loads the new account without a manual check", async () => {
+  vi.mocked(companion).mockImplementation(async (path) =>
+    path === "auth/start"
+      ? {
+          url: "https://auth.openai.com/api/accounts/authorize?state=test",
+          opened: true,
+        }
+      : { accounts: [] },
+  );
+  const onAccount = vi.fn(),
+    onModels = vi.fn();
+  render(<ChatGPTConnection onAccount={onAccount} onModels={onModels} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Continue with ChatGPT" }),
+  );
+  await screen.findByText(/Finish sign-in in your browser/);
+  vi.mocked(companion).mockResolvedValue({
+    authorizing: false,
+    lastConnected: "new-account",
+    accounts: [{ id: "new-account", label: "Signed in", connected: true }],
+  });
+  vi.mocked(chatGPTModels).mockResolvedValue([
+    { id: "available", label: "Available" },
+  ]);
+  await waitFor(() => expect(onAccount).toHaveBeenCalledWith("new-account"), {
+    timeout: 3000,
+  });
+  expect(onModels).toHaveBeenCalledWith([
+    { id: "available", label: "Available" },
+  ]);
+  expect(
+    screen.queryByRole("link", { name: /Open ChatGPT sign-in/ }),
+  ).toBeNull();
+});
+it("keeps catalog failures visible for an already connected account", async () => {
+  vi.mocked(companion).mockResolvedValue({
+    accounts: [{ id: "issued", label: "Signed in", connected: true }],
+  });
+  vi.mocked(chatGPTModels).mockRejectedValue(
+    new Error("Model catalog unavailable"),
+  );
+  render(
+    <ChatGPTConnection
+      account="issued"
+      onAccount={vi.fn()}
+      onModels={vi.fn()}
+    />,
+  );
+  await screen.findByText("Model catalog unavailable");
+  expect(screen.getByRole("status").textContent).toBe(
+    "Model catalog unavailable",
+  );
 });

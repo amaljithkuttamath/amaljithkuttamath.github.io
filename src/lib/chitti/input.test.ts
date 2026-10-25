@@ -93,6 +93,7 @@ it("streams the real render_chart tool with recorded workspace evidence before t
     workspace.spec,
   );
   expect(JSON.parse(files["citations.json"])).toEqual(workspace.citations);
+  expect(JSON.stringify(mock.mock.calls[0][1])).toContain("citations.json for the underlying institutional sources");
 });
 it("replaces overlapping recorded values when new source rows arrive", async () => {
   const { replaceWorkspaceRows } = await import("./session");

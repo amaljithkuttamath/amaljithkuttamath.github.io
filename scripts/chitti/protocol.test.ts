@@ -169,3 +169,93 @@ describe("ChatGPT subscription Responses protocol", () => {
     ).toThrow("invalid tool call");
   });
 });
+
+describe("subscription streams with metadata-only terminal events", () => {
+  const item = {
+    id: "msg-fixture",
+    type: "message",
+    status: "completed",
+    content: [{ type: "output_text", text: "Checked values." }],
+  };
+  const tool = {
+    type: "function_call",
+    call_id: "call-fixture",
+    name: "lookup",
+    namespace: "chitti",
+    arguments: '{"q":"GDP"}',
+    status: "completed",
+  };
+  const terminal = {
+    type: "response.completed",
+    response: { ...output, output: [] },
+  };
+  it("retains finalized message and tool items when completed.output is empty", async () => {
+    const result = await readCompletion(
+      stream(
+        [
+          { type: "response.output_item.done", output_index: 1, item: tool },
+          { type: "response.output_item.done", output_index: 0, item },
+          { type: "response.output_item.done", output_index: 0, item },
+          terminal,
+        ],
+        1,
+      ),
+    );
+    expect(result.text).toBe("Checked values.");
+    expect(result.toolCalls).toEqual([
+      { id: "call-fixture", name: "lookup", arguments: { q: "GDP" } },
+    ]);
+    expect(result.usage).toEqual({ input: 2, output: 3 });
+  });
+  it("does not duplicate items when the terminal event also contains output", async () => {
+    const result = await readCompletion(
+      stream([
+        { type: "response.output_item.done", output_index: 0, item },
+        { type: "response.completed", response: { ...output, output: [item] } },
+      ]),
+    );
+    expect(result.text).toBe("Checked values.");
+  });
+  it("still rejects failure or interruption after finalized items", async () => {
+    const done = { type: "response.output_item.done", output_index: 0, item };
+    await expect(readCompletion(stream([done]))).rejects.toThrow(
+      "before completion",
+    );
+    await expect(
+      readCompletion(
+        stream([
+          done,
+          {
+            type: "response.failed",
+            response: {
+              error: { code: "subscription_sharing_usage_limit_exceeded" },
+            },
+          },
+        ]),
+      ),
+    ).rejects.toThrow("subscription limit");
+  });
+  it("rejects invalid output indices and unfinished output items", async () => {
+    for (const output_index of [-1, 0.5, 4096])
+      await expect(
+        readCompletion(
+          stream([
+            { type: "response.output_item.done", output_index, item },
+            terminal,
+          ]),
+        ),
+      ).rejects.toThrow("invalid output item");
+    await expect(
+      readCompletion(
+        stream([
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: { ...item, status: "incomplete" },
+          },
+          terminal,
+        ]),
+      ),
+    ).rejects.toThrow("invalid output item");
+  });
+});

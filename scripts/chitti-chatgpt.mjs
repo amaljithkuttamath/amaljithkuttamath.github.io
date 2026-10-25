@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { openSignIn } from "./chitti/browser.mjs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadStore, saveStore } from "./chitti/oauth.mjs";
@@ -32,6 +33,7 @@ listener.listen(PORT, "127.0.0.1", async () => {
     await saveStore(directory, store);
     handler = createCompanion({
       store,
+      openBrowser: openSignIn,
       persist: () => {
         const snapshot = structuredClone(store);
         saving = saving
@@ -41,7 +43,7 @@ listener.listen(PORT, "127.0.0.1", async () => {
       },
     });
     console.log(
-      `Chitti companion ready on 127.0.0.1:${PORT}.\nOpen Chitti → Settings → ChatGPT subscription → Continue with ChatGPT.\nCredentials stay in ${directory} (owner-only). Keep this terminal running.`,
+      `Chitti companion ready on 127.0.0.1:${PORT}.\nOpen Chitti → Connect model → ChatGPT subscription → Continue with ChatGPT.\nCredentials stay in ${directory} (owner-only). Keep this terminal running.`,
     );
   } catch {
     console.error("Unable to read or save Chitti’s protected account store.");

@@ -101,8 +101,20 @@ describe("ChatGPT companion integration", () => {
       email: "verified@example.com",
     }));
     const fetcher = vi.fn(async () => new Response(JSON.stringify(grant)));
-    const server = createCompanion({ store, persist, fetcher, verify });
+    const openBrowser = vi.fn(async () => true);
+    const server = createCompanion({
+      store,
+      persist,
+      fetcher,
+      verify,
+      openBrowser,
+    });
     const auth = await request(server, "/auth/start");
+    expect(openBrowser).toHaveBeenCalledWith(auth.body.url);
+    expect(auth.body.opened).toBe(true);
+    expect((await request(server, "/status")).body).toMatchObject({
+      authorizing: true,
+    });
     const q = new URL(auth.body.url).searchParams;
     const callback = `/auth/callback?${new URLSearchParams({ code: "test-code", state: q.get("state")!, client_id: "issued" })}`;
     expect(
@@ -119,6 +131,10 @@ describe("ChatGPT companion integration", () => {
       client_id: "issued",
     });
     expect(persist).toHaveBeenCalledTimes(1);
+    expect((await request(server, "/status")).body).toMatchObject({
+      authorizing: false,
+      lastConnected: "issued",
+    });
     expect(
       (await request(server, callback, {}, { method: "GET" })).status,
     ).toBe(400);
