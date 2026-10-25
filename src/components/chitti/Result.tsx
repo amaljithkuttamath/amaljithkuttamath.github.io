@@ -41,9 +41,37 @@ export function Result({
   );
   return (
     <div className="cw-result">
+      {result.answer && (
+        <div
+          className="cw-finding"
+          dangerouslySetInnerHTML={{ __html: mdToHtml(result.answer) }}
+        />
+      )}
+      {result.verification && (
+        <details
+          className="cw-verdict"
+          data-verified={result.verification.status === "verified"}
+        >
+          <summary>
+            {result.verification.status === "verified"
+              ? "Evidence check passed"
+              : result.verification.status === "unavailable"
+                ? "Evidence check unavailable"
+                : "Evidence not verified"}
+            {result.verification.engine === "jev" ? " · Jev" : ""}
+          </summary>
+          <p>
+            Verifier confidence: {result.verification.confidence}. This is the
+            verifier’s assessment.
+          </p>
+          {result.verification.issues.map((issue, i) => (
+            <p key={i}>{issue}</p>
+          ))}
+        </details>
+      )}
       {onSteer && (
         <fieldset className="cw-steering" disabled={!enabled}>
-          <legend>Work with this view</legend>
+          <legend className="cw-sr-only">Work with this view</legend>
           <div className="cw-view-controls">
             {choices.length > 1 && (
               <label>
@@ -106,34 +134,6 @@ export function Result({
             </form>
           )}
         </fieldset>
-      )}
-      {result.answer && (
-        <div
-          className="cw-finding"
-          dangerouslySetInnerHTML={{ __html: mdToHtml(result.answer) }}
-        />
-      )}
-      {result.verification && (
-        <details
-          className="cw-verdict"
-          data-verified={result.verification.status === "verified"}
-        >
-          <summary>
-            {result.verification.status === "verified"
-              ? "Evidence check passed"
-              : result.verification.status === "unavailable"
-                ? "Evidence check unavailable"
-                : "Evidence not verified"}
-            {result.verification.engine === "jev" ? " · Jev" : ""}
-          </summary>
-          <p>
-            Verifier confidence: {result.verification.confidence}. This is the
-            verifier’s assessment.
-          </p>
-          {result.verification.issues.map((issue, i) => (
-            <p key={i}>{issue}</p>
-          ))}
-        </details>
       )}
       <div className="cw-tabs" role="tablist" aria-label="Result view">
         {["Chart", "Data", "Sources"].map((t) => (

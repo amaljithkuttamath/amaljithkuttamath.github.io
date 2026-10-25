@@ -61,11 +61,21 @@ export function esc(s: string): string {
 // renderer — escape first, then transform — instead of a library: the
 // subset the agent actually emits is small and everything is escaped
 // before any HTML is introduced, so no injection surface.
-export function inlineMd(escaped: string): string {
+function inlineFormatting(escaped: string): string {
   return escaped
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+}
+export function inlineMd(escaped: string): string {
+  // Text is already escaped. Format link labels separately so emphasis syntax
+  // cannot modify URLs; only absolute HTTP(S) links are interactive.
+  return escaped.split(/(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/gi).map((part) => {
+    const link = part.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/i);
+    if (!link) return inlineFormatting(part);
+    const href = link[2].replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + inlineFormatting(link[1]) + '</a>';
+  }).join('');
 }
 
 export function mdToHtml(text: string): string {

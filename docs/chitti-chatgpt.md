@@ -17,16 +17,18 @@ npm run chitti:connect
 ```
 
 Keep that terminal running. Open [Chitti](https://amaljithkuttamath.github.io/apps/chitti/),
-then **Settings → Provider → ChatGPT subscription**. Click **Continue with ChatGPT**,
-follow the ChatGPT link and authorize Chitti. Return and click **Check connection**,
-choose an available model, and **Apply settings**. Allow local network access if
+then **Connect model → ChatGPT subscription**. Click **Continue with ChatGPT**.
+The companion opens sign-in in your default browser; a manual link remains available.
+Authorize Chitti, return to the model dialog, and wait for the connected account
+and available models to appear. Choose a model and click **Use model**. Allow local network access if
 prompted by your browser. Browsers that block public websites from reaching
 loopback can use the local interface: run `npm run build && npm run preview -- --host 127.0.0.1 --port 4323`
 in a second terminal and open `http://127.0.0.1:4323/apps/chitti/`.
 
-Account selection and model choice last until the page reloads. Reopen settings
-to select a saved account. Separate registrations are kept for each account or
-workspace; **Add account** starts a new registration. Existing analysis sessions
+Account selection and model choice survive reloads in the current browser tab.
+Only the public registration ID and model name are stored there. Open **Account
+and usage** to select another saved account or reconnect. Separate registrations
+are kept for each account or workspace; **Add account** starts a new registration. Existing analysis sessions
 keep their selected account and model. Reconnect that account without starting a
 new analysis, or start a new analysis to switch accounts/models.
 

@@ -159,6 +159,7 @@ export async function readCompletion(body) {
   if (!body) throw new Error("ChatGPT returned no response stream.");
   const reader = body.getReader(),
     decoder = new TextDecoder();
+  const finalized = new Map();
   let buffer = "",
     total = 0;
   try {
@@ -185,8 +186,32 @@ export async function readCompletion(body) {
         } catch {
           throw new Error("ChatGPT returned a malformed stream event.");
         }
-        if (event.type === "response.completed")
-          return completion(event.response);
+        if (event.type === "response.output_item.done") {
+          if (
+            !Number.isInteger(event.output_index) ||
+            event.output_index < 0 ||
+            event.output_index > 2048 ||
+            !event.item ||
+            typeof event.item !== "object" ||
+            !["completed", undefined].includes(event.item.status)
+          )
+            throw new Error("ChatGPT returned an invalid output item.");
+          finalized.set(event.output_index, event.item);
+        }
+        if (event.type === "response.completed") {
+          // Subscription streams can put final content only in output_item.done.
+          // Keep waiting for this terminal event before returning any result.
+          const response = event.response;
+          return completion({
+            ...response,
+            output:
+              Array.isArray(response?.output) && response.output.length
+                ? response.output
+                : [...finalized.entries()]
+                    .sort(([a], [b]) => a - b)
+                    .map(([, item]) => item),
+          });
+        }
         if (event.type === "response.failed" || event.type === "error")
           throw new Error(
             subscriptionError(event.response?.error?.code || event.code),

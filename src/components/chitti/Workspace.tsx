@@ -31,23 +31,32 @@ import { SOURCES, rowsToCSV } from "../../lib/chitti/tools";
 import { buildFindingOkf } from "../../lib/chitti/okf";
 import type { ActionPayload } from "@a2ui/web_core/v0_9";
 import Settings from "./Settings";
+import ExamplePlot from "./ExamplePlot";
 import Surface from "./Surface";
 import Dashboards, { download } from "./Dashboards";
 import "./workspace.css";
 function initialConfig(): Config {
-  let provider: ProviderId = "openrouter",
-    apiKey = "";
+  let provider: ProviderId = "chatgpt",
+    apiKey = "",
+    model = "",
+    chatgptAccount: string | undefined;
   try {
     const saved = sessionStorage.getItem("chitti:provider");
     if (PROVIDERS.some((p) => p.id === saved)) {
       provider = saved as ProviderId;
       apiKey = sessionStorage.getItem("chitti:key") || "";
+      model = sessionStorage.getItem("chitti:model") || "";
+      chatgptAccount = sessionStorage.getItem("chitti:account") || undefined;
     }
   } catch {}
   return {
     provider,
-    model: providerMeta(provider).models[0]?.id || "",
-    apiKey,
+    model:
+      provider === "chatgpt"
+        ? model
+        : providerMeta(provider).models[0]?.id || "",
+    chatgptAccount: provider === "chatgpt" ? chatgptAccount : undefined,
+    apiKey: provider === "chatgpt" ? "" : apiKey,
     sources: SOURCES.map((s) => s.id),
     rlm: false,
   };
@@ -62,9 +71,7 @@ export default function Workspace() {
     Record<string, { change: ChartChange; analysis: Analysis }>
   >({});
   const [turns, setTurns] = useState<Analysis[]>([]);
-  const [selected, setSelected] = useState(
-    DEMOS[0] ? `example:${DEMOS[0].id}` : "",
-  );
+  const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
   const [useCurrent, setUseCurrent] = useState(false);
   const [redo, setRedo] = useState<string[]>([]);
@@ -334,7 +341,12 @@ export default function Workspace() {
       agent.configure(value);
       setConfig(value);
       try {
-        if (remember) {
+        if (value.provider === "chatgpt") {
+          sessionStorage.setItem("chitti:provider", value.provider);
+          sessionStorage.setItem("chitti:account", value.chatgptAccount || "");
+          sessionStorage.setItem("chitti:model", value.model);
+          sessionStorage.removeItem("chitti:key");
+        } else if (remember) {
           sessionStorage.setItem("chitti:key", value.apiKey);
           sessionStorage.setItem("chitti:provider", value.provider);
         } else {
@@ -473,20 +485,13 @@ export default function Workspace() {
           )}
         </div>
       </form>
-      <p className="cw-privacy">
-        {config.provider === "chatgpt"
-          ? "ChatGPT credentials stay in the local companion. Model requests use your ChatGPT plan."
-          : "Your key stays in this browser. Requests go to your selected provider."}
-      </p>
     </>
   );
   return (
     <div className="cw">
       <header className="cw-header">
         <div>
-          <h1>
-            Chitti<span>Work with the data</span>
-          </h1>
+          <h1>Chitti</h1>
         </div>
         <div className="cw-actions">
           <button
@@ -496,10 +501,18 @@ export default function Workspace() {
             }}
             aria-pressed={dashboards}
           >
-            Dashboards
+            Saved
           </button>
-          <button onClick={() => setSettings(true)}>
-            Settings{" "}
+          <button
+            className="cw-model-control"
+            aria-label="Model settings"
+            onClick={() => setSettings(true)}
+          >
+            {config.provider === "chatgpt" && config.chatgptAccount
+              ? "ChatGPT"
+              : config.apiKey
+                ? providerMeta(config.provider).label
+                : "Connect model"}{" "}
             <span
               className="cw-connection"
               data-connected={
@@ -524,7 +537,10 @@ export default function Workspace() {
             />
           ) : (
             <>
-              <div className="cw-thread-tools">
+              <div
+                className="cw-thread-tools"
+                data-empty={!active || undefined}
+              >
                 <button disabled={running} onClick={newAnalysis}>
                   New analysis
                 </button>
@@ -844,13 +860,42 @@ export default function Workspace() {
                 </article>
               ) : (
                 <div className="cw-start">
-                  <h2>Ask for data.</h2>
+                  <h2>What do you want to find out?</h2>
+                  <p>
+                    Compare countries, follow a trend, or check a claim against
+                    public data.
+                  </p>
                   {!!redo.length && (
                     <button disabled={running} onClick={redoChange}>
                       Redo
                     </button>
                   )}
                   {composerView}
+                  <section
+                    className="cw-examples"
+                    aria-label="Recorded analyses"
+                  >
+                    <h3>Explore a recorded analysis</h3>
+                    <div>
+                      {DEMOS.map((d) => (
+                        <button
+                          key={d.id}
+                          onClick={() => {
+                            setSelected(`example:${d.id}`);
+                            setUseCurrent(true);
+                          }}
+                        >
+                          <ExamplePlot spec={d.state.spec} />
+                          <strong>{d.question}</strong>
+                          <span>{d.sources.join(" / ")}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                  <p className="cw-source-line">
+                    World Bank, Our World in Data, IMF and WHO. Every result
+                    keeps its sources.
+                  </p>
                 </div>
               )}
             </>
