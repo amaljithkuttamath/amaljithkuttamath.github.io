@@ -32,6 +32,19 @@ are kept for each account or workspace; **Add account** starts a new registratio
 keep their selected account and model. Reconnect that account without starting a
 new analysis, or start a new analysis to switch accounts/models.
 
+## Switching providers
+
+OpenRouter, OpenAI API and Anthropic each keep their own key and model while
+Chitti is open. Switching to ChatGPT does not clear them. **Use model** applies
+the provider drafts; **Cancel** discards edits. Keys never carry over to another
+provider's requests.
+
+**Remember in this tab until it closes** is separate for each API provider.
+Enable it to keep that provider's key through reloads in the current tab. Without
+it, the key stays in page memory and is lost on reload. Turning it off and applying
+settings removes only that provider's stored key. ChatGPT stores only its public
+account registration and model; its OAuth credentials remain in the companion.
+
 ## Credentials and requests
 
 The companion listens only on `127.0.0.1:4319`. It accepts the production website

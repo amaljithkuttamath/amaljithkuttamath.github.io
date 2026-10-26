@@ -22,47 +22,46 @@ import {
   encodeShareState,
   type ShareStateV1,
 } from "../../lib/chitti/share";
-import {
-  PROVIDERS,
-  providerMeta,
-  type ProviderId,
-} from "../../lib/chitti/providers";
+import { providerMeta } from "../../lib/chitti/providers";
 import { SOURCES, rowsToCSV } from "../../lib/chitti/tools";
 import { buildFindingOkf } from "../../lib/chitti/okf";
 import type { ActionPayload } from "@a2ui/web_core/v0_9";
 import Settings from "./Settings";
 import ExamplePlot from "./ExamplePlot";
+import {
+  readPreferences,
+  writePreferences,
+  selectProvider,
+  type ProviderProfiles,
+} from "../../lib/chitti/workspace/preferences";
 import Surface from "./Surface";
 import Dashboards, { download } from "./Dashboards";
 import "./workspace.css";
-function initialConfig(): Config {
-  let provider: ProviderId = "chatgpt",
-    apiKey = "",
-    model = "",
-    chatgptAccount: string | undefined;
+function initialPreferences() {
   try {
-    const saved = sessionStorage.getItem("chitti:provider");
-    if (PROVIDERS.some((p) => p.id === saved)) {
-      provider = saved as ProviderId;
-      apiKey = sessionStorage.getItem("chitti:key") || "";
-      model = sessionStorage.getItem("chitti:model") || "";
-      chatgptAccount = sessionStorage.getItem("chitti:account") || undefined;
-    }
-  } catch {}
-  return {
-    provider,
-    model:
-      provider === "chatgpt"
-        ? model
-        : providerMeta(provider).models[0]?.id || "",
-    chatgptAccount: provider === "chatgpt" ? chatgptAccount : undefined,
-    apiKey: provider === "chatgpt" ? "" : apiKey,
-    sources: SOURCES.map((s) => s.id),
-    rlm: false,
-  };
+    return readPreferences(sessionStorage);
+  } catch {
+    return { active: "chatgpt" as const, profiles: {} };
+  }
 }
 export default function Workspace() {
-  const [config, setConfig] = useState(initialConfig);
+  const [preferences] = useState(initialPreferences);
+  const [profiles, setProfiles] = useState<ProviderProfiles>(
+    preferences.profiles,
+  );
+  const [config, setConfig] = useState<Config>(() =>
+    selectProvider(
+      {
+        provider: preferences.active,
+        apiKey: "",
+        model: "",
+        sources: SOURCES.map((s) => s.id),
+        rlm: false,
+      },
+      preferences.active,
+      preferences.profiles,
+    ),
+  );
   const [agent] = useState(() => new ChittiAgent(config));
   const explanationRuns = useRef<
     Record<string, { view: string; change: ChartChange }>
@@ -336,26 +335,16 @@ export default function Workspace() {
     setReceipt(false);
     setUseCurrent(true);
   };
-  const saveConfig = (value: Config, remember: boolean) => {
+  const saveConfig = (value: Config, nextProfiles: ProviderProfiles) => {
     try {
       agent.configure(value);
       setConfig(value);
+      setProfiles(nextProfiles);
       try {
-        if (value.provider === "chatgpt") {
-          sessionStorage.setItem("chitti:provider", value.provider);
-          sessionStorage.setItem("chitti:account", value.chatgptAccount || "");
-          sessionStorage.setItem("chitti:model", value.model);
-          sessionStorage.removeItem("chitti:key");
-        } else if (remember) {
-          sessionStorage.setItem("chitti:key", value.apiKey);
-          sessionStorage.setItem("chitti:provider", value.provider);
-        } else {
-          sessionStorage.removeItem("chitti:key");
-          sessionStorage.removeItem("chitti:provider");
-        }
+        writePreferences(sessionStorage, value.provider, nextProfiles);
       } catch {
         setNotice(
-          "Settings applied. Browser storage is unavailable, so the key is kept only in memory.",
+          "Settings applied in memory. Browser storage could not be updated; saved-key changes may not survive a reload.",
         );
       }
       setSettings(false);
@@ -905,6 +894,7 @@ export default function Workspace() {
       {settings && (
         <Settings
           value={config}
+          profiles={profiles}
           locked={running || agent.sessionLocked}
           onSave={saveConfig}
           onClose={() => setSettings(false)}
