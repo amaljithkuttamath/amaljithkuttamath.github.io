@@ -1,4 +1,9 @@
 import ChatGPTConnection from "./ChatGPTConnection";
+import {
+  providerProfile,
+  selectProvider,
+  type ProviderProfiles,
+} from "../../lib/chitti/workspace/preferences";
 import { useEffect, useRef, useState } from "react";
 import {
   PROVIDERS,
@@ -16,24 +21,23 @@ const jevBase = classificationBase(
 );
 export default function Settings({
   value,
+  profiles,
   locked,
   onSave,
   onClose,
 }: {
   value: Config;
+  profiles: ProviderProfiles;
   locked: boolean;
-  onSave: (value: Config, remember: boolean) => void;
+  onSave: (value: Config, profiles: ProviderProfiles) => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const drafts = useRef<ProviderProfiles>({ ...profiles });
   const [draft, setDraft] = useState(value),
-    [remember, setRemember] = useState(() => {
-      try {
-        return !!sessionStorage.getItem("chitti:key");
-      } catch {
-        return false;
-      }
-    }),
+    [remember, setRemember] = useState(
+      profiles[value.provider]?.remember || false,
+    ),
     [models, setModels] = useState<ModelOption[]>(
       providerMeta(value.provider).models,
     ),
@@ -47,14 +51,12 @@ export default function Settings({
   }, []);
   const changeProvider = (id: ProviderId) => {
     loading.current++;
-    setDraft({
+    drafts.current[draft.provider] = providerProfile(draft.provider, {
       ...draft,
-      provider: id,
-      model: providerMeta(id).models[0]?.id || "",
-      apiKey: "",
-      chatgptAccount: undefined,
-      requestReasoning: false,
+      remember,
     });
+    setDraft(selectProvider(draft, id, drafts.current));
+    setRemember(drafts.current[id]?.remember || false);
     setModels(providerMeta(id).models);
     setStatus("");
   };
@@ -88,7 +90,13 @@ export default function Settings({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          onSave(draft, remember);
+          onSave(draft, {
+            ...drafts.current,
+            [draft.provider]: providerProfile(draft.provider, {
+              ...draft,
+              remember,
+            }),
+          });
         }}
       >
         <header>
@@ -196,16 +204,18 @@ export default function Settings({
                       })
                     }
                   />
-                  <datalist id="cw-models">
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </datalist>
                 </>
               )}
             </label>
+            {draft.provider !== "chatgpt" && (
+              <datalist id="cw-models">
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </datalist>
+            )}
             <button
               type="button"
               aria-label="Refresh models"
