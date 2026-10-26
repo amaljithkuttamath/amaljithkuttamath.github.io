@@ -93,7 +93,7 @@ describe("provider preferences", () => {
     const tab = storage();
     tab.setItem("chitti:provider", "openrouter");
     tab.setItem("chitti:key", "legacy-test-key");
-    tab.setItem("chitti:model", "legacy-model");
+    tab.setItem("chitti:model", "stale-subscription-model");
     const old = readPreferences(tab);
     writePreferences(tab, "chatgpt", {
       ...old.profiles,
@@ -103,7 +103,7 @@ describe("provider preferences", () => {
       "legacy-test-key",
     );
     expect(readPreferences(tab).profiles.openrouter?.model).toBe(
-      "legacy-model",
+      providerProfile("openrouter").model,
     );
     expect(tab.getItem("chitti:key")).toBeNull();
   });

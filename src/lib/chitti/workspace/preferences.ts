@@ -80,7 +80,9 @@ export function readPreferences(storage: TabStorage): ProviderPreferences {
     profiles: {
       [legacy]: providerProfile(legacy, {
         apiKey: key,
-        model: storage.getItem("chitti:model"),
+        // The old UI persisted model only for ChatGPT, even after switching away.
+        model:
+          legacy === "chatgpt" ? storage.getItem("chitti:model") : undefined,
         chatgptAccount: storage.getItem("chitti:account"),
         remember: !!key,
       }),
