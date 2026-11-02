@@ -48,12 +48,32 @@ export interface DataRow {
 }
 
 // Chart spec the agent builds and the renderer consumes.
+export interface ChartSeries {
+  /** Stable semantic identity, e.g. country:IND or year:2024. */
+  id?: string;
+  name: string;
+  unit?: string;
+  /** Renderer-owned palette slot, persisted across revisions and exports. */
+  colorIndex?: number;
+  evidence?: {
+    citationIds: string[];
+    mode: 'observed' | 'derived';
+    indicatorId?: string;
+    iso3?: string;
+    year?: number;
+    method?: string;
+  };
+  data: [number | string, number][];
+}
 export interface ChartSpec {
   type: 'line' | 'bar' | 'scatter' | 'grouped-bar';
   title: string;
   x_axis?: string;
   y_axis?: string;
-  series: { name: string; data: [number | string, number][] }[];
+  unit?: string;
+  series: ChartSeries[];
+  highlight?: string[];
+  annotations?: { seriesId: string; x: number | string; label: string }[];
 }
 
 export const COUNTRIES = countriesData as Country[];
@@ -120,4 +140,35 @@ export class ApiRejection extends Error {
     this.status = opts.status;
     this.invalidParameter = opts.invalidParameter ?? true;
   }
+}
+
+export interface Citation {
+  // Stable id = the session fetch-cache key (id + resolved countries + range),
+  // so a repeat/cached use maps to the SAME entry rather than a duplicate.
+  id: string;
+  source: 'worldbank' | 'owid' | 'imf' | 'who';
+  sourceLabel: string; // friendly institution name, e.g. "World Bank Open Data"
+  indicatorId: string; // the (normalized) series id
+  indicatorName: string; // friendly indicator name when known, else the id
+  // The human-visitable canonical page — this is what the citation LINKS to.
+  url: string;
+  // The exact API URL the data actually came from, only when it differs from
+  // the human URL (they always do here). Kept for full traceability.
+  requestUrl?: string;
+  countries: string[]; // resolved ISO3 / aggregate codes ([] = every country)
+  yearRange: { start?: number; end?: number } | null;
+  fetchedAt: string; // ISO timestamp — when CHITTI fetched (not the vintage)
+  // Data vintage from the source's own response (WB `lastupdated`), when the
+  // source provides one. Omitted otherwise — never invented.
+  sourceUpdated?: string;
+  // Set only when the rows were served from Chitti's same-origin snapshot of
+  // the source rather than a live call: the ISO timestamp of when that snapshot
+  // was taken. `fetchedAt` still records when Chitti served the answer, so the
+  // two together say "captured then, served now". Absent means a live fetch.
+  mirroredAt?: string;
+  rowCount: number;
+  // Whether the record's underlying fetch was a real network call. Always false
+  // on the stored ledger entry (it IS the real fetch); a later cache hit reuses
+  // this same entry and discloses "cached" only on that use's receipt.
+  cached: boolean;
 }

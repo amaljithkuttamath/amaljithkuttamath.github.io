@@ -3729,10 +3729,9 @@ describe('dispatch — malformed (non-object) tool arguments do not crash the tu
     // read_file {} → path "undefined" missing → "(empty)"; nothing threw.
     expect(toolMsgById('a1')).toBe('(empty)');
     expect(toolMsgById('a2')).toBe('written');
-    // render_chart with coerced-{} args → the safe default spec.
-    expect(chart).not.toBeNull();
-    expect(chart.type).toBe('line');
-    expect(chart.series).toEqual([]);
+    // Malformed empty charts are rejected without throwing or rendering.
+    expect(chart).toBeNull();
+    expect(toolMsgById('a3')).toContain('chart rejected');
     expect(out.finding).toBe('survived');
   });
 });

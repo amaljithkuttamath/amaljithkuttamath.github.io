@@ -31,6 +31,9 @@ import { SOURCES, rowsToCSV } from "../../lib/chitti/tools";
 import { buildFindingOkf } from "../../lib/chitti/okf";
 import type { ActionPayload } from "@a2ui/web_core/v0_9";
 import Settings from "./Settings";
+import ModelPicker from "./ModelPicker";
+import { Result, CollapseChart } from "./Result";
+import { conversationPath, conversationHeads } from "../../lib/chitti/workspace/conversation";
 import ExamplePlot from "./ExamplePlot";
 import Surface from "./Surface";
 import Dashboards, { download } from "./Dashboards";
@@ -54,7 +57,7 @@ function initialConfig(): Config {
     model:
       provider === "chatgpt"
         ? model
-        : providerMeta(provider).models[0]?.id || "",
+        : model || providerMeta(provider).models[0]?.id || "",
     chatgptAccount: provider === "chatgpt" ? chatgptAccount : undefined,
     apiKey: provider === "chatgpt" ? "" : apiKey,
     sources: SOURCES.map((s) => s.id),
@@ -63,6 +66,10 @@ function initialConfig(): Config {
 }
 export default function Workspace() {
   const [config, setConfig] = useState(initialConfig);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const chatConfigs = useRef<Record<string, Config>>({});
+  const [settingsDraft, setSettingsDraft] = useState<Config | null>(null);
   const [agent] = useState(() => new ChittiAgent(config));
   const explanationRuns = useRef<
     Record<string, { view: string; change: ChartChange }>
@@ -73,6 +80,7 @@ export default function Workspace() {
   const [turns, setTurns] = useState<Analysis[]>([]);
   const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [useCurrent, setUseCurrent] = useState(false);
   const [redo, setRedo] = useState<string[]>([]);
   const [latestRequest, setLatestRequest] = useState("");
@@ -93,12 +101,21 @@ export default function Workspace() {
   const activeRun = useRef(""),
     busy = useRef(false),
     composer = useRef<HTMLTextAreaElement>(null);
+  const activeArticle = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (selected && parents.current[selected])
+      activeArticle.current?.scrollIntoView?.({ block: "start" });
+  }, [selected]);
   useEffect(() => {
     const sub = agent.subscribe({
       onStateChanged: ({ state }) => {
         const snapshot = state as WorkspaceState;
         if (snapshot.analysis) {
           const next = snapshot.analysis;
+          if (next.origin === "agent" && !explanationRuns.current[next.id]) {
+            const root = conversationPath(next.id, parents.current)[0];
+            chatConfigs.current[root] ||= { ...configRef.current, sources: [...configRef.current.sources] };
+          }
           const target = explanationRuns.current[next.id];
           if (target) {
             setExplanations((previous) => ({
@@ -168,6 +185,29 @@ export default function Workspace() {
         : turns.find((t) => t.id === selected),
     [example, selected, turns],
   );
+  const resolveTurn = (id: string) => {
+    const demo = DEMOS.find(d => id === `example:${d.id}`);
+    return demo ? fromShared(demo.state, "example", id) : turns.find(t => t.id === id);
+  };
+  const previousTurns = conversationPath(selected, parents.current).slice(0, -1)
+    .map(resolveTurn).filter((t): t is Analysis => !!t);
+  const recentChats = conversationHeads(turns.map(t => t.id), parents.current).map(resolveTurn).filter((t): t is Analysis => !!t);
+  const modelLocked = agent.sessionLocked || !!chatConfigs.current[conversationPath(selected, parents.current)[0]];
+  const openChat = (id: string) => {
+    if (busy.current) return;
+    const savedConfig = chatConfigs.current[conversationPath(id, parents.current)[0]];
+    agent.reset();
+    if (savedConfig) { agent.configure(savedConfig); setConfig(savedConfig); }
+    setSelected(id); setLatestRequest(""); setRedo([]); setReceipt(false);
+    setUseCurrent(true); setNavigationNote(""); setDashboards(false);
+  };
+  const connect = (provider?: ProviderId) => {
+    setSettingsDraft(provider && provider !== config.provider ? {
+      ...config, provider, model: providerMeta(provider).models[0]?.id || "",
+      apiKey: "", chatgptAccount: undefined, directOnly: false,
+    } : { ...config, directOnly: false });
+    setSettings(true);
+  };
   const operations = useMemo(
     () =>
       active?.origin === "view" && active.result
@@ -215,6 +255,10 @@ export default function Workspace() {
     }
     contexts.current[id] = context;
     agent.useWorkspace(context, edit);
+    agent.useConversation(context ? conversationPath(selected, parents.current).flatMap(id => {
+      const turn = resolveTurn(id);
+      return turn ? [{ role: "user" as const, content: turn.question }, ...(turn.result?.answer ? [{ role: "assistant" as const, content: turn.result.answer }] : [])] : [];
+    }) : []);
     if (force) agent.escalate();
     agent.addMessage({
       id: crypto.randomUUID(),
@@ -253,6 +297,17 @@ export default function Workspace() {
   const steerResult = (action: ActionPayload) => {
     if (busy.current || !active?.result) return;
     const value = action.context.value;
+    if (action.name === "years" && typeof value === "string") {
+      try {
+        const range = JSON.parse(value);
+        if (range && Number.isInteger(range.start) && Number.isInteger(range.end))
+          void submit(`Show ${range.start}–${range.end}`, false, active.result, { kind: "years", start: range.start, end: range.end });
+      } catch {}
+    }
+    if (action.name === "chart-type" && typeof value === "string" && ["line", "bar", "grouped-bar"].includes(value))
+      void submit(`Show a ${value.replace('-', ' ')} chart`, false, active.result, { kind: "type", type: value as "line" | "bar" | "grouped-bar" });
+    if (action.name === "highlight" && typeof value === "string")
+      void submit(value ? `Highlight ${active.result.spec?.series.find(s => (s.id || s.name) === value)?.name || value}` : "Clear highlighting", false, active.result, { kind: "highlight", id: value });
     if (
       action.name === "explain-change" &&
       typeof value === "string" &&
@@ -349,6 +404,7 @@ export default function Workspace() {
         } else if (remember) {
           sessionStorage.setItem("chitti:key", value.apiKey);
           sessionStorage.setItem("chitti:provider", value.provider);
+          sessionStorage.setItem("chitti:model", value.model);
         } else {
           sessionStorage.removeItem("chitti:key");
           sessionStorage.removeItem("chitti:provider");
@@ -359,6 +415,7 @@ export default function Workspace() {
         );
       }
       setSettings(false);
+      setSettingsDraft(null);
     } catch (e) {
       setNotice(String(e));
     }
@@ -409,7 +466,7 @@ export default function Workspace() {
             undefined,
             explanation.change,
           ),
-        onConnect: () => setSettings(true),
+        onConnect: () => connect(),
         onStop: () => agent.stop(),
         clarification:
           clarification?.runId === explanation.analysis.id ? (
@@ -428,7 +485,7 @@ export default function Workspace() {
       >
         <label htmlFor="cw-question">
           {useCurrent && active?.result
-            ? "Ask or change this view"
+            ? "Ask a follow-up"
             : "Ask a data question"}
         </label>
         {active?.result && (
@@ -457,18 +514,14 @@ export default function Workspace() {
           }}
           placeholder={
             useCurrent && active?.result
-              ? "Ask about the current view…"
+              ? "Ask a follow-up or change the chart…"
               : "Compare life expectancy in Japan, Italy and Spain since 1960"
           }
         />
         <div>
-          <span>
-            {config.provider === "chatgpt" && config.chatgptAccount
-              ? `ChatGPT plan · ${config.model}`
-              : config.apiKey
-                ? `${config.model} · ${config.sources.length} sources`
-                : "Direct lookups need no API key"}
-          </span>
+          <ModelPicker value={config} locked={modelLocked} running={running}
+            onChoose={value => { let remember = false; try { remember = !!sessionStorage.getItem("chitti:key"); } catch {} saveConfig(value, remember); }}
+            onConnect={connect} onNewChat={newAnalysis} />
           {running ? (
             <button type="button" onClick={() => agent.stop()}>
               Stop
@@ -479,7 +532,7 @@ export default function Workspace() {
               className="cw-primary"
               disabled={!question.trim()}
             >
-              {useCurrent && active?.result ? "Update" : "Analyze"}{" "}
+              Send{" "}
               <span aria-hidden="true">↗</span>
             </button>
           )}
@@ -490,41 +543,29 @@ export default function Workspace() {
   return (
     <div className="cw">
       <header className="cw-header">
-        <div>
-          <h1>Chitti</h1>
-        </div>
-        <div className="cw-actions">
-          <button
-            onClick={() => {
-              setDashboards(!dashboards);
-              setPin(null);
-            }}
-            aria-pressed={dashboards}
-          >
-            Saved
-          </button>
-          <button
-            className="cw-model-control"
-            aria-label="Model settings"
-            onClick={() => setSettings(true)}
-          >
-            {config.provider === "chatgpt" && config.chatgptAccount
-              ? "ChatGPT"
-              : config.apiKey
-                ? providerMeta(config.provider).label
-                : "Connect model"}{" "}
-            <span
-              className="cw-connection"
-              data-connected={
-                config.provider === "chatgpt"
-                  ? !!config.chatgptAccount
-                  : !!config.apiKey
-              }
-            />
-          </button>
-        </div>
+        <h1>Chitti</h1><span className="cw-subtitle">Data, in conversation</span>
       </header>
       <div className="cw-workspace">
+        <aside className="cw-sidebar" aria-label="Chat navigation" data-history-open={historyOpen}>
+          <button className="cw-new-chat" disabled={running} onClick={newAnalysis}>+ New chat</button>
+          <button className="cw-mobile-history-toggle" aria-expanded={historyOpen} aria-controls="cw-recent-chats" onClick={() => setHistoryOpen(!historyOpen)}>Recent chats ({recentChats.length})</button>
+          <section id="cw-recent-chats" aria-label="Recent chats">
+            <h2>Recent chats</h2>
+            {!recentChats.length && <p>Your chats appear here.</p>}
+            {recentChats.map(t => <button key={t.id} disabled={running} aria-current={selected === t.id ? "page" : undefined} onClick={() => openChat(t.id)}>{resolveTurn(conversationPath(t.id, parents.current)[0])?.question || t.question}{parents.current[t.id] && <small>{t.question}</small>}</button>)}
+          </section>
+          <label className="cw-example-select">Recorded examples
+            <select aria-label="Open result" value={example ? selected : ""} disabled={running} onChange={e => { if (e.target.value) openChat(e.target.value); }}>
+              <option value="">Choose an example</option>
+              {DEMOS.map(d => <option value={`example:${d.id}`} key={d.id}>{d.question}</option>)}
+            </select>
+          </label>
+          <div className="cw-sidebar-bottom">
+            <button onClick={() => { setDashboards(!dashboards); setPin(null); }} aria-pressed={dashboards}>Saved charts</button>
+            <button aria-label="Model settings" onClick={() => connect()}>Settings</button>
+            <small>Chats stay in this session. Save a chart or export a result to keep it.</small>
+          </div>
+        </aside>
         <section className="cw-main" aria-label="Analysis workspace">
           {dashboards ? (
             <Dashboards
@@ -537,138 +578,21 @@ export default function Workspace() {
             />
           ) : (
             <>
-              <div
-                className="cw-thread-tools"
-                data-empty={!active || undefined}
-              >
-                <button disabled={running} onClick={newAnalysis}>
-                  New analysis
-                </button>
-                <label>
-                  Examples
-                  <select
-                    aria-label="Open result"
-                    value={example ? selected : ""}
-                    disabled={running}
-                    onChange={(e) => {
-                      setNavigationNote("");
-                      setSelected(e.target.value);
-                      setLatestRequest("");
-                      setRedo([]);
-                      setReceipt(false);
-                      setUseCurrent(true);
-                    }}
-                  >
-                    <option value="">Choose an example</option>
-                    {DEMOS.map((d) => (
-                      <option key={d.id} value={`example:${d.id}`}>
-                        {d.question}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {turns.length > 0 && (
-                  <details className="cw-history">
-                    <summary>History ({turns.length})</summary>
-                    <ol>
-                      {turns.map((t) => (
-                        <li
-                          key={t.id}
-                          aria-current={selected === t.id ? "step" : undefined}
-                        >
-                          <div>
-                            <strong>{t.question}</strong>
-                            <p>
-                              {t.result
-                                ? describeChange(
-                                    contexts.current[t.id] || null,
-                                    t.result,
-                                  )
-                                : t.status}
-                            </p>
-                          </div>
-                          {t.result && (
-                            <button
-                              disabled={running || selected === t.id}
-                              onClick={() => {
-                                setNavigationNote("");
-                                setSelected(t.id);
-                                setLatestRequest("");
-                                setRedo([]);
-                                setReceipt(false);
-                                setUseCurrent(true);
-                              }}
-                            >
-                              Restore
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
-                )}
-              </div>
-              {currentRequest &&
-                (running ||
-                  (!currentRequest.result &&
-                    ["needs-key", "error", "stopped"].includes(
-                      currentRequest.phase,
-                    ))) && (
-                  <section className="cw-inflight" aria-label="Current request">
-                    {selected !== currentRequest.id && (
-                      <p className="cw-request-text">
-                        {currentRequest.question}
-                      </p>
-                    )}
-                    <p role="status">{currentRequest.status}</p>
-                    <div className="cw-actions">
-                      {running && (
-                        <button
-                          onClick={() => {
-                            setUseCurrent(true);
-                            agent.stop();
-                            composer.current?.focus();
-                          }}
-                        >
-                          Stop and steer
-                        </button>
-                      )}
-                      {currentRequest.phase === "needs-key" && (
-                        <button onClick={() => setSettings(true)}>
-                          Connect model
-                        </button>
-                      )}
-                      {["needs-key", "error"].includes(
-                        currentRequest.phase,
-                      ) && (
-                        <button
-                          onClick={() =>
-                            void submit(
-                              currentRequest.question,
-                              false,
-                              contexts.current[currentRequest.id] || null,
-                            )
-                          }
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </div>
-                    {clarification?.runId === currentRequest.id && (
-                      <Surface
-                        operations={clarification.operations}
-                        onAction={respond}
-                      />
-                    )}
-                  </section>
-                )}
+              <div className="cw-transcript" aria-label="Conversation">
+              {previousTurns.map((turn, index) => <article className="cw-analysis cw-previous-turn" key={turn.id}>
+                <div className="cw-request"><span>You{turn.origin === "example" ? " · recorded example" : ""}</span><h2>{turn.question}</h2></div>
+                <div className="cw-assistant-label">Chitti</div>
+                {turn.result && <CollapseChart.Provider value={JSON.stringify(turn.result.spec) === JSON.stringify(previousTurns[index - 1]?.result?.spec)}><Result result={turn.result} /></CollapseChart.Provider>}
+                {!turn.result && <p>{turn.status}</p>}
+                <button className="cw-continue" disabled={running} onClick={() => openChat(turn.id)}>Continue from here</button>
+              </article>)}
               {notice && (
                 <p className="cw-notice" role="status">
                   {notice}
                 </p>
               )}
               {active ? (
-                <article className="cw-analysis">
+                <article className="cw-analysis" ref={activeArticle}>
                   <header className="cw-turn-head">
                     <div className="cw-request">
                       <span>
@@ -789,6 +713,7 @@ export default function Workspace() {
                         onAction={steerResult}
                         disabled={running}
                         inlineComposer
+                        collapseChart={!!contexts.current[active.id]?.spec && JSON.stringify(active.result?.spec) === JSON.stringify(contexts.current[active.id]?.spec)}
                       />
                     </ExplanationContext.Provider>
                   ) : active.phase === "running" ? (
@@ -797,7 +722,6 @@ export default function Workspace() {
                       Reading sources and preparing the result…
                     </div>
                   ) : null}
-                  {composerView}
                   {active.result && (
                     <details className="cw-export">
                       <summary>Save or export</summary>
@@ -870,7 +794,6 @@ export default function Workspace() {
                       Redo
                     </button>
                   )}
-                  {composerView}
                   <section
                     className="cw-examples"
                     aria-label="Recorded analyses"
@@ -881,8 +804,7 @@ export default function Workspace() {
                         <button
                           key={d.id}
                           onClick={() => {
-                            setSelected(`example:${d.id}`);
-                            setUseCurrent(true);
+                            openChat(`example:${d.id}`);
                           }}
                         >
                           <ExamplePlot spec={d.state.spec} />
@@ -898,16 +820,72 @@ export default function Workspace() {
                   </p>
                 </div>
               )}
+              {currentRequest &&
+                (running ||
+                  (!currentRequest.result &&
+                    ["needs-key", "error", "stopped"].includes(
+                      currentRequest.phase,
+                    ))) && (
+                  <section className="cw-inflight" aria-label="Current request">
+                    {selected !== currentRequest.id && (
+                      <p className="cw-request-text">
+                        {currentRequest.question}
+                      </p>
+                    )}
+                    <p role="status">{currentRequest.status}</p>
+                    <div className="cw-actions">
+                      {running && (
+                        <button
+                          onClick={() => {
+                            setUseCurrent(true);
+                            agent.stop();
+                            composer.current?.focus();
+                          }}
+                        >
+                          Stop and steer
+                        </button>
+                      )}
+                      {currentRequest.phase === "needs-key" && (
+                        <button onClick={() => connect()}>
+                          Connect model
+                        </button>
+                      )}
+                      {["needs-key", "error"].includes(
+                        currentRequest.phase,
+                      ) && (
+                        <button
+                          onClick={() =>
+                            void submit(
+                              currentRequest.question,
+                              false,
+                              contexts.current[currentRequest.id] || null,
+                            )
+                          }
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                    {clarification?.runId === currentRequest.id && (
+                      <Surface
+                        operations={clarification.operations}
+                        onAction={respond}
+                      />
+                    )}
+                  </section>
+                )}
+              </div>
+              <div className="cw-composer-dock">{composerView}<p className="cw-composer-help">Enter a question · Ctrl/⌘ + Enter to send · Answers keep their sources</p></div>
             </>
           )}
         </section>
       </div>
       {settings && (
         <Settings
-          value={config}
-          locked={running || agent.sessionLocked}
+          value={settingsDraft || config}
+          locked={running || modelLocked}
           onSave={saveConfig}
-          onClose={() => setSettings(false)}
+          onClose={() => { setSettings(false); setSettingsDraft(null); }}
         />
       )}
     </div>

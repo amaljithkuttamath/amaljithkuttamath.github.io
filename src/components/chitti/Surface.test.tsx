@@ -9,6 +9,13 @@ import {
 import { DEMOS } from "../../lib/chitti/demos";
 vi.mock("./Chart", () => ({ default: () => <div>Chart rendered</div> }));
 afterEach(cleanup);
+it("reveals a changed streamed chart after an inherited chart started collapsed", async () => {
+  const { rerender } = render(<Surface operations={resultSurface(DEMOS[0].state)} collapseChart />);
+  await screen.findByRole("button", { name: "View chart and evidence" });
+  expect(screen.queryByRole("tab", { name: "Chart" })).toBeNull();
+  rerender(<Surface operations={resultSurface({ ...DEMOS[0].state, answer: "Changed chart" })} collapseChart={false} />);
+  expect(await screen.findByRole("tab", { name: "Chart" })).toBeTruthy();
+});
 describe("A2UI surfaces", () => {
   it("renders catalog controls and returns an A2UI action without executing generated code", async () => {
     const onAction = vi.fn();

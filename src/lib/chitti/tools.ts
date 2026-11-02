@@ -8,7 +8,7 @@
 // re-exported here so `import { COUNTRIES, DataRow, ApiRejection } from
 // './tools'` keeps working; the source adapters import them from ./core
 // directly, which is what keeps sources/ out of an import loop with this facade.
-import type { DataRow } from './core';
+import type { DataRow, Citation } from './core';
 
 export {
   COUNTRIES,
@@ -20,6 +20,8 @@ export {
   type Indicator,
   type DataRow,
   type ChartSpec,
+  type ChartSeries,
+  type Citation,
   type CountryFilter,
 } from './core';
 
@@ -180,36 +182,6 @@ export { rowsToCSV } from './csv';
 // the fetch — nothing is reconstructed after the fact, so what the receipt (and
 // the verifier) shows is exactly what happened. Model-derived (llm()) artifacts
 // never produce a Citation: only fetched data gets one.
-export interface Citation {
-  // Stable id = the session fetch-cache key (id + resolved countries + range),
-  // so a repeat/cached use maps to the SAME entry rather than a duplicate.
-  id: string;
-  source: 'worldbank' | 'owid' | 'imf' | 'who';
-  sourceLabel: string; // friendly institution name, e.g. "World Bank Open Data"
-  indicatorId: string; // the (normalized) series id
-  indicatorName: string; // friendly indicator name when known, else the id
-  // The human-visitable canonical page — this is what the citation LINKS to.
-  url: string;
-  // The exact API URL the data actually came from, only when it differs from
-  // the human URL (they always do here). Kept for full traceability.
-  requestUrl?: string;
-  countries: string[]; // resolved ISO3 / aggregate codes ([] = every country)
-  yearRange: { start?: number; end?: number } | null;
-  fetchedAt: string; // ISO timestamp — when CHITTI fetched (not the vintage)
-  // Data vintage from the source's own response (WB `lastupdated`), when the
-  // source provides one. Omitted otherwise — never invented.
-  sourceUpdated?: string;
-  // Set only when the rows were served from Chitti's same-origin snapshot of
-  // the source rather than a live call: the ISO timestamp of when that snapshot
-  // was taken. `fetchedAt` still records when Chitti served the answer, so the
-  // two together say "captured then, served now". Absent means a live fetch.
-  mirroredAt?: string;
-  rowCount: number;
-  // Whether the record's underlying fetch was a real network call. Always false
-  // on the stored ledger entry (it IS the real fetch); a later cache hit reuses
-  // this same entry and discloses "cached" only on that use's receipt.
-  cached: boolean;
-}
 
 const CITATION_SOURCE_LABEL: Record<Citation['source'], string> = {
   worldbank: 'World Bank Open Data',

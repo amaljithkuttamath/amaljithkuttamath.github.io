@@ -18,7 +18,7 @@ import {
 } from "../../lib/chitti/workspace/catalog";
 import { CATALOG_ID } from "../../lib/chitti/workspace/model";
 import { cleanShareState } from "../../lib/chitti/share";
-import { Result, ResultInteraction, InlineComposer } from "./Result";
+import { Result, ResultInteraction, InlineComposer, CollapseChart } from "./Result";
 
 const resultComponent = createComponentImplementation(
   resultApi,
@@ -102,11 +102,13 @@ export default function Surface({
   onAction,
   disabled = false,
   inlineComposer = false,
+  collapseChart = false,
 }: {
   operations: unknown[];
   onAction?: (action: ActionPayload) => void;
   disabled?: boolean;
   inlineComposer?: boolean;
+  collapseChart?: boolean;
 }) {
   const [model, setModel] =
     useState<SurfaceModel<ReactCatalogComponent> | null>(null);
@@ -151,7 +153,7 @@ export default function Surface({
   ) : model ? (
     <ResultInteraction.Provider value={!disabled}>
       <InlineComposer.Provider value={inlineComposer}>
-        <A2uiSurface surface={model} />
+        <CollapseChart.Provider value={collapseChart}><A2uiSurface surface={model} /></CollapseChart.Provider>
       </InlineComposer.Provider>
     </ResultInteraction.Provider>
   ) : (

@@ -1,11 +1,15 @@
-import { useMemo, useState, createContext, useContext } from "react";
+import { useMemo, useState, useId, createContext, useContext } from "react";
 import type { ShareStateV1 } from "../../lib/chitti/share";
 import { safeLink } from "../../lib/chitti/workspace/model";
 import { mdToHtml } from "../../lib/chitti/ui/dom";
+import { prepareChart, seriesIdentity } from "../../lib/chitti/chart-contract";
+import { chartTypes } from "../../lib/chitti/workspace/steering";
 import { recentStart } from "../../lib/chitti/workspace/steering";
 import { changeKey } from "../../lib/chitti/chart-insights";
 import Chart from "./Chart";
+import YearRange from "./YearRange";
 export const ResultInteraction = createContext(true);
+export const CollapseChart = createContext(false);
 export const InlineComposer = createContext(false);
 export function Result({
   result,
@@ -15,6 +19,10 @@ export function Result({
   onSteer?: (name: string, value: string) => void;
 }) {
   const enabled = useContext(ResultInteraction);
+  const collapse = useContext(CollapseChart);
+  const [expanded, setExpanded] = useState(!collapse);
+  const tabId = useId();
+  const chart = result.spec ? prepareChart(result.spec) : null;
   const inlineComposer = useContext(InlineComposer);
   const [steer, setSteer] = useState("");
   const choices =
@@ -69,10 +77,25 @@ export function Result({
           ))}
         </details>
       )}
+      {collapse && (
+        <button className="cw-evidence-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? "Hide chart and evidence" : "View chart and evidence"}
+        </button>
+      )}
+      <div hidden={collapse && !expanded}>
       {onSteer && (
         <fieldset className="cw-steering" disabled={!enabled}>
           <legend className="cw-sr-only">Work with this view</legend>
           <div className="cw-view-controls">
+            {chart && <>
+              <label>Chart type <select aria-label="Chart type" value={chart.type} onChange={e => onSteer("chart-type", e.target.value)}>
+                {chartTypes(chart).map(type => <option value={type} key={type}>{type.replace('-', ' ')}</option>)}
+              </select></label>
+              {chart.series.length > 1 && <label>Highlight <select aria-label="Highlight series" value={chart.highlight?.[0] || ""} onChange={e => onSteer("highlight", e.target.value)}>
+                <option value="">All equally</option>
+                {chart.series.map(s => <option key={seriesIdentity(s)} value={seriesIdentity(s)}>{s.name}</option>)}
+              </select></label>}
+            </>}
             {choices.length > 1 && (
               <label>
                 Focus{" "}
@@ -108,6 +131,7 @@ export function Result({
               Explain changes
             </button>
           </div>
+          {chart && <YearRange key={JSON.stringify(chart.series.map(s => s.data.map(([x]) => x)))} spec={chart} onApply={value => onSteer("years", value)} />}
           {!inlineComposer && (
             <form
               onSubmit={(e) => {
@@ -141,8 +165,8 @@ export function Result({
             key={t}
             role="tab"
             aria-selected={tab === t}
-            id={`result-tab-${t}`}
-            aria-controls="result-panel"
+            id={`${tabId}-tab-${t}`}
+            aria-controls={`${tabId}-panel`}
             onClick={() => setTab(t)}
             onKeyDown={(e) => {
               const list = ["Chart", "Data", "Sources"];
@@ -153,7 +177,7 @@ export function Result({
                     (list.indexOf(t) + (e.key === "ArrowRight" ? 1 : 2)) % 3
                   ];
                 setTab(next);
-                document.getElementById(`result-tab-${next}`)?.focus();
+                document.getElementById(`${tabId}-tab-${next}`)?.focus();
               }
             }}
             tabIndex={tab === t ? 0 : -1}
@@ -169,8 +193,8 @@ export function Result({
       </div>
       <section
         role="tabpanel"
-        id="result-panel"
-        aria-labelledby={`result-tab-${tab}`}
+        id={`${tabId}-panel`}
+        aria-labelledby={`${tabId}-tab-${tab}`}
         tabIndex={0}
       >
         {tab === "Chart" &&
@@ -258,6 +282,15 @@ export function Result({
           </>
         )}
         {tab === "Sources" && (
+          <>
+          {chart?.series.some(s => s.evidence) && <section className="cw-chart-methods" aria-label="Chart methods">
+            <h3>Chart methods</h3>
+            {chart.series.filter(s => s.evidence).map(s => <p key={seriesIdentity(s)}>
+              <strong>{s.name}</strong>{s.unit || chart.unit ? ` · ${s.unit || chart.unit}` : ""}: {s.evidence!.mode === "derived" ? s.evidence!.method || "Method not supplied" : "Observed source values"}
+              {` · ${s.evidence!.citationIds.map(id => result.citations.find(c => c.id === id)?.indicatorName || id).join('; ')}`}
+            </p>)}
+          </section>}
+
           <div className="cw-sources">
             {result.citations.map((c) => (
               <article key={c.id}>
@@ -303,8 +336,10 @@ export function Result({
               <p>No source records accompany this result.</p>
             )}
           </div>
+          </>
         )}
       </section>
+      </div>
       <p className="cw-result-date">
         Recorded{" "}
         {new Date(result.ts).toLocaleDateString("en-US", {

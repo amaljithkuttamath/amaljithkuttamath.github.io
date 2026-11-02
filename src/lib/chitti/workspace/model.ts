@@ -32,6 +32,7 @@ export interface WorkspaceState {
   question: Question | null;
 }
 export interface Settings extends ProviderConfig {
+  directOnly?: boolean;
   sources: string[];
   rlm: boolean;
   jev?: SessionOptions["jev"];

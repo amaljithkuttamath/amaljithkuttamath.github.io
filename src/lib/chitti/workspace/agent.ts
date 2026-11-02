@@ -22,6 +22,7 @@ import {
  * Credentials stay in private configuration, never in state, messages, or surfaces. */
 export class ChittiAgent extends AbstractAgent {
   private workspace: ShareStateV1 | null = null;
+  private conversation: { role: "user" | "assistant"; content: string }[] = [];
   private viewEdit: ViewEdit | null = null;
   private session: ChittiSession | null = null;
   private settings: Settings;
@@ -56,7 +57,11 @@ export class ChittiAgent extends AbstractAgent {
     if (!this.workspace) this.session = null;
     this.viewEdit = edit || null;
   }
+  useConversation(messages: { role: "user" | "assistant"; content: string }[]) {
+    this.conversation = messages.slice(-20).map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
+  }
   reset() {
+    this.conversation = [];
     this.workspace = null;
     this.viewEdit = null;
     this.stop();
@@ -247,11 +252,11 @@ export class ChittiAgent extends AbstractAgent {
               directActive = false;
             }
           }
-          if (cfg.provider === "chatgpt" ? !cfg.chatgptAccount : !cfg.apiKey.trim()) {
+          if (cfg.directOnly || (cfg.provider === "chatgpt" ? !cfg.chatgptAccount : !cfg.apiKey.trim())) {
             patch({
               phase: "needs-key",
               status:
-                "This question needs a model. Connect one in Settings, then retry.",
+                cfg.directOnly ? "This question needs a model. Choose one beside the message box, then retry." : "This question needs a model. Connect one in Settings, then retry.",
             });
             return;
           }
@@ -264,6 +269,7 @@ export class ChittiAgent extends AbstractAgent {
           if (workspace) this.session = null;
           this.session ||= this.dependencies.createSession(cfg, {
             workspace: workspace || undefined,
+            conversation: this.conversation,
             sources: cfg.sources,
             rlm: cfg.rlm,
             jev: cfg.jev,

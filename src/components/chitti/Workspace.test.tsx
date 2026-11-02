@@ -46,12 +46,37 @@ import { runFastPath, parseFastPath } from "../../lib/chitti/fastpath";
 import { highlightChanges, deltaLabel } from "../../lib/chitti/chart-insights";
 import { within } from "@testing-library/react";
 import { DEMOS } from "../../lib/chitti/demos";
+import { providerMeta } from "../../lib/chitti/providers";
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.clearAllMocks();
 });
-it("keeps the previous artifact visible while a new AG-UI run prepares its replacement", async () => {
+it("locks a chat's model, switches only in a new chat, and restores its original model", async () => {
+  sessionStorage.setItem("chitti:provider", "openrouter");
+  sessionStorage.setItem("chitti:key", "test-key");
+  sessionStorage.setItem("chitti:model", "original-model");
+  const ask = vi.fn().mockResolvedValue({ finding: "An answer to keep.", chartSpec: null, rows: [], citations: [], verification: null, cost: 0 });
+  vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
+  render(<Workspace />);
+  fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain the limits of these indicators" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await screen.findByText("An answer to keep.");
+  fireEvent.click(screen.getByLabelText("Choose model: original-model"));
+  const next = providerMeta("openrouter").models[0];
+  fireEvent.click(screen.getByRole("button", { name: `${next.label} OpenRouter · configured` }));
+  expect(screen.getByLabelText("Choose model: original-model")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Start new chat" }));
+  expect(screen.queryByText("An answer to keep.")).toBeNull();
+  expect(screen.getByLabelText(`Choose model: ${next.id}`)).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("region", { name: "Recent chats" })).getByRole("button", { name: "Explain the limits of these indicators" }));
+  expect(screen.getByLabelText("Choose model: original-model")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Expand on that answer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(createSession).mock.calls[1][0].model).toBe("original-model");
+});
+it("keeps the previous artifact visible while a new AG-UI run appends a new reply", async () => {
   let resolve!: (value: Awaited<ReturnType<typeof runFastPath>>) => void;
   vi.mocked(runFastPath).mockImplementation(
     () =>
@@ -70,7 +95,7 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: question },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Analyze" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByRole("button", { name: "Stop" });
   expect(screen.getByRole("heading", { name: previous.question })).toBeTruthy();
   await waitFor(() => expect(runFastPath).toHaveBeenCalled());
@@ -90,8 +115,8 @@ it("keeps the previous artifact visible while a new AG-UI run prepares its repla
     }),
   );
   await screen.findByRole("heading", { name: question });
-  expect(screen.queryByRole("heading", { name: previous.question })).toBeNull();
-  expect(screen.getByText("History (1)")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: previous.question })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Recent chats" })).toBeTruthy();
   expect(screen.getByText("Result from the test source")).toBeTruthy();
 });
 it("lets the user steer a recorded result and return to the exact parent view without a key", async () => {
@@ -172,7 +197,7 @@ it("uses the restored evidence for the next model request after undo", async () 
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: "Explain the restored comparison" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() => expect(createSession).toHaveBeenCalled());
   expect(vi.mocked(createSession).mock.calls[0][1]!.workspace).toEqual(
     demo.state,
@@ -187,7 +212,7 @@ it("keeps a model-key request beside the unchanged result", async () => {
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: "Explain the causal mechanism" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByRole("button", { name: "Connect model" });
   expect(screen.getByRole("heading", { name: DEMOS[0].question })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Current request" })).toBeTruthy();
@@ -347,4 +372,39 @@ it("starts with the user's question and lets them deliberately open evidence", a
   await screen.findByRole("heading", { name: DEMOS[0].question });
   fireEvent.click(screen.getByRole("tab", { name: /Sources/ }));
   expect(screen.getAllByText(/World Bank/).length).toBeGreaterThan(0);
+});
+
+
+it("keeps prior answers in the selected branch's model context", async () => {
+  sessionStorage.setItem("chitti:provider", "openrouter");
+  sessionStorage.setItem("chitti:key", "test-key");
+  const demo = DEMOS[0];
+  const ask = vi.fn().mockResolvedValue({ finding: "First, rates fell. Second, causes need more evidence.", chartSpec: null, rows: demo.state.rows, citations: demo.state.citations, verification: null, cost: 0 });
+  vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
+  render(<Workspace />);
+  fireEvent.change(screen.getByLabelText("Open result"), { target: { value: `example:${demo.id}` } });
+  fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain the finding" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await screen.findByText("First, rates fell. Second, causes need more evidence.");
+  fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain your second point" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(createSession).mock.calls[1][1]!.conversation).toContainEqual({ role: "assistant", content: "First, rates fell. Second, causes need more evidence." });
+  expect(screen.getByRole("heading", { name: demo.question })).toBeTruthy();
+});
+
+it("opens a fresh chat without erasing earlier branches", async () => {
+  render(<Workspace />);
+  const demo = DEMOS[2];
+  fireEvent.change(screen.getByLabelText("Open result"), { target: { value: `example:${demo.id}` } });
+  fireEvent.change(await screen.findByLabelText("Focus chart"), { target: { value: demo.state.spec!.series[0].name } });
+  await screen.findByRole("button", { name: "Undo" });
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  fireEvent.change(await screen.findByLabelText("Focus chart"), { target: { value: demo.state.spec!.series[1].name } });
+  await screen.findByRole("heading", { name: `Focus on ${demo.state.spec!.series[1].name}` });
+  expect(within(screen.getByRole("region", { name: "Recent chats" })).getAllByRole("button")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+  expect(screen.getByRole("heading", { name: "What do you want to find out?" })).toBeTruthy();
+  expect(screen.queryByText("Chart rendered")).toBeNull();
+  expect(within(screen.getByRole("region", { name: "Recent chats" })).getAllByRole("button")).toHaveLength(2);
 });
