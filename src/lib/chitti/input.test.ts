@@ -82,8 +82,9 @@ it("streams the real render_chart tool with recorded workspace evidence before t
     { workspace },
   );
   await session.ask("Explain this view", { ...callbacks, onPreview, onFiles });
+  const { prepareChart } = await import("./chart-contract");
   expect(onPreview).toHaveBeenCalledWith({
-    chartSpec: workspace.spec,
+    chartSpec: prepareChart(workspace.spec!),
     rows: workspace.rows,
     citations: workspace.citations,
   });

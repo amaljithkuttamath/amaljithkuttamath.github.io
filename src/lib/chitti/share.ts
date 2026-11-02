@@ -19,6 +19,7 @@
 
 import type { ChartSpec, DataRow, Citation } from './tools';
 import { packJson, unpackJson, hasCompression } from './codec';
+import { normalizeChart } from './chart-contract';
 
 // Bumped whenever the payload shape changes incompatibly. decodeShareState gates
 // on it: an unknown version yields null (invalid link), never a guess.
@@ -79,7 +80,7 @@ export type EncodeResult =
 
 const VERIFY_STATUS = new Set(['verified', 'unverified', 'unavailable']);
 const VERIFY_CONFIDENCE = new Set(['high', 'medium', 'low', 'none']);
-const SPEC_TYPES = new Set(['line', 'bar', 'scatter', 'grouped-bar']);
+
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x : x == null ? '' : String(x);
@@ -87,21 +88,7 @@ function str(x: unknown): string {
 
 function cleanSpec(spec: unknown): ChartSpec | null {
   if (!spec || typeof spec !== 'object') return null;
-  const s = spec as Record<string, unknown>;
-  const type = SPEC_TYPES.has(s.type as string) ? (s.type as ChartSpec['type']) : 'line';
-  const seriesIn = Array.isArray(s.series) ? s.series : [];
-  const series = seriesIn.map((ser) => {
-    const so = (ser && typeof ser === 'object' ? ser : {}) as Record<string, unknown>;
-    const dataIn = Array.isArray(so.data) ? so.data : [];
-    const data = dataIn
-      .filter((pt) => Array.isArray(pt) && pt.length >= 2)
-      .map((pt) => [(pt as unknown[])[0] as number | string, Number((pt as unknown[])[1])] as [number | string, number]);
-    return { name: str(so.name), data };
-  });
-  const out: ChartSpec = { type, title: str(s.title), series };
-  if (s.x_axis != null) out.x_axis = str(s.x_axis);
-  if (s.y_axis != null) out.y_axis = str(s.y_axis);
-  return out;
+  return normalizeChart(spec);
 }
 
 function cleanRows(rows: unknown): DataRow[] {

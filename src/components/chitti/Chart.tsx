@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useContext } from "react";
+import { chartUnit } from "../../lib/chitti/chart-contract";
 import type { ChartSpec } from "../../lib/chitti/tools";
 import { buildOption } from "../../lib/chitti/ui/chart-option";
 import {
@@ -23,6 +24,7 @@ export default function Chart({
   onSelect?: (name: string) => void;
   onAsk?: (question: string, change: ChartChange) => void;
 }) {
+  const unit = chartUnit(spec);
   const explanation = useContext(ExplanationContext);
   const selected = explanation?.change;
   const [fit, setFit] = useState(true);
@@ -89,7 +91,7 @@ export default function Chart({
     <figure className="cw-chart">
       <figcaption>
         {spec.title}
-        <span>{spec.y_axis}</span>
+        <span>{unit}</span>
       </figcaption>
       {domain && (
         <div className="cw-scale">
@@ -124,10 +126,10 @@ export default function Chart({
                   : undefined
               }
               aria-expanded={!!selected && changeKey(selected) === changeKey(c)}
-              aria-label={`Ask why: ${c.series}, ${deltaLabel(c, spec.y_axis)}, ${c.from[0]} to ${c.to[0]}`}
+              aria-label={`Ask why: ${c.series}, ${deltaLabel(c, unit)}, ${c.from[0]} to ${c.to[0]}`}
             >
               <strong>
-                {c.series} <b>{deltaLabel(c, spec.y_axis)}</b>
+                {c.series} <b>{deltaLabel(c, unit)}</b>
               </strong>
               <span>
                 {c.from[0]}–{c.to[0]} · {chartValue(c.from[1], changeDigits(c))}{" "}
@@ -138,7 +140,7 @@ export default function Chart({
           ))}
         </div>
       )}
-      <ChangeExplanation unit={spec.y_axis} />
+      <ChangeExplanation unit={unit} />
       {failed ? (
         <p role="status">
           Chart unavailable. The values are still available in Data.

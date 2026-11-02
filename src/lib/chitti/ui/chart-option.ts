@@ -9,7 +9,8 @@ import {
   changeDigits,
   type ChartChange,
 } from "../chart-insights";
-import type { ChartSpec } from "../tools";
+import type { ChartSpec, ChartSeries } from "../core";
+import { prepareChart, seriesIdentity, chartUnit } from "../chart-contract";
 import {
   formatAxisValue,
   needsDataZoom,
@@ -23,23 +24,28 @@ export function buildOption(
   fitLine = true,
   selected?: ChartChange,
 ) {
+  spec = prepareChart(spec);
   const signal = cssVar("--signal") || "#d9a13b";
   const muted = cssVar("--fg-muted") || "#79817c";
   const fg = cssVar("--fg") || "#e6e9e7";
   const faint = cssVar("--fg-faint") || "rgba(255,255,255,0.08)";
   const bg = cssVar("--bg") || "#0b0d0c";
 
-  // Palette: primary in signal amber, the rest in muted-derived tones.
-  const palette = [
-    signal,
-    muted,
-    fg,
-    "#6b8ab8",
-    "#4b986b",
-    "#c0605a",
-    "#9a7cc0",
-    "#b8946b",
-  ];
+  const palette = ["#719bd2", "#68ae89", "#d5a353", "#b690cf", "#d57c79", "#61aeb8", "#cb94b5", "#a9aa68"]
+    .map((fallback, i) => cssVar(`--chart-${i + 1}`) || fallback);
+  const colorOf = (s: ChartSeries) => palette[s.colorIndex! % palette.length];
+  const opacityOf = (s: ChartSeries) =>
+    selected ? (selected.series === s.name ? 1 : 0.35) :
+    spec.highlight?.length && !spec.highlight.includes(seriesIdentity(s)) ? 0.35 : 1;
+  const annotations = (s: ChartSeries, categories?: (string | number)[]) =>
+    (spec.annotations || []).filter(a => a.seriesId === seriesIdentity(s)).flatMap(a => {
+      const point = s.data.find(([x]) => x === a.x);
+      if (!point) return [];
+      return [{ name: a.label, coord: [categories ? categories.indexOf(a.x) : a.x, point[1]],
+        symbol: "pin", symbolSize: 20,
+        label: { show: true, formatter: a.label, color: fg, fontSize: 11, position: "top" },
+        itemStyle: { color: colorOf(s) } }];
+    });
 
   const baseText = {
     color: muted,
@@ -68,7 +74,7 @@ export function buildOption(
   // The unit lives in spec.y_axis (also shown in the card header). Only the
   // axis tick and tooltip number formatting consult it — via formatAxisValue,
   // which appends % for percent units and otherwise just compacts magnitudes.
-  const unit = spec.y_axis || "";
+  const unit = chartUnit(spec);
   const reduce = prefersReducedMotion();
 
   // A themed legend. type:'scroll' with paged arrows only when there are
@@ -232,6 +238,8 @@ export function buildOption(
         name: s.name,
         type: "scatter",
         symbolSize: 8,
+        itemStyle: { color: colorOf(s), opacity: opacityOf(s) },
+        markPoint: { data: annotations(s) },
         data: s.data,
       })),
     };
@@ -271,7 +279,8 @@ export function buildOption(
           type: "bar",
           barMaxWidth: 28,
           data: cats.map((c) => map.get(c) ?? null),
-          itemStyle: spec.series.length === 1 ? { color: signal } : {},
+          itemStyle: { color: colorOf(s), opacity: opacityOf(s) },
+          markPoint: { data: annotations(s, cats) },
         };
       }),
     };
@@ -291,7 +300,7 @@ export function buildOption(
     for (const [x] of s.data) if (!lineCats.includes(x)) lineCats.push(x);
   lineCats.sort((a, b) => Number(a) - Number(b));
   const domain = fitLine ? lineDomain(spec) : null;
-  const linePalette = [signal, "#6b8ab8", "#4b986b", "#c0605a", "#9a7cc0", fg];
+  const linePalette = palette;
   const highlights = highlightChanges(spec);
   const endLabels = spec.series.length <= 6;
   return {
@@ -354,7 +363,7 @@ export function buildOption(
             : highlights.filter((c) => c.series === s.name)
           ).flatMap((c) =>
             (selected ? [c.from, c.to] : [c.to]).map((point) => ({
-              name: `${c.series}: ${deltaLabel(c, spec.y_axis)}, ${c.from[0]}–${c.to[0]}`,
+              name: `${c.series}: ${deltaLabel(c, unit)}, ${c.from[0]}–${c.to[0]}`,
               coord: [
                 lineCats.findIndex((x) => Number(x) === point[0]),
                 point[1],
@@ -372,7 +381,7 @@ export function buildOption(
                   }
                 : { show: false },
             })),
-          ),
+          ).concat(annotations(s, lineCats) as any),
         },
         markLine:
           selected?.series === s.name
@@ -383,7 +392,7 @@ export function buildOption(
                 lineStyle: {
                   width: 4,
                   type: "solid",
-                  color: linePalette[i % linePalette.length],
+                  color: colorOf(s),
                 },
                 data: [
                   [
@@ -406,11 +415,14 @@ export function buildOption(
               }
             : undefined,
         lineStyle: {
-          width: i === 0 ? 2 : 1.4,
-          opacity: selected && selected.series !== s.name ? 0.28 : 1,
+          width: spec.highlight?.includes(seriesIdentity(s)) ? 3 : 2,
+          color: colorOf(s),
+          type: (["solid", "dashed", "dotted"] as const)[s.colorIndex! % 3],
+          opacity: opacityOf(s),
         },
         itemStyle: {
-          opacity: selected && selected.series !== s.name ? 0.28 : 1,
+          color: colorOf(s),
+          opacity: opacityOf(s),
         },
         data: lineCats.map((c) => map.get(c) ?? null),
       };

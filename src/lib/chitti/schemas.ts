@@ -230,7 +230,10 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
     description:
       'Render the final chart. Provide a spec with a chart type, title, axis labels, and series. ' +
       'Each series has a name and an array of [x, y] pairs (x = year for line/scatter, or category label for bar). ' +
-      'Returns "rendered".',
+      'Use stable series IDs across follow-ups, explicit units, and evidence citation IDs from citations.json. ' +
+      'Observed series bind an indicator and country to source rows; derived series describe their calculation. ' +
+      'Use highlight for series IDs and annotations only at existing x coordinates. Colors are assigned by the renderer. ' +
+      'Returns rendered or validation errors; correct errors before finishing.',
     parameters: {
       type: 'object',
       properties: {
@@ -238,12 +241,26 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
         title: { type: 'string' },
         x_axis: { type: 'string' },
         y_axis: { type: 'string' },
+        unit: { type: 'string', description: 'Common unit for the y values; do not mix units on one axis.' },
+        highlight: { type: 'array', items: { type: 'string' }, description: 'Stable series IDs to emphasize without hiding other series.' },
+        annotations: { type: 'array', items: { type: 'object', properties: {
+          seriesId: { type: 'string' }, x: { type: ['number', 'string'] }, label: { type: 'string' },
+        }, required: ['seriesId', 'x', 'label'] } },
         series: {
           type: 'array',
           items: {
             type: 'object',
             properties: {
+              id: { type: 'string', description: 'Stable semantic ID, e.g. country:IND. Reuse it when changing labels or views.' },
               name: { type: 'string' },
+              unit: { type: 'string' },
+              evidence: { type: 'object', properties: {
+                citationIds: { type: 'array', items: { type: 'string' } },
+                mode: { type: 'string', enum: ['observed', 'derived'] },
+                indicatorId: { type: 'string' }, iso3: { type: 'string', description: 'Required for observed time-series points.' },
+                year: { type: 'integer', description: 'Required for observed categorical comparisons.' },
+                method: { type: 'string', description: 'Calculation used for derived points; not a verification claim.' },
+              }, required: ['citationIds', 'mode'] },
               data: {
                 type: 'array',
                 items: { type: 'array', items: {} },

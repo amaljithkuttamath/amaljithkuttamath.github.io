@@ -53,3 +53,19 @@ it("limits by calendar years, not ten points, and refuses non-time charts", () =
     recentStart({ ...source, spec: { ...source.spec!, x_axis: "GDP" } }),
   ).toBeNull();
 });
+it('changes chart type, time range and highlight without changing source evidence', () => {
+  const bar = editView(source, { kind: 'type', type: 'grouped-bar' })!;
+  expect(bar.spec!.type).toBe('grouped-bar');
+  expect(bar.rows).toEqual(source.rows);
+  const highlighted = editView(bar, { kind: 'highlight', id: 'B' })!;
+  expect(highlighted.spec!.highlight).toEqual(['B']);
+  expect(highlighted.spec!.series).toHaveLength(2);
+  const filtered = editView(highlighted, { kind: 'years', start: 2010, end: 2020 })!;
+  expect(filtered.spec!.series[1].data).toEqual([[2020, 4]]);
+  expect(filtered.spec!.series[1].colorIndex).toBe(bar.spec!.series[1].colorIndex);
+  expect(filtered.verification).toBeNull();
+  expect(editView(source, { kind: 'years', start: 2020, end: 2000 })).toBeNull();
+  expect(editView(source, { kind: 'years', start: 1900, end: 1910 })).toBeNull();
+  expect(editView(source, { kind: 'type', type: 'scatter' })).toBeNull();
+  expect(editView(source, { kind: 'highlight', id: 'missing' })).toBeNull();
+});

@@ -46,7 +46,7 @@ in the companion. See [setup and security details](../../../docs/chitti-chatgpt.
 | `prompts.ts` | `buildSystemPrompt` / `buildSubAgentPrompt`. |
 | `planner.ts` | The gated planner heuristic (`needsPlan` + helpers, `countCountryMentions`), `parsePlanBrief`, `matchStepToEvent`, `PlanStep`/`InsightBrief`. |
 | `verifier.ts` | `verify` (the second-LLM check) + `parseVerifierVerdict` + verdict types. |
-| `spec.ts` | `normalizeSpec` — guard a model chart spec into a valid `ChartSpec`. |
+| `spec.ts`, `chart-contract.ts` | Shared chart whitelist, stable identity/palette, unit resolution and validation of declared source bindings. `normalizeSpec` remains a compatibility export. |
 | `okf.ts` | `buildFindingOkf` — export one answer as an Open Knowledge Format (OKF) v0.1 Markdown concept (front matter + citations as links). Pure. Copied via the turn's "Copy Markdown" action (`Workspace.tsx`). |
 | `abort.ts` | `AbortedError` — the user-cancel sentinel (loop + refresh pipeline). |
 | `dashboards-agent.ts` | Agent-side dashboard glue: `resolveTileRef`, the session-less refresh pipeline (`refreshDashboard`/`refreshTile`/`refetchCitation`), `buildCitation`, `indicatorName`, `defaultDashboardTitle`. |
@@ -63,11 +63,13 @@ Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.t
 | --- | --- |
 | `workspace/agent.ts` | `AbstractAgent` adapter: runs, state snapshots, text, A2UI custom events, cancellation, and input replies. Provider credentials remain private configuration. |
 | `workspace/model.ts` | Whitelisted result surfaces, clarification payloads, analysis state and safe source URLs. |
-| `components/chitti/Workspace.tsx` | One request/change/result thread; inline steering, undo/redo, history, configuration, sharing and exports. |
+| `components/chitti/Workspace.tsx` | Chat transcript and sidebar; inline steering, branch navigation, undo/redo, private per-chat configuration, sharing and exports. |
+| `workspace/conversation.ts` | Pure parent-path and branch-head navigation; no UI or protocol state. |
 | `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog. Replies dispatch A2UI actions into the waiting agent tool. |
 | `components/chitti/Result.tsx` | Finding, chart/data/source tabs and honest verification status. |
 | `components/chitti/Chart.tsx` | Lazy bundled ECharts, theme/resize lifecycle and cleanup. No CDN runtime. |
 | `components/chitti/Settings.tsx` | Provider, model, source scope and optional per-tab key storage. |
+| `components/chitti/ModelPicker.tsx` | Composer model menu, connection entry points and explicit new-chat transition for locked models. |
 | `components/chitti/Dashboards.tsx` | Existing local dashboard schema, pinning, imports, exports, shared snapshots and refresh. |
 | `ui/dom.ts`, `ui/chart-option.ts` | Retained pure formatting/chart helpers. The old DOM bootstrap and mutable UI globals are retired. |
 
@@ -81,18 +83,34 @@ A rendered chart now emits an evidence-bearing draft immediately through `onPrev
 before the final finding and verification. Repeated A2UI updates reuse the surface
 processor so the current tab and filter stay open. Drafts carry no verification.
 
-The result's focus and recent-period controls dispatch A2UI actions into AG-UI
+The result's focus, type, highlight and time-range controls dispatch A2UI actions into AG-UI
 runs. They change the chart using recorded values, retain the full source rows
 and timestamps, and discard the old conclusion/verdict. Each revision links back
 to its exact parent view. The workspace shows a deterministic difference summary
 next to Undo, Redo and Steer. Undo/redo restores snapshots without rerunning the
-agent; starting a new branch clears redo but keeps the old branch in History.
-The single composer uses the restored view as its context. Earlier turns and
-exports are collapsed, and running input requests/errors stay beside the result. Chart clicks have the same focus action as the keyboard
+agent; starting a new branch clears redo but keeps every leaf in Recent chats.
+The single composer uses the restored view as its context. Earlier messages stay
+visible; repeated inherited charts and exports are collapsed. Running input
+requests/errors stay beside the result. Chart clicks have the same focus action as the keyboard
 accessible selector. Questions sent from a result seed a new engine session with
 that selected chart, rows and citation ledger; the engine reads `workspace.csv`,
 `workspace-view.json`, and `citations.json`. A fresh pull replaces overlapping
 recorded rows. The composer can detach from the current view for a fresh query.
+Follow-ups also carry the selected branch's last 20 user/assistant messages,
+each capped at 4,000 characters. Chat history and its provider configuration are
+session-only; credentials remain in a private React ref and never enter result
+surfaces, model history, or exports. Reopening a chat restores its configuration.
+After a model has been used, the composer requires a new chat to switch it.
+
+`ChartSpec` supports optional series IDs, palette slots, explicit units, observed
+or derived evidence bindings, point annotations and highlighted series IDs.
+`render_chart` validates declared bindings against the session rows and citation
+ledger before publishing a draft. Derived methods document calculations; they
+do not independently prove them. Legacy specs without bindings remain supported
+and receive no new verification claim. A shared whitelist protects both model
+output and saved/shared results; arbitrary chart-library options never pass it.
+Palette slots survive focusing, reordering and sharing. Distinct series use
+colors plus line patterns; local edits retain evidence and prune stale markers.
 Line charts fit one shared, explicitly labelled y range by default, with a zero
 baseline toggle; bars retain their zero baseline. `chart-insights.ts` derives
 up to three largest observed steps (one per series) from plotted time points.

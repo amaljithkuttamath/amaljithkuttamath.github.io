@@ -187,3 +187,15 @@ it("anchors the explanation to exact plotted values and clears the highlight on 
     screen.queryByRole("region", { name: /Explanation: Spain/ }),
   ).toBeNull();
 });
+it('uses explicit units, stable colors and declarative annotations across chart types', async () => {
+  const annotated: ChartSpec = { ...spec, y_axis: 'Rate', unit: '%', series: [{ ...spec.series[0], id: 'country:ESP' }], annotations: [{ seriesId: 'country:ESP', x: 2020, label: 'Observed endpoint' }] };
+  const { rerender } = render(<Chart spec={annotated} />);
+  await waitFor(() => expect(setOption).toHaveBeenCalled());
+  expect(screen.getByRole('button', { name: /Ask why: Spain/ }).textContent).toContain('pp');
+  const first = setOption.mock.calls.at(-1)![0].series[0];
+  expect(first.markPoint.data.some((p: any) => p.name === 'Observed endpoint')).toBe(true);
+  rerender(<Chart spec={{ ...annotated, type: 'bar' }} />);
+  await waitFor(() => expect(setOption.mock.calls.at(-1)![0].series[0].type).toBe('bar'));
+  expect(setOption.mock.calls.at(-1)![0].series[0].itemStyle.color).toBe(first.itemStyle.color);
+  expect(setOption.mock.calls.at(-1)![0].series[0].markPoint.data[0].name).toBe('Observed endpoint');
+});

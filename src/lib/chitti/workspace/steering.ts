@@ -1,6 +1,17 @@
 import { cleanShareState, type ShareStateV1 } from "../share";
+import { prepareChart, seriesIdentity } from "../chart-contract";
+import type { ChartSpec } from "../core";
 
-export type ViewEdit = { kind: "series"; name: string } | { kind: "recent" };
+export type ViewEdit = { kind: "series"; name: string } | { kind: "recent" }
+  | { kind: "type"; type: ChartSpec["type"] }
+  | { kind: "highlight"; id: string }
+  | { kind: "years"; start: number; end: number };
+
+export function chartTypes(spec: ChartSpec): ChartSpec["type"][] {
+  if (spec.type === "scatter") return ["scatter"];
+  const time = /year/i.test(spec.x_axis || "") && spec.series.every(s => s.data.every(([x]) => typeof x === "number" && Number.isInteger(x) && x >= 1800 && x <= 2200));
+  return time ? ["line", "bar", "grouped-bar"] : ["bar", "grouped-bar"];
+}
 
 export function recentStart(result: ShareStateV1): number | null {
   const spec = result.spec;
@@ -24,7 +35,16 @@ export function editView(
 ): ShareStateV1 | null {
   const result = cleanShareState(source);
   if (!result?.spec) return null;
-  if (edit.kind === "series") {
+  result.spec = prepareChart(result.spec);
+  if (edit.kind === "type") {
+    if (!chartTypes(result.spec).includes(edit.type)) return null;
+    result.spec.type = edit.type;
+    result.answer = `Showing a ${edit.type.replace('-', ' ')} chart. Source values unchanged.`;
+  } else if (edit.kind === "highlight") {
+    if (edit.id && !result.spec.series.some(s => seriesIdentity(s) === edit.id)) return null;
+    result.spec.highlight = edit.id ? [edit.id] : [];
+    result.answer = edit.id ? `Highlighted ${result.spec.series.find(s => seriesIdentity(s) === edit.id)!.name}. Other series remain visible.` : 'Showing all series equally.';
+  } else if (edit.kind === "series") {
     const series = result.spec.series.filter((s) => s.name === edit.name);
     if (series.length) result.spec.series = series;
     else if (result.spec.type === "bar" || result.spec.type === "grouped-bar") {
@@ -40,18 +60,24 @@ export function editView(
     result.spec.title += ` · ${edit.name}`;
     result.answer = `Showing ${edit.name}. Original source rows retained in Data.`;
   } else {
-    const start = recentStart(result);
-    if (start === null) return null;
+    const start = edit.kind === "years" ? edit.start : recentStart(result);
+    const limit = edit.kind === "years" ? edit.end : Infinity;
+    if (start === null || !chartTypes(result.spec).includes("line") ||
+        !Number.isInteger(start) || (edit.kind === "years" && (!Number.isInteger(limit) || start > limit))) return null;
     result.spec.series = result.spec.series.map((s) => ({
       ...s,
-      data: s.data.filter(([x]) => Number(x) >= start),
+      data: s.data.filter(([x]) => Number(x) >= start && Number(x) <= limit),
     }));
+    if (!result.spec.series.some(s => s.data.length)) return null;
     const end = Math.max(
       ...result.spec.series.flatMap((s) => s.data.map(([x]) => Number(x))),
     );
     result.spec.title = `${result.spec.y_axis || "Recorded values"} · ${start}–${end}`;
-    result.answer = `Showing ${start} onward. Original source rows retained in Data.`;
+    result.answer = `Showing ${start}–${end}. Original source rows retained in Data.`;
   }
+  const ids = result.spec.series.map(seriesIdentity);
+  if (result.spec.highlight) result.spec.highlight = result.spec.highlight.filter(id => ids.includes(id));
+  if (result.spec.annotations) result.spec.annotations = result.spec.annotations.filter(a => result.spec!.series.some(s => seriesIdentity(s) === a.seriesId && s.data.some(([x]) => x === a.x)));
   result.verification = null;
   // Keep the original recorded date: changing a view is not a fresh fetch.
   return result;
