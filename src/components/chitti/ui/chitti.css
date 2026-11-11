@@ -418,6 +418,9 @@ button.cx-token:hover { background: var(--cx-raise); }
 .cx-finding :where(p + p, p + ul, ul + p, p + ol, h4) { margin-top: 10px; }
 .cx-finding h4 { font-size: var(--fs-3); }
 .cx-finding :where(code) { font-family: var(--cx-mono); }
+/* A figure tied to its line on the chart: underlined in the series colour.
+   The name is always in the text, so colour is never the only cue. */
+.cx-fig { text-decoration: underline; text-decoration-color: var(--c); text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-skip-ink: none; }
 .cx-finding a { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--cx-faint); }
 
 .cx-evidence-toggle { align-self: flex-start; }
