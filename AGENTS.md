@@ -23,7 +23,7 @@ before changing it.
 ```bash
 npm install          # install deps
 npm run dev          # local dev server (astro dev)
-npm test             # run the full vitest suite (npx vitest run) — 690+ tests
+npm test             # run the full vitest suite (npx vitest run) — 980+ tests
 npm run build        # production build (astro build) — run before deploying UI/template edits
 npm run demos:refresh   # re-fetch Chitti's empty-state demo answers (needs network)
 npm run kb:refresh      # re-fetch the World Bank catalogue into the knowledge base (needs network)
@@ -87,6 +87,17 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   fast answer is worse than a slower right one, so every gate errs toward
   refusing. `MIN_MATCH_SCORE` is calibrated against the curated catalog (see its
   comment) and deliberately under-fires.
+  Three refusals are easy to undo by accident, and each closed a case that used
+  to chart the wrong thing: **a number the year parser did not use** ("ages
+  0-14", "in 2050", a third year) rejects the question, because bare numeric
+  tokens are otherwise dropped silently; **a query word the chosen series says
+  nothing about** ("adult mortality" on the infant series, "life expectancy of
+  women" on the total) rejects the match (`unmatchedTerms`); and **a tie between
+  long-tail series** rejects it too (`pickKbHit`) — only a tuned leaf may win a
+  tie, since tree order is the "core wins" rule for the authored tier and mere
+  catalogue order for the generated one. The scorer matches at the START of a
+  word, never as a free substring ("male" must not find "female"). The cases
+  live in `fastpath.test.ts`; add to that table when you change any of this.
 - **The knowledge base has two tiers, and the tuned one wins.** `kb.ts` resolves
   a phrase to a series by navigating a hierarchy rather than scoring a flat list
   — a leaf inherits its ancestors' vocabulary, so "child mortality" reaches an

@@ -155,6 +155,14 @@ describe('fetchFromMirror falls through instead of failing', () => {
     expect(await m.fetchFromMirror('SH.DYN.MORT', ['ZWE'], undefined, undefined)).toBeNull();
   });
 
+  it('returns null when only SOME requested countries are in the snapshot', async () => {
+    // Serving the ones it has would be a different answer from the live API —
+    // "India and Zimbabwe" must not come back as India alone.
+    const m = await withManifest(present, serve(file));
+    expect(await m.fetchFromMirror('SH.DYN.MORT', ['IND', 'ZWE'], undefined, undefined)).toBeNull();
+    expect(await m.fetchFromMirror('SH.DYN.MORT', ['ind'], undefined, undefined)).not.toBeNull();
+  });
+
   it('is inert when the manifest is the empty placeholder', async () => {
     const f = serve(file);
     const m = await withManifest({}, f);

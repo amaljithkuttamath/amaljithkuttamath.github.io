@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ChittiAgent } from "./agent";
+import { ChittiAgent, needsModelStatus } from "./agent";
 import { DEMOS } from "../demos";
 import type { SessionOptions } from "../session";
 import type { Settings } from "./model";
@@ -134,6 +134,38 @@ describe("AG-UI browser adapter", () => {
     expect(agent.state.analysis.phase).toBe("stopped");
     expect(agent.state.question).toBeNull();
     expect(agent.respond(id, "A")).toBe(false);
+  });
+  it("says the source failed, not that a model is needed, when a direct lookup cannot finish", async () => {
+    const run = async (runFastPath: any) => {
+      const createSession = vi.fn();
+      const agent = new ChittiAgent(
+        { ...config, apiKey: "" },
+        { createSession, runFastPath },
+      );
+      question(agent, "Chart life expectancy in Japan since 1960");
+      await agent.runAgent();
+      expect(createSession).not.toHaveBeenCalled();
+      expect(agent.state.analysis.phase).toBe("needs-key");
+      return agent.state.analysis.status as string;
+    };
+    expect(await run(vi.fn().mockRejectedValue(new Error("network")))).toBe(
+      needsModelStatus("unreachable", false),
+    );
+    expect(
+      await run(
+        vi.fn().mockResolvedValue({
+          ok: false,
+          reason: "no-data",
+          hit: { id: "SP.DYN.LE00.IN", name: "Life expectancy", source: "worldbank" },
+        }),
+      ),
+    ).toBe(needsModelStatus({ noData: "Life expectancy" }, false));
+    expect(
+      await run(vi.fn().mockResolvedValue({ ok: false, reason: "no-match" })),
+    ).toBe(needsModelStatus(null, false));
+    expect(needsModelStatus("unreachable", false)).toMatch(/did not respond/);
+    expect(needsModelStatus("unreachable", false)).not.toMatch(/needs a model/);
+    expect(needsModelStatus({ noData: "X" }, true)).toMatch(/beside the message box/);
   });
   it("gates model questions without a key and rejects changes during a session", async () => {
     const createSession = vi.fn(() => ({ ask: async () => output }) as any);

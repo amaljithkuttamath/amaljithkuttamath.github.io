@@ -15,6 +15,7 @@
 
 import type { ChartSpec, DataRow, Citation } from './tools';
 import { citationSourceLabel } from './tools';
+import { normalizeChart } from './chart-contract';
 
 // Bumped whenever the document shape changes incompatibly. parseDashboard gates
 // on it: an unknown version yields null (a document we refuse to guess at).
@@ -93,35 +94,19 @@ function nowIso(): string {
 // apiKey, an internal handle, a __proto__ key — cannot survive the copy. Do not
 // replace with a blacklist/delete approach. Mirrors share.ts's discipline.
 
-const SPEC_TYPES = new Set(['line', 'bar', 'scatter', 'grouped-bar']);
 const CITE_SOURCES = new Set(['worldbank', 'owid', 'imf', 'who']);
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x : x == null ? '' : String(x);
 }
 
+// One whitelist for every saved or shared chart. This used to be a second,
+// older copy that had drifted from `normalizeChart`: it dropped the unit,
+// series ids, palette slots, evidence bindings and highlights on pin, turned a
+// null y into a fabricated 0 (`Number(null)`), and let a non-scalar x through
+// to the renderer.
 function cleanSpec(spec: unknown): ChartSpec {
-  const s = (spec && typeof spec === 'object' ? spec : {}) as Record<string, unknown>;
-  const type = SPEC_TYPES.has(s.type as string) ? (s.type as ChartSpec['type']) : 'line';
-  const seriesIn = Array.isArray(s.series) ? s.series : [];
-  const series = seriesIn.map((ser) => {
-    const so = (ser && typeof ser === 'object' ? ser : {}) as Record<string, unknown>;
-    const dataIn = Array.isArray(so.data) ? so.data : [];
-    const data = dataIn
-      .filter((pt) => Array.isArray(pt) && pt.length >= 2)
-      .map(
-        (pt) =>
-          [(pt as unknown[])[0] as number | string, Number((pt as unknown[])[1])] as [
-            number | string,
-            number,
-          ]
-      );
-    return { name: str(so.name), data };
-  });
-  const out: ChartSpec = { type, title: str(s.title), series };
-  if (s.x_axis != null) out.x_axis = str(s.x_axis);
-  if (s.y_axis != null) out.y_axis = str(s.y_axis);
-  return out;
+  return normalizeChart(spec);
 }
 
 function cleanRows(rows: unknown): DataRow[] {
@@ -167,6 +152,9 @@ function cleanCitations(citations: unknown): Citation[] {
     };
     if (o.requestUrl != null) cit.requestUrl = str(o.requestUrl);
     if (o.sourceUpdated != null) cit.sourceUpdated = str(o.sourceUpdated);
+    // The snapshot disclosure travels with the numbers (see share.ts). Without
+    // it a pinned snapshot tile re-rendered as a live fetch.
+    if (o.mirroredAt != null) cit.mirroredAt = str(o.mirroredAt);
     return cit;
   });
 }

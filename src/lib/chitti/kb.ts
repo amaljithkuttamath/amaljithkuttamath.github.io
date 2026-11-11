@@ -47,7 +47,7 @@
 // request, and — unlike a similarity score — explains itself: the path IS the
 // reason the series was chosen.
 import { INDICATORS } from './tools';
-import { scoreSeries } from './scoring';
+import { scoreSeries, unmatchedTerms } from './scoring';
 import { resolveSources } from './sources/index';
 import kbData from '../../data/chitti/kb.json';
 
@@ -321,6 +321,16 @@ export interface KbHit {
   score: number;
   // The route that found it — the explanation a similarity score cannot give.
   path: string[];
+  // True for a leaf the authored core placed; false for the generated long
+  // tail. Tree order puts the core first, so a tuned leaf winning a tie is the
+  // "core wins on conflict" rule at work, while a long-tail leaf winning one is
+  // only catalogue order.
+  tuned: boolean;
+  // Query terms that matched neither this leaf's own wording nor its group's
+  // vocabulary. Topic- and source-level text is deliberately left out: a
+  // topic's aliases are the union of every group under it, so "gdp" would
+  // count as covered on an inflation series.
+  unmatched: string[];
 }
 
 // Everything a node inherits from its ancestors, joined into one haystack. This
@@ -364,6 +374,12 @@ export function searchKb(query: string, sourceIds?: string[], limit = 8): KbHit[
         name: node.title,
         source: node.source || '',
         score: own * LEAF_WEIGHT + inherited,
+        tuned: !node.path.includes('/more/'),
+        unmatched: unmatchedTerms(
+          query,
+          node.seriesId,
+          `${node.title} ${node.aliases.join(' ')} ${trail.length ? haystack(trail.slice(-1)) : ''}`
+        ),
         path: next.filter((n) => n.title !== 'Knowledge base').map((n) => n.title),
       });
       return;
@@ -427,5 +443,7 @@ export async function navigateKb(
     source: node.source || '',
     score: scoreSeries(query, node.seriesId, `${node.title} ${node.aliases.join(' ')}`),
     path: trail,
+    tuned: !node.path.includes('/more/'),
+    unmatched: [],
   };
 }

@@ -857,6 +857,47 @@ async function fetchWithTimeout(
   }
 }
 
+// A completion request and its BODY under one deadline. `fetchWithTimeout`
+// disarms its timer and its Stop listener the moment headers arrive, which is
+// the right contract for a caller that only wants headers — but a provider
+// that sends headers early and then stalls the body left `resp.text()` with
+// nothing able to interrupt it: the 60s timeout never fired and Stop did
+// nothing. Here both stay armed until the text is read. An abort mid-body
+// rejects with an AbortError, exactly as one before headers does, so the
+// caller's timeout-vs-stop classification is unchanged.
+async function fetchBodyWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  ms: number,
+  f?: FetchLike,
+  extSignal?: AbortSignal
+): Promise<{ resp: Response; body: string }> {
+  const doFetch: FetchLike = f ?? ((u, i) => (globalThis.fetch as FetchLike)(u, i));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  const onExtAbort = () => ctrl.abort();
+  if (extSignal) {
+    if (extSignal.aborted) ctrl.abort();
+    else extSignal.addEventListener('abort', onExtAbort, { once: true });
+  }
+  // Raced against the read, because not every body stream is wired to the
+  // request's signal (a polyfilled or proxied fetch may ignore it).
+  const aborted = new Promise<never>((_, reject) => {
+    const fail = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    if (ctrl.signal.aborted) fail();
+    else ctrl.signal.addEventListener('abort', fail, { once: true });
+  });
+  aborted.catch(() => {});
+  try {
+    const resp = await Promise.race([doFetch(url, { ...(init ?? {}), signal: ctrl.signal }), aborted]);
+    const body = await Promise.race([safeText(resp), aborted]);
+    return { resp, body };
+  } finally {
+    clearTimeout(timer);
+    if (extSignal) extSignal.removeEventListener('abort', onExtAbort);
+  }
+}
+
 async function safeText(resp: Response): Promise<string> {
   try {
     return await resp.text();
@@ -943,14 +984,15 @@ async function attemptOpenAICompatible(
   }
 
   let resp: Response;
+  let rawText: string;
   try {
-    resp = await fetchWithTimeout(endpoint, { method: 'POST', headers, body: JSON.stringify(body) }, COMPLETION_TIMEOUT_MS, f, signal);
+    ({ resp, body: rawText } = await fetchBodyWithTimeout(endpoint, { method: 'POST', headers, body: JSON.stringify(body) }, COMPLETION_TIMEOUT_MS, f, signal));
   } catch (err) {
     // Network failure, CORS, or an abort (timeout) — classify and throw.
     throw asClassified(err, cfg.provider);
   }
   if (!resp.ok) {
-    const errText = await safeText(resp);
+    const errText = rawText;
     throw new ClassifiedError(
       classifyProviderError({ status: resp.status, body: errText, headers: resp.headers }, cfg.provider)
     );
@@ -960,7 +1002,6 @@ async function attemptOpenAICompatible(
   // a common transient free-model glitch) is told apart from genuine garbage:
   //   • blank/whitespace body           → empty_completion (retry + fallback)
   //   • non-empty but unparseable JSON  → malformed (surface at once)
-  const rawText = await safeText(resp);
   if (!rawText.trim()) {
     throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
   }
@@ -975,12 +1016,23 @@ async function attemptOpenAICompatible(
   if (!data || typeof data !== 'object' || !Array.isArray(data.choices)) {
     throw new ClassifiedError(infoFor('malformed', cfg.provider));
   }
-  const choice = data.choices?.[0]?.message ?? {};
-  const toolCalls: ToolCall[] = (choice.tool_calls ?? []).map((tc: any) => ({
-    id: tc.id ?? 'call_' + Math.random().toString(36).slice(2),
-    name: tc.function?.name ?? '',
-    arguments: safeParse(tc.function?.arguments ?? '{}'),
-  }));
+  const message0 = data.choices?.[0]?.message;
+  const choice = message0 && typeof message0 === 'object' ? message0 : {};
+  // Entries are shape-guarded: a `tool_calls: [null]` used to throw a TypeError
+  // here, which the classifier reads as a NETWORK failure — so a malformed
+  // body was reported as "could not reach the provider" and retried three
+  // times. A non-object entry is skipped; nothing usable left is `malformed`.
+  const rawCalls: any[] = Array.isArray(choice.tool_calls) ? choice.tool_calls : [];
+  const toolCalls: ToolCall[] = rawCalls
+    .filter((tc) => tc && typeof tc === 'object')
+    .map((tc: any) => ({
+      id: typeof tc.id === 'string' && tc.id ? tc.id : 'call_' + Math.random().toString(36).slice(2),
+      name: typeof tc.function?.name === 'string' ? tc.function.name : '',
+      arguments: safeParse(tc.function?.arguments ?? '{}'),
+    }));
+  if (rawCalls.length && !toolCalls.length && typeof choice.content !== 'string') {
+    throw new ClassifiedError(infoFor('malformed', cfg.provider));
+  }
 
   // Per OpenRouter's docs, reasoning text appears under one of two
   // interchangeable string fields: `reasoning` or `reasoning_content`.
@@ -1081,8 +1133,9 @@ async function attemptAnthropic(
   }
 
   let resp: Response;
+  let rawText: string;
   try {
-    resp = await fetchWithTimeout(
+    ({ resp, body: rawText } = await fetchBodyWithTimeout(
       'https://api.anthropic.com/v1/messages',
       {
         method: 'POST',
@@ -1098,20 +1151,19 @@ async function attemptAnthropic(
       COMPLETION_TIMEOUT_MS,
       f,
       signal
-    );
+    ));
   } catch (err) {
     throw asClassified(err, cfg.provider);
   }
 
   if (!resp.ok) {
-    const errText = await safeText(resp);
+    const errText = rawText;
     throw new ClassifiedError(
       classifyProviderError({ status: resp.status, body: errText, headers: resp.headers }, cfg.provider)
     );
   }
 
   // Empty body (a 200 with nothing in it) vs genuine garbage, as above.
-  const rawText = await safeText(resp);
   if (!rawText.trim()) {
     throw new ClassifiedError(infoFor('empty_completion', cfg.provider));
   }
@@ -1128,10 +1180,14 @@ async function attemptAnthropic(
   let text = '';
   const toolCalls: ToolCall[] = [];
   for (const block of data.content ?? []) {
-    if (block.type === 'text') text += block.text;
-    if (block.type === 'tool_use') {
+    // Shape-guarded for the same reason as the OpenAI path: a null block must
+    // not surface as a "network" error.
+    if (!block || typeof block !== 'object') continue;
+    if (block.type === 'text' && typeof block.text === 'string') text += block.text;
+    if (block.type === 'tool_use' && typeof block.name === 'string') {
       // Normalise Anthropic tool_use back into the OpenAI-shaped ToolCall.
-      toolCalls.push({ id: block.id, name: block.name, arguments: block.input ?? {} });
+      const input = block.input && typeof block.input === 'object' && !Array.isArray(block.input) ? block.input : {};
+      toolCalls.push({ id: String(block.id ?? 'call_' + Math.random().toString(36).slice(2)), name: block.name, arguments: input });
     }
   }
   // An empty content array (no text, no tool_use) is the model glitching, not
@@ -1269,9 +1325,13 @@ export async function complete(
   }
 }
 
-function safeParse(s: string): Record<string, unknown> {
+// Tool arguments are always an object downstream. `arguments: "null"` or
+// `"[1]"` parses fine and is not one, so anything else collapses to {}.
+function safeParse(s: unknown): Record<string, unknown> {
+  if (s && typeof s === 'object' && !Array.isArray(s)) return s as Record<string, unknown>;
   try {
-    return JSON.parse(s);
+    const v = JSON.parse(String(s));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
   } catch {
     return {};
   }

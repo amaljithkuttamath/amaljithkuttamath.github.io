@@ -165,10 +165,11 @@ reports; the router reads the optionals when present.
 
 ```
 JSON data · providers · countries · codec
+  core                       (reference tables, DataRow/ChartSpec, ApiRejection — imports nothing from the app)
   scoring · vfs · execute-js · csv · schemas · parse-json · budgets
     sources/types            (SourceAdapter + shared shapes)
       sources/{worldbank,owid,imf,who}   (import ApiRejection/COUNTRIES/INDICATORS
-                                          from tools ONLY inside functions)
+                                          from core, never from tools)
         sources/index         (registry + generic search/routing)
           tools.ts            (facade + remaining core types/consts/helpers)
     receipts · prompts · planner · verifier · spec · abort
@@ -179,14 +180,15 @@ JSON data · providers · countries · codec
 
 Rules that keep it acyclic:
 
-- Shared **types** sit at the bottom (`sources/types.ts`, the core types still in
-  `tools.ts` are imported *type-only* by the source files — erased at build, no
-  runtime edge).
-- The source adapter files import `tools.ts` runtime values (`ApiRejection`,
-  `COUNTRIES`, `INDICATORS`) **only inside function bodies**, never at module
-  top-level. So although `tools.ts ⇄ sources/*` is a static cycle, nothing reads
-  a not-yet-initialized binding during evaluation — the vitest/vite import graph
-  (which evaluates every module) is green.
+- Shared **types** and reference tables sit at the bottom (`core.ts`,
+  `sources/types.ts`). `core.ts` imports nothing from the app.
+- The source adapter files import runtime values (`ApiRejection`, `COUNTRIES`,
+  `INDICATORS`) from **`core.ts`, never from `tools.ts`**. `tools.ts` is a facade
+  that re-exports `./sources`, so an adapter importing back from it closes the
+  loop `adapter → tools → sources/index → adapter`, and `SOURCES` (built at
+  module scope) then holds `undefined` for whichever adapter was the entry
+  point. `layering.test.ts` walks the real import graph and fails on any runtime
+  cycle; `mirror.test.ts` enters through each source module in turn.
 - `session.ts`/`agent.ts` sit at the top; nothing below imports them.
 
 ## Adding a data source (the invariant)

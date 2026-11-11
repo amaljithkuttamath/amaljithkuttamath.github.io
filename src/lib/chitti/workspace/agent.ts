@@ -20,6 +20,31 @@ import {
 
 /** One adapter translates the existing source/agent engine to standard AG-UI events.
  * Credentials stay in private configuration, never in state, messages, or surfaces. */
+// Why a recognised direct lookup produced no answer. `null` means the question
+// was never a direct lookup (or matched no series), so a model really is what
+// it needs.
+export type DirectFailure = null | "unreachable" | { noData: string };
+
+// The status shown when a turn stops at the model gate. Pure — exported for
+// its unit table. A direct lookup that failed for its own reasons says so:
+// telling someone their question "needs a model" when the source simply did
+// not answer sends them to Settings for a problem a retry would fix.
+export function needsModelStatus(
+  failure: DirectFailure,
+  directOnly: boolean,
+): string {
+  const model = directOnly
+    ? "choose a model beside the message box"
+    : "connect a model in Settings";
+  if (failure === "unreachable")
+    return `The data source did not respond, so this direct lookup could not finish. Retry, or ${model}.`;
+  if (failure)
+    return `${failure.noData} has no values for those countries and years. Try another range, or ${model} to search more widely.`;
+  return directOnly
+    ? "This question needs a model. Choose one beside the message box, then retry."
+    : "This question needs a model. Connect one in Settings, then retry.";
+}
+
 export class ChittiAgent extends AbstractAgent {
   private workspace: ShareStateV1 | null = null;
   private conversation: { role: "user" | "assistant"; content: string }[] = [];
@@ -200,6 +225,7 @@ export class ChittiAgent extends AbstractAgent {
             surface(resultSurface(result));
             return;
           }
+          let directFailure: DirectFailure = null;
           const plan =
             !workspace && !this.session && !forceAgent
               ? parseFastPath(question)
@@ -246,8 +272,11 @@ export class ChittiAgent extends AbstractAgent {
                 surface(resultSurface(analysis.result!));
                 return;
               }
+              directFailure =
+                result.reason === "no-data" ? { noData: result.hit.name } : null;
             } catch {
               if (controller.signal.aborted) return;
+              directFailure = "unreachable";
             } finally {
               directActive = false;
             }
@@ -255,8 +284,7 @@ export class ChittiAgent extends AbstractAgent {
           if (cfg.directOnly || (cfg.provider === "chatgpt" ? !cfg.chatgptAccount : !cfg.apiKey.trim())) {
             patch({
               phase: "needs-key",
-              status:
-                cfg.directOnly ? "This question needs a model. Choose one beside the message box, then retry." : "This question needs a model. Connect one in Settings, then retry.",
+              status: needsModelStatus(directFailure, !!cfg.directOnly),
             });
             return;
           }

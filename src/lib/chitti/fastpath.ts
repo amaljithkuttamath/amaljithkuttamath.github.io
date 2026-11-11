@@ -20,8 +20,8 @@
 // this?" but "would we handle it wrong?".
 import { adapterOfId } from './sources/index';
 import { findSeriesWithReceipt } from './sources/index';
-import { scoreSeries } from './scoring';
-import { searchKb, KB_MIN_SCORE } from './kb';
+import { scoreSeries, unmatchedTerms } from './scoring';
+import { searchKb, KB_MIN_SCORE, type KbHit } from './kb';
 import { extractCountryMentions } from './planner';
 import { buildCitation } from './dashboards-agent';
 import { growthStats, type ChartSpec, type Citation, type DataRow } from './tools';
@@ -153,7 +153,13 @@ export function parseFastPath(
   question: string,
   thisYear: number = new Date().getFullYear()
 ): FastPathPlan | null {
-  const raw = String(question ?? '').trim();
+  // "&" and the wordier joiners are rewritten to "and" up front: "&" has no
+  // letters, so the tokenizer dropped it and "GDP & inflation in India" reached
+  // Gate 4 with nothing between its two indicators.
+  const raw = String(question ?? '')
+    .trim()
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/\b(?:as well as|along with|together with)\b/gi, 'and');
   if (raw.length < 6 || raw.length > 200) return null;
   const lower = raw.toLowerCase();
 
@@ -170,7 +176,32 @@ export function parseFastPath(
   // better (and a chart nobody can read).
   if (unique.length > 6) return null;
 
+  // A lowercase "us" after a preposition or joiner ("gdp of the us and china")
+  // is almost certainly the country, but cannot be told from the pronoun with
+  // confidence — so it is not resolved, and the question is not answered
+  // without it either.
+  if (!seen.has('USA') && /\b(?:the|in|of|for|and|between)\s+u\.?s\b/.test(lower)) return null;
+
   const years = parseYears(raw, thisYear);
+
+  // Gate 2b: every number in the question must be one the year parser used.
+  // Bare numeric tokens are dropped by the tokenizer, so an unused one is a
+  // part of the question about to be silently ignored: "ages 0-14" charted the
+  // 65-and-over series, "in 2050" a full history, "2010 2020" a single year,
+  // "from 2020 to 2010" an open range. One rule covers all of them.
+  const spare = [...years.used];
+  const numbered =
+    !years.used.length && years.yearStart !== undefined
+      ? lower.replace(/\b(?:last|past)\s+\d{1,3}\s+years?\b/, ' ')
+      : lower;
+  for (const token of numbered.split(/\s+/)) {
+    if (/[a-z]/.test(token)) continue;
+    for (const run of token.match(/\d+/g) ?? []) {
+      const at = spare.indexOf(Number(run));
+      if (at === -1) return null;
+      spare.splice(at, 1);
+    }
+  }
 
   // The indicator phrase: everything that is not a country mention, a year, or
   // a framing word. Country spans are removed by index, so "United States" goes
@@ -194,7 +225,7 @@ export function parseFastPath(
   // content phrases — in "Japan and Korea" the countries are already stripped,
   // leaving nothing content-bearing after "and", which is the case we want to
   // keep (two countries, one indicator, a perfectly good fast-path question).
-  const conj = residual.findIndex((w) => /^(and|plus|versus|vs)$/i.test(w));
+  const conj = residual.findIndex((w) => /^(and|or|plus|versus|vs)$/i.test(w));
   if (conj !== -1) {
     const contentBefore = residual.slice(0, conj).some((w) => !FRAMING.has(w.toLowerCase()));
     const contentAfter = residual.slice(conj + 1).some((w) => !FRAMING.has(w.toLowerCase()));
@@ -295,8 +326,12 @@ export async function runFastPath(
   // It also costs no request, so a KB hit skips a network round trip entirely.
   let hit: SeriesHit | null = null;
   let via = '';
-  const kbHit = searchKb(plan.indicatorQuery, opts.sources)[0];
-  if (kbHit && kbHit.score >= KB_MIN_SCORE) {
+  const kbHit = pickKbHit(searchKb(plan.indicatorQuery, opts.sources));
+  if (kbHit === 'ambiguous') {
+    settle(findEv, 'error', 'more than one series fits');
+    return { ok: false, reason: 'no-match' };
+  }
+  if (kbHit) {
     hit = { id: kbHit.seriesId, name: kbHit.name, source: kbHit.source };
     // The route is the explanation a similarity score cannot give — show it.
     via = ' · via ' + kbHit.path.slice(1).join(' › ');
@@ -314,6 +349,12 @@ export async function runFastPath(
     // ranked the hits, so this is a threshold on the ranking we already trust.
     if (scoreSeries(plan.indicatorQuery, best.id, best.name) < MIN_MATCH_SCORE) {
       settle(findEv, 'error', `best match too weak (${best.name})`);
+      return { ok: false, reason: 'weak-match', best };
+    }
+    // Same rule as the KB route: a word of the question that the chosen series
+    // says nothing about is a qualifier we would be silently dropping.
+    if (unmatchedTerms(plan.indicatorQuery, best.id, best.name).length) {
+      settle(findEv, 'error', `best match ignores part of the question (${best.name})`);
       return { ok: false, reason: 'weak-match', best };
     }
     hit = best;
@@ -379,6 +420,31 @@ export async function runFastPath(
     plan, hit, spec, rows, citations, trace,
     summary: buildFastSummary(plan, rows, label),
   };
+}
+
+// Decide whether the knowledge base's ranking is safe to act on with no model.
+//
+//   null        the KB has no confident match — try the flat catalogue search.
+//   'ambiguous' the KB matched, but committing would be a guess — refuse, and
+//               do NOT fall back to flat search, which is weaker still.
+//   a hit       commit.
+//
+// Two ways a top hit is a guess. (1) It leaves a word of the question
+// unanswered: "adult mortality" clears the bar on the INFANT series through
+// "mortality" alone, "life expectancy of women" on the total. (2) It only wins
+// a tie on catalogue order: "rural population" tied "Rural population" with
+// "Rural population living in areas where elevation is below 5 meters" and
+// charted the latter. A tie a TUNED leaf wins is different — the authored core
+// sits first in the tree precisely so it wins conflicts ("life expectancy" →
+// the total series, not the male one), and the retrieval eval pins that order.
+// Pure — exported for its unit table.
+export function pickKbHit(hits: KbHit[]): KbHit | 'ambiguous' | null {
+  const top = hits[0];
+  if (!top || top.score < KB_MIN_SCORE) return null;
+  if (top.unmatched.length) return 'ambiguous';
+  const tied = hits.some((h) => h.seriesId !== top.seriesId && h.score >= top.score);
+  if (tied && !top.tuned) return 'ambiguous';
+  return top;
 }
 
 // Choose the human label for the chart title, axis and summary.
@@ -481,6 +547,11 @@ export function buildFastSummary(plan: FastPathPlan, rows: DataRow[], label: str
   const parts = stats.map(
     (s) => `${s.country} ${num(s.firstValue)} → ${num(s.lastValue)}${s.pctChange === null ? '' : ` (${s.pctChange >= 0 ? '+' : ''}${num(s.pctChange)}%)`}`
   );
+  // One shared span in the heading only when every country actually has it.
+  // Otherwise each country carries its own years: stamping India's 1960–2023
+  // on South Sudan's 2011–2019 change misdates the number.
   const first = stats[0];
-  return `${label}, ${first.firstYear}–${first.lastYear}: ${parts.join('; ')}.`;
+  const shared = stats.every((s) => s.firstYear === first.firstYear && s.lastYear === first.lastYear);
+  if (shared) return `${label}, ${first.firstYear}–${first.lastYear}: ${parts.join('; ')}.`;
+  return `${label}: ${stats.map((s, i) => `${parts[i]}, ${s.firstYear}–${s.lastYear}`).join('; ')}.`;
 }

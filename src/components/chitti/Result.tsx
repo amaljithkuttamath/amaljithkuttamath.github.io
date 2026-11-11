@@ -37,7 +37,7 @@ export function Result({
         : [];
   const [tab, setTab] = useState("Chart");
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
+  const [pageWanted, setPage] = useState(0);
   const filtered = useMemo(
     () =>
       result.rows.filter((r) =>
@@ -46,6 +46,12 @@ export function Result({
           .includes(query.toLowerCase()),
       ),
     [result.rows, query],
+  );
+  // Clamped at render: a surface update can replace the rows with a shorter
+  // set (draft → final) while a later page is open, which showed "Page 3 of 1".
+  const page = Math.min(
+    pageWanted,
+    Math.max(0, Math.ceil(filtered.length / 50) - 1),
   );
   return (
     <div className="cw-result">

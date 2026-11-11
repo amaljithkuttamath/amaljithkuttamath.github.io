@@ -426,11 +426,67 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
       ctrl.abort();
       return okChat();
     });
-    await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { signal: ctrl.signal }));
+    // A stop that lands mid-request ends the call even if the transport hands
+    // back a response anyway — the turn must not carry on with it.
+    await expect(
+      complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { signal: ctrl.signal }))
+    ).rejects.toBeInstanceOf(ClassifiedError);
     // The fetch's composed signal reflects the external abort (timeout controller
-    // + external stop share one AbortController inside fetchWithTimeout).
+    // + external stop share one AbortController).
     expect(observed).toBeInstanceOf(AbortSignal);
     expect(observed!.aborted).toBe(true);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets Stop interrupt a body that stalls after the headers arrive', async () => {
+    // Headers come back at once; the body never does. The deadline and the Stop
+    // listener used to be disarmed at headers, so this hung until the page closed.
+    const ctrl = new AbortController();
+    const f = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: () => new Promise<string>(() => {}),
+      headers: { get: () => null },
+    }));
+    const run = complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f, { signal: ctrl.signal }));
+    setTimeout(() => ctrl.abort(), 10);
+    await expect(run).rejects.toBeInstanceOf(ClassifiedError);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['a null tool call', { choices: [{ message: { content: '', tool_calls: [null] } }] }],
+    ['a non-object message', { choices: [{ message: 7 }] }],
+  ])('reports %s as a malformed/empty reply, never as a network failure', async (_label, body) => {
+    const f = vi.fn(async () => ({
+      ok: true, status: 200, text: async () => JSON.stringify(body), headers: { get: () => null },
+    }));
+    const err: any = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f)).catch((e) => e);
+    expect(err).toBeInstanceOf(ClassifiedError);
+    expect(err.errorClass).not.toBe('network');
+  });
+
+  it('keeps the usable tool calls and coerces non-object arguments to {}', async () => {
+    const body = { choices: [{ message: { content: null, tool_calls: [
+      null,
+      { id: 'a', function: { name: 'find_series', arguments: 'null' } },
+      { function: { name: 'finish', arguments: '{"x":1}' } },
+    ] } }] };
+    const f = vi.fn(async () => ({
+      ok: true, status: 200, text: async () => JSON.stringify(body), headers: { get: () => null },
+    }));
+    const out = await complete(cfg(), [{ role: 'user', content: 'hi' }], [], deps(f));
+    expect(out.toolCalls.map((t) => [t.name, t.arguments])).toEqual([['find_series', {}], ['finish', { x: 1 }]]);
+  });
+
+  it('skips malformed Anthropic content blocks instead of throwing a TypeError', async () => {
+    const body = { content: [null, { type: 'text', text: 'ok' }, { type: 'tool_use', id: 't', name: 'finish', input: [1] }], usage: {} };
+    const f = vi.fn(async () => ({
+      ok: true, status: 200, text: async () => JSON.stringify(body), headers: { get: () => null },
+    }));
+    const out = await complete(cfg({ provider: 'anthropic', model: 'claude-haiku-latest' }), [{ role: 'user', content: 'hi' }], [], deps(f));
+    expect(out.text).toBe('ok');
+    expect(out.toolCalls).toEqual([{ id: 't', name: 'finish', arguments: {} }]);
   });
 
   it('retries a transient server error several times with backoff, then surfaces', async () => {

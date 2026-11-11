@@ -22,6 +22,7 @@ import {
 } from './providers';
 import {
   VFS,
+  type FileMeta,
   findSeriesWithReceipt,
   listCountries,
   growthStats,
@@ -273,6 +274,8 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
     { role: 'system', content: buildSystemPrompt(activeSources, rlmEnabled) },
   ];
   const vfsFiles: Record<string, string> = {};
+  // Provenance markers for those files, session-scoped for the same reason.
+  const vfsMeta: Record<string, FileMeta> = {};
   const state: {
     rows: DataRow[];
     chartSpec: ChartSpec | null;
@@ -375,6 +378,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
       Object.assign(vfsFiles, files);
       cb.onFiles({ ...vfsFiles });
     });
+    // Carry earlier turns' files in. The UI list (`vfsFiles`) is session-scoped,
+    // so a per-turn filesystem showed the user a note the model could no longer
+    // read — `read_file` returned "(empty)" for a file still on screen.
+    Object.assign(vfs.files, vfsFiles);
+    vfs.meta = vfsMeta;
     if (opts?.workspace) {
       vfs.write('workspace.csv', rowsToCSV(state.rows), {via: 'workspace'});
       vfs.write('workspace-view.json', JSON.stringify({question: opts.workspace.q, chart: state.chartSpec, recordedAt: opts.workspace.ts}), {via: 'workspace'});
@@ -1619,7 +1627,11 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         }
         if (finished) return;
 
-        if (turnChartSpec && state.rows.length && calls >= 6) return;
+        // Enough work for a chart turn — stop calling tools. `break`, not
+        // `return`: leaving here skipped the summariser below, so a turn that
+        // never called `finish` ended with an EMPTY finding and still went to
+        // the verifier, which could stamp "(none)" as verified.
+        if (turnChartSpec && state.rows.length && calls >= 6) break;
       }
 
       if (!state.finding) {

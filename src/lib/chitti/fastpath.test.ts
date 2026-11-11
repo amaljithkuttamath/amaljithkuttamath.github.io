@@ -5,10 +5,12 @@ import {
   buildFastSpec,
   buildFastSummary,
   pickLabel,
+  pickKbHit,
   MIN_MATCH_SCORE,
   type FastPathPlan,
 } from './fastpath';
-import { scoreSeries } from './scoring';
+import { scoreSeries, unmatchedTerms } from './scoring';
+import { searchKb } from './kb';
 import { INDICATORS, type DataRow } from './tools';
 
 // Pinned so the relative-year forms ("last 20 years") are deterministic.
@@ -241,4 +243,134 @@ it('keeps sub-unit endpoint changes visible in the direct summary', () => {
  const rows: DataRow[]=[{country:'Japan',iso3:'JPN',year:2015,value:83.79},{country:'Japan',iso3:'JPN',year:2024,value:84.04}];
  const summary=buildFastSummary(plan,rows,'Life expectancy');
  expect(summary).toContain('83.79 in 2015'); expect(summary).toContain('84.04 in 2024');
+});
+
+// ── "Would we handle it wrong?" ──────────────────────────────────────────────
+// Every case below once produced a confident chart of the wrong thing with no
+// model in the loop. Each is pinned to the specific way it went wrong.
+describe('parseFastPath — refuses rather than dropping part of the question', () => {
+  it.each([
+    // A bare numeric token the year parser did not use was silently discarded.
+    ['population of India ages 0-14', 'charted the 65-and-over series'],
+    ['population of India in 2050', 'a future year became a full history'],
+    ['India GDP 2010 2020', 'two years became a single-year bar'],
+    ['GDP of India from 2020 to 2010', 'a reversed range became "since 2020"'],
+    ['GDP per capita India 1990, 2000 and 2010', 'three years became 2000–2010'],
+    ['poverty at $2.15 a day in India', 'the threshold was dropped'],
+    // "&" has no letters, so the two-indicator gate never saw a conjunction.
+    ['GDP & inflation in India', 'charted inflation only'],
+    ['GDP as well as inflation in India', 'charted inflation only'],
+    ['GDP or GNI of India', 'charted one of the two'],
+    // A lowercase "us" that is plainly the country was dropped as a pronoun.
+    ['gdp of the us and china', 'charted China alone'],
+  ])('%s  (%s)', (q) => {
+    expect(parse(q)).toBeNull();
+  });
+
+  it('still takes the year forms it understands', () => {
+    expect(parse('GDP of India 1990-2020')).toMatchObject({ yearStart: 1990, yearEnd: 2020 });
+    expect(parse('GDP of India between 1990 and 2020')).toMatchObject({ yearStart: 1990, yearEnd: 2020 });
+    expect(parse('GDP of India in 2019?')).toMatchObject({ yearStart: 2019, yearEnd: 2019, chartType: 'bar' });
+    expect(parse('GDP growth in Germany over the last 20 years')).toMatchObject({ yearStart: YEAR - 20 });
+    // Digits inside a word are part of the indicator, not a stray number.
+    expect(parse('CO2 emissions in China since 2000')).toMatchObject({ indicatorQuery: 'CO2 emissions', yearStart: 2000 });
+  });
+
+  it('reads US and UK as countries, and "&" between countries as a list', () => {
+    expect(parse('GDP of the US and China')!.countries).toEqual(['USA', 'CHN']);
+    expect(parse('unemployment in U.S. and Canada')!.countries).toEqual(['USA', 'CAN']);
+    expect(parse('life expectancy in UK and France')!.countries).toEqual(['GBR', 'FRA']);
+    expect(parse('gdp of the uk and france')!.countries).toEqual(['GBR', 'FRA']);
+    expect(parse('GDP of Japan & Korea')!.countries).toEqual(['JPN', 'KOR']);
+    // …while the pronoun stays a pronoun.
+    expect(parse('show us gdp of India')!.countries).toEqual(['IND']);
+    expect(parse('SHOW US GDP OF INDIA')!.countries).toEqual(['IND']);
+  });
+
+  it('keeps a hyphenated term searchable', () => {
+    const p = parse('under-5 mortality in India since 2000')!;
+    expect(p.indicatorQuery).toBe('under-5 mortality');
+    expect(pickKbHit(searchKb(p.indicatorQuery))).toMatchObject({ seriesId: 'SH.DYN.MORT' });
+  });
+});
+
+describe('pickKbHit — commits only when the match is not a guess', () => {
+  const pick = (q: string) => pickKbHit(searchKb(parse(q)!.indicatorQuery));
+
+  it.each([
+    ['life expectancy in Japan', 'SP.DYN.LE00.IN'],
+    ['GDP per capita of India', 'NY.GDP.PCAP.CD'],
+    ['GDP of India', 'NY.GDP.MKTP.CD'],
+    ['literacy rate in India', 'SE.ADT.LITR.ZS'],
+    ['child mortality in Kenya since 1990', 'SH.DYN.MORT'],
+    ['internet users in Brazil', 'IT.NET.USER.ZS'],
+    ['inflation in Brazil since 2000', 'FP.CPI.TOTL.ZG'],
+    ['population of Nigeria', 'SP.POP.TOTL'],
+    ['health spending in France', 'SH.XPD.CHEX.GD.ZS'],
+    ['fertility rate in Niger', 'SP.DYN.TFRT.IN'],
+  ])('commits: %s → %s', (q, id) => {
+    expect(pick(q)).toMatchObject({ seriesId: id });
+  });
+
+  it.each([
+    // A word of the question the chosen series says nothing about.
+    ['adult mortality in India', 'cleared the bar on the infant series'],
+    ['neonatal mortality in India', 'cleared the bar on the infant series'],
+    ['life expectancy of women in Japan', 'charted the total'],
+    ['population of Mexico city', 'charted the national population'],
+    // A tie between long-tail series, broken only by catalogue order.
+    ['rural population of India', 'charted rural population below 5m elevation'],
+    ['remittances in India', 'charted paid, tied with received'],
+    ['male literacy in India', 'youth and adult male tied'],
+    ['youth unemployment in Spain', 'charted the female series'],
+    ['tourism in Thailand', 'arrivals tied with departures'],
+  ])('refuses: %s  (%s)', (q) => {
+    expect(pick(q)).toBe('ambiguous');
+  });
+
+  it('defers to the flat search when the KB has no confident match', () => {
+    expect(pickKbHit(searchKb('banana exports'))).toBeNull();
+    expect(pickKbHit([])).toBeNull();
+  });
+});
+
+describe('scoring — terms match at the start of a word, not anywhere in it', () => {
+  it('does not find "male" in "female" or "age" in "percentage"', () => {
+    expect(scoreSeries('male', '', 'Literacy rate, youth female')).toBe(0);
+    expect(scoreSeries('age', '', 'percentage of total')).toBe(0);
+    expect(scoreSeries('male', '', 'Literacy rate, youth male')).toBeGreaterThan(0);
+  });
+  it('still lets a word run on, so singular finds plural', () => {
+    expect(scoreSeries('export', '', 'Exports of goods and services')).toBeGreaterThan(0);
+    expect(scoreSeries('gdp', 'NY.GDP.PCAP.CD', 'Income per person')).toBeGreaterThan(0);
+  });
+  it('reports the terms a series leaves unanswered', () => {
+    expect(unmatchedTerms('adult mortality', 'SP.DYN.IMRT.IN', 'Mortality rate, infant')).toEqual(['adult']);
+    expect(unmatchedTerms('infant mortality rate', 'SP.DYN.IMRT.IN', 'Mortality rate, infant')).toEqual([]);
+    expect(unmatchedTerms('', 'x', 'y')).toEqual([]);
+  });
+});
+
+describe('buildFastSummary — each change carries its own years', () => {
+  const plan: FastPathPlan = {
+    indicatorQuery: 'life expectancy', countries: ['IND', 'SSD'], countryNames: ['India', 'South Sudan'],
+    chartType: 'line',
+  };
+  it('does not stamp one country\'s span on another', () => {
+    const s = buildFastSummary(
+      plan,
+      rows([['India', 'IND', 1960, 45], ['India', 'IND', 2023, 72], ['South Sudan', 'SSD', 2011, 55], ['South Sudan', 'SSD', 2019, 58]]),
+      'Life expectancy'
+    );
+    expect(s).toContain('India 45 → 72 (+60%), 1960–2023');
+    expect(s).toContain('South Sudan 55 → 58 (+5.45%), 2011–2019');
+  });
+  it('keeps the single shared heading when every country spans the same years', () => {
+    const s = buildFastSummary(
+      plan,
+      rows([['India', 'IND', 1960, 45], ['India', 'IND', 2023, 72], ['South Sudan', 'SSD', 1960, 40], ['South Sudan', 'SSD', 2023, 58]]),
+      'Life expectancy'
+    );
+    expect(s.startsWith('Life expectancy, 1960–2023: ')).toBe(true);
+  });
 });

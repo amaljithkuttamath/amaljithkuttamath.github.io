@@ -181,6 +181,12 @@ export async function fetchFromMirror(
     if (!resp.ok) return null;
     const file = parseMirrorFile(await resp.json());
     if (!file) return null;
+    // Every requested code must be IN the snapshot. The capture holds
+    // countries only, so "India and World" would otherwise come back as India
+    // alone — a different answer from the live API, which is the one thing the
+    // mirror must never give. A partial match is a miss.
+    const wanted = (countries ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean);
+    if (wanted.some((c) => !file.countries[c])) return null;
     const rows = rowsFromMirror(file, id, countries, yearStart, yearEnd);
     // An empty slice means the caller asked for a window this snapshot does not
     // cover. That is a real "not here", so it falls through to the live API

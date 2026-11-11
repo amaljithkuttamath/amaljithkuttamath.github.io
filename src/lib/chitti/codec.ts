@@ -50,14 +50,44 @@ async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
-async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
+// Inflation is read chunk by chunk against a hard ceiling. Deflate reaches
+// roughly 1000:1 on repetitive input, so bounding only the COMPRESSED fragment
+// bounds nothing: a 12 KB `#share=` link inflated to three million rows and
+// several hundred MB before a single field was validated — a link that kills
+// the tab that opens it. Past the ceiling the stream is cancelled and the
+// payload rejected.
+async function inflateRaw(bytes: Uint8Array, maxOut: number): Promise<Uint8Array> {
   const ds = new (globalThis as any).DecompressionStream('deflate-raw');
   const writer = ds.writable.getWriter();
   writer.write(bytes).catch(() => {});
   writer.close().catch(() => {});
-  const buf = await new Response(ds.readable).arrayBuffer();
-  return new Uint8Array(buf);
+  const reader = ds.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxOut) {
+      reader.cancel().catch(() => {});
+      throw new Error('inflated payload exceeds limit');
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }
+
+// How far a payload may expand. A real link is trimmed to fit `maxBytes` of
+// fragment, and the densest honest payload (long runs of similar rows) inflates
+// a few tens of times; 256× leaves an order of magnitude of headroom and still
+// caps an 8 KB budget at ~2 MB.
+export const MAX_INFLATE_RATIO = 256;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -77,10 +107,11 @@ export async function packJson(json: string, compress: boolean): Promise<string>
 // malformed / oversized / non-inflatable input yields null. Never throws, never
 // runs anything — the returned value is a plain string the caller then parses
 // and whitelist-rebuilds. `maxBytes` bounds the raw fragment length (rejected at
-// 4× the budget) before any decode work is attempted.
+// 4× the budget) before any decode work is attempted; `maxInflatedBytes`
+// (default `maxBytes × MAX_INFLATE_RATIO`) bounds what it may expand to.
 export async function unpackJson(
   payload: string,
-  opts: { maxBytes: number }
+  opts: { maxBytes: number; maxInflatedBytes?: number }
 ): Promise<string | null> {
   try {
     if (typeof payload !== 'string' || payload.length < 2) return null;
@@ -94,7 +125,7 @@ export async function unpackJson(
     let raw: Uint8Array;
     if (flag === 'C') {
       if (!hasCompression()) return null; // can't inflate without the API
-      raw = await inflateRaw(packed);
+      raw = await inflateRaw(packed, opts.maxInflatedBytes ?? opts.maxBytes * MAX_INFLATE_RATIO);
     } else {
       raw = packed;
     }

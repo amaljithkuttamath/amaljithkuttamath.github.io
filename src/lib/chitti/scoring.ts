@@ -98,8 +98,14 @@ export function explainMatch(query: string, id: string, name: string): MatchExpl
   const nName = normalize(name);
   const nId = normalize(id);
   const hay = nName + ' ' + nId;
+  // Matching is anchored to the START of a word, never free substring: "male"
+  // must not score against "female", nor "age" against "percentage" — that is
+  // how "male literacy" came to chart the female series. A word may still run
+  // on past the term, so "export" keeps finding "exports".
+  const padded = ' ' + hay;
+  const has = (t: string) => padded.includes(' ' + t);
   let score = 0;
-  if (hay.includes(q)) score += 10; // exact phrase present
+  if (has(q)) score += 10; // exact phrase present
   if (nName.startsWith(q)) score += 6; // name leads with the query
   if (nId === q) score += 8; // id is exactly the query
 
@@ -115,12 +121,25 @@ export function explainMatch(query: string, id: string, name: string): MatchExpl
 
   const matchedBase: string[] = [];
   const matchedSynonyms: { term: string; synonym: string }[] = [];
-  for (const t of base) if (hay.includes(t)) { score += 2; matchedBase.push(t); } // originals weigh more
-  for (const [w, t] of synOf) if (hay.includes(w)) { score += 1; matchedSynonyms.push({ term: t, synonym: w }); }
+  for (const t of base) if (has(t)) { score += 2; matchedBase.push(t); } // originals weigh more
+  for (const [w, t] of synOf) if (has(w)) { score += 1; matchedSynonyms.push({ term: t, synonym: w }); }
   return { score, matchedBase, matchedSynonyms };
 }
 
 // Weighted relevance of one series (id + name) to a query. 0 = no match.
 export function scoreSeries(query: string, id: string, name: string): number {
   return explainMatch(query, id, name).score;
+}
+
+// The query's content terms that found NOTHING in a haystack, neither verbatim
+// nor through a synonym. A match score says how much of the query landed; this
+// says what did not, which is the half a threshold cannot see: "adult
+// mortality" and "life expectancy of women" both clear the bar on a series
+// that answers a different question, on the strength of one shared word. Pure.
+export function unmatchedTerms(query: string, id: string, name: string): string[] {
+  const q = normalize(query);
+  if (!q) return [];
+  const m = explainMatch(query, id, name);
+  const covered = new Set([...m.matchedBase, ...m.matchedSynonyms.map((x) => x.term)]);
+  return [...new Set(q.split(' ').filter((w) => w && !STOPWORDS.has(w)))].filter((t) => !covered.has(t));
 }

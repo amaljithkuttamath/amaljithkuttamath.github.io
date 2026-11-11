@@ -108,12 +108,16 @@ export async function fetchOwid(
     if (Number.isNaN(year)) continue;
     if (yearStart !== undefined && year < yearStart) continue;
     if (yearEnd !== undefined && year > yearEnd) continue;
-    const v = cells[3];
+    // Only a finite number is a value. Number(' ') is 0 and Number('electoral
+    // democracy') is NaN — a blank cell must not become a fabricated zero, and
+    // NaN slips past every `value !== null` filter downstream.
+    const v = (cells[3] ?? '').trim();
+    const n = v ? Number(v) : NaN;
     rows.push({
       country: cells[0],
       iso3: code,
       year,
-      value: v === '' || v === undefined ? null : Number(v),
+      value: Number.isFinite(n) ? n : null,
       indicator: 'owid:' + clean,
     });
   }

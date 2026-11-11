@@ -199,3 +199,48 @@ it('uses explicit units, stable colors and declarative annotations across chart 
   expect(setOption.mock.calls.at(-1)![0].series[0].itemStyle.color).toBe(first.itemStyle.color);
   expect(setOption.mock.calls.at(-1)![0].series[0].markPoint.data[0].name).toBe('Observed endpoint');
 });
+
+it("focuses the series on a plain point click when there are several, and still explains a marker", async () => {
+  const two: ChartSpec = {
+    ...spec,
+    series: [
+      ...spec.series,
+      { name: "Italy", data: [[2019, 83.5], [2020, 82.2]] },
+    ],
+  };
+  const onAsk = vi.fn();
+  const onSelect = vi.fn();
+  render(<Chart spec={two} onAsk={onAsk} onSelect={onSelect} />);
+  await waitFor(() => expect(on).toHaveBeenCalled());
+  const click = on.mock.calls.find(([event]) => event === "click")![1];
+  click({ componentType: "series", seriesName: "Italy", name: "2020" });
+  expect(onAsk).not.toHaveBeenCalled();
+  expect(onSelect).toHaveBeenCalledWith("Italy");
+  click({ componentType: "markPoint", seriesName: "Italy", data: { changeYear: 2020 } });
+  expect(onAsk).toHaveBeenCalledTimes(1);
+});
+it("lays a named ranking out sideways with room for every bar, and leaves time and grouped bars upright", async () => {
+  const { barLayout, buildOption } = await import("../../lib/chitti/ui/chart-option");
+  const names = ["Maldives", "China", "Sao Tome and Principe", "Korea, Dem. People's Rep.", "Montenegro", "Latvia", "Cambodia", "Belarus"];
+  const ranking: ChartSpec = {
+    type: "bar", title: "Falls", x_axis: "Country", y_axis: "%",
+    series: [{ name: "Change", data: names.map((n, i) => [n, -80 + i]) }],
+    annotations: [{ seriesId: "Change", x: "China", label: "note" }] as any,
+  };
+  const layout = barLayout(ranking);
+  expect(layout.horizontal).toBe(true);
+  expect(layout.height).toBe(60 + names.length * 24);
+  const option: any = buildOption(ranking);
+  expect(option.yAxis.type).toBe("category");
+  expect(option.yAxis.data).toEqual(names);
+  expect(option.yAxis.inverse).toBe(true);
+  expect(option.xAxis.type).toBe("value");
+  expect(option.series[0].data).toEqual(names.map((_, i) => -80 + i));
+  for (const m of option.series[0].markPoint.data) expect(m.coord).toEqual([-79, 1]);
+  const years: ChartSpec = { ...ranking, annotations: undefined, series: [{ name: "GDP", data: names.map((_, i) => [String(2000 + i), i]) }] };
+  expect(barLayout(years)).toMatchObject({ horizontal: false });
+  expect(barLayout({ ...ranking, series: [{ name: "Change", data: [["A", 1], ["B", 2]] }] }).horizontal).toBe(false);
+  expect(barLayout({ ...ranking, type: "grouped-bar" }).horizontal).toBe(false);
+  expect((buildOption(years) as any).xAxis.type).toBe("category");
+  expect(barLayout(spec)).toEqual({ categories: [], horizontal: false });
+});

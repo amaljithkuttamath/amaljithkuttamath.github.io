@@ -15,3 +15,12 @@ it("cannot create executable links or inject attributes and markup", () => {
 it("leaves underscores and emphasis markers inside source URLs intact", () => {
   expect(mdToHtml('[source](https://example.com/a*b*c_d)')).toContain('href="https://example.com/a*b*c_d"');
 });
+
+it("keeps arithmetic asterisks and code spans literal while still formatting emphasis", () => {
+  const html = mdToHtml("Output was 5 * 3 = 15 and 2 * 4 = 8. See `a*b*c`.");
+  expect(html).toContain("5 * 3 = 15 and 2 * 4 = 8");
+  expect(html).toContain("<code>a*b*c</code>");
+  expect(html).not.toContain("<em>");
+  expect(mdToHtml("3*4 and 5*6")).not.toContain("<em>");
+  expect(mdToHtml("**Japan** rose *sharply*, **not `x*y`**.")).toContain("<strong>Japan</strong> rose <em>sharply</em>");
+});

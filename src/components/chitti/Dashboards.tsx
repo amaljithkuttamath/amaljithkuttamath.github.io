@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listDashboards,
   deleteDashboard,
@@ -23,6 +23,14 @@ import {
 import { refreshDashboard } from "../../lib/chitti/dashboards-agent";
 import type { ShareStateV1 } from "../../lib/chitti/share";
 import Chart from "./Chart";
+import type { ChartSpec } from "../../lib/chitti/core";
+// Chart re-initialises ECharts whenever its `spec` identity changes, so the
+// titled spec is memoised per tile: an inline `{...tile.spec, title}` rebuilt
+// every chart on every render, and a refresh re-renders once per tile.
+function TileChart({ spec, title }: { spec: ChartSpec; title: string }) {
+  const titled = useMemo(() => ({ ...spec, title }), [spec, title]);
+  return <Chart spec={titled} />;
+}
 export function download(name: string, body: string, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([body], { type }));
   const a = document.createElement("a");
@@ -348,7 +356,7 @@ export default function Dashboards({
                   Refresh failed: {tile.stale.reason}. Showing previous data.
                 </p>
               )}
-              <Chart spec={{ ...tile.spec, title: tile.title }} />
+              <TileChart spec={tile.spec} title={tile.title} />
               <p>{tile.sourceNote}</p>
               <details>
                 <summary>Sources & data</summary>

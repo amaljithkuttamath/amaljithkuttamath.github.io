@@ -54,6 +54,46 @@ const WHO_DATASETS: [string, string][] = [
   ['WSH_SANITATION_SAFELY_MANAGED', 'Population using safely managed sanitation services (%)'],
 ];
 
+// Reduce a GHO `value` array to ONE observation per country-year. Many GHO
+// indicators are disaggregated — obesity and life expectancy come back as three
+// rows per country-year (male, female, both sexes) distinguished only by Dim1 —
+// and reading every row as "the" value charted whichever happened to arrive
+// last and produced summaries like "Mexico is highest … and Mexico lowest".
+// The rule: an undisaggregated row wins, then the both-sexes total; a
+// country-year that still has several candidates is DROPPED, because picking
+// one would be a guess about which breakdown the reader meant. Rows with no
+// numeric value are skipped, matching the other sources' "no fabricated value"
+// contract. Pure — exported for its unit table.
+export function whoRows(value: unknown): { iso3: string; year: number; value: number }[] {
+  const groups = new Map<string, { iso3: string; year: number; value: number; rank: number }[]>();
+  for (const r of Array.isArray(value) ? (value as any[]) : []) {
+    const iso3 = String(r?.SpatialDim ?? '').toUpperCase();
+    if (!iso3) continue;
+    const year = parseInt(String(r?.TimeDim), 10);
+    if (Number.isNaN(year)) continue;
+    const nv = r?.NumericValue;
+    if (nv === null || nv === undefined || nv === '') continue;
+    const num = Number(nv);
+    if (!Number.isFinite(num)) continue;
+    const dims = [r?.Dim1, r?.Dim2, r?.Dim3].filter((d) => d !== null && d !== undefined && d !== '');
+    const rank = !dims.length ? 0 : dims.length === 1 && String(dims[0]).toUpperCase() === 'SEX_BTSX' ? 1 : 2;
+    const key = iso3 + ':' + year;
+    const list = groups.get(key);
+    if (list) list.push({ iso3, year, value: num, rank });
+    else groups.set(key, [{ iso3, year, value: num, rank }]);
+  }
+  const out: { iso3: string; year: number; value: number }[] = [];
+  for (const list of groups.values()) {
+    const best = Math.min(...list.map((r) => r.rank));
+    const picks = list.filter((r) => r.rank === best);
+    // A lone row is taken whatever its breakdown (an indicator defined for one
+    // group only); several equally-ranked rows are an unresolved breakdown.
+    if (picks.length !== 1) continue;
+    out.push({ iso3: picks[0].iso3, year: picks[0].year, value: picks[0].value });
+  }
+  return out;
+}
+
 // fetch_who: WHO Global Health Observatory (GHO) OData. Endpoint shape:
 // GET https://ghoapi.azureedge.net/api/<IndicatorCode>?$filter=<odata filter>
 // returns { value: [{ SpatialDim: ISO3, TimeDim: year, NumericValue, ... }] }.
@@ -104,24 +144,13 @@ export async function fetchWho(
   const data = await resp.json();
   const value: any[] = Array.isArray(data?.value) ? data.value : [];
   const nameOf = (iso3: string) => COUNTRIES.find((c) => c.id === iso3)?.name ?? iso3;
-  const rows: DataRow[] = [];
-  for (const r of value) {
-    const iso3 = String(r?.SpatialDim ?? '').toUpperCase();
-    if (!iso3) continue;
-    const year = parseInt(String(r?.TimeDim), 10);
-    if (Number.isNaN(year)) continue;
-    // Skip rows GHO returns with no numeric value (present-but-null), matching
-    // the other sources' "no fabricated value" contract.
-    const nv = r?.NumericValue;
-    if (nv === null || nv === undefined) continue;
-    rows.push({
-      country: nameOf(iso3),
-      iso3,
-      year,
-      value: Number(nv),
-      indicator: 'who:' + clean,
-    });
-  }
+  const rows: DataRow[] = whoRows(value).map((r) => ({
+    country: nameOf(r.iso3),
+    iso3: r.iso3,
+    year: r.year,
+    value: r.value,
+    indicator: 'who:' + clean,
+  }));
   rows.sort((a, b) => (a.iso3 === b.iso3 ? a.year - b.year : a.iso3.localeCompare(b.iso3)));
   return { rows, requestUrl: url };
 }

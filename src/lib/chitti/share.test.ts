@@ -223,3 +223,20 @@ describe('key is never serialized', () => {
     void b64;
   });
 });
+
+describe('codec — inflation is bounded, not just the fragment', () => {
+  it('rejects a small fragment that inflates past the limit and still reads an honest one', async () => {
+    const { packJson, unpackJson, hasCompression, MAX_INFLATE_RATIO } = await import('./codec');
+    if (!hasCompression()) return;
+    // ~3 MB of JSON that deflates to a few KB: well inside the fragment budget.
+    const bomb = await packJson(JSON.stringify({ rows: 'a'.repeat(3_000_000) }), true);
+    expect(bomb.length).toBeLessThan(8000 * 4);
+    expect(await unpackJson(bomb, { maxBytes: 8000 })).toBeNull();
+    expect(await decodeShareState(bomb)).toBeNull();
+    // The explicit ceiling is honoured in both directions.
+    const small = await packJson(JSON.stringify({ ok: 'a'.repeat(5000) }), true);
+    expect(await unpackJson(small, { maxBytes: 8000 })).toContain('"ok"');
+    expect(await unpackJson(small, { maxBytes: 8000, maxInflatedBytes: 1000 })).toBeNull();
+    expect(MAX_INFLATE_RATIO).toBeGreaterThan(1);
+  });
+});

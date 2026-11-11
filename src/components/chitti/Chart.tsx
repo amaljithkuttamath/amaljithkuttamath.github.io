@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useContext } from "react";
 import { chartUnit } from "../../lib/chitti/chart-contract";
 import type { ChartSpec } from "../../lib/chitti/tools";
-import { buildOption } from "../../lib/chitti/ui/chart-option";
+import { buildOption, barLayout } from "../../lib/chitti/ui/chart-option";
 import {
   lineDomain,
   chartValue,
@@ -30,6 +30,7 @@ export default function Chart({
   const [fit, setFit] = useState(true);
   const domain = useMemo(() => lineDomain(spec), [spec]);
   const highlights = useMemo(() => highlightChanges(spec), [spec]);
+  const height = useMemo(() => barLayout(spec).height, [spec]);
   const ask = useRef(onAsk);
   ask.current = onAsk;
   const select = useRef(onSelect);
@@ -55,16 +56,25 @@ export default function Chart({
             params.componentType === "markPoint"
               ? data?.changeYear
               : Number(params.name);
-          const change = chartChanges(spec).find(
-            (c) => c.series === params.seriesName && c.to[0] === year,
-          );
+          // A marker is the explicit "why?" target. A plain point on a
+          // multi-series chart focuses its series instead: almost every point
+          // ends some step, so treating each one as a question turned an
+          // ordinary click into a model run.
+          const focuses =
+            params.componentType === "series" &&
+            spec.series.length > 1 &&
+            typeof params.seriesName === "string";
+          const change = focuses
+            ? undefined
+            : chartChanges(spec).find(
+                (c) => c.series === params.seriesName && c.to[0] === year,
+              );
           if (change && ask.current) {
             ask.current(explainChange(change), change);
             return;
           }
           if (params.componentType !== "series") return;
-          if (spec.series.length > 1 && typeof params.seriesName === "string")
-            select.current?.(params.seriesName);
+          if (focuses) select.current?.(params.seriesName as string);
           else if (
             ["bar", "grouped-bar"].includes(spec.type) &&
             typeof params.name === "string"
@@ -149,6 +159,7 @@ export default function Chart({
         <div
           ref={host}
           className="cw-chart-canvas"
+          style={height ? { height } : undefined}
           role="img"
           aria-label={`${chartAriaLabel(spec)}${selected ? ` Highlighted ${selected.series}, ${selected.from[0]} to ${selected.to[0]}, ${chartValue(selected.from[1])} to ${chartValue(selected.to[1])}.` : ""}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}
         />

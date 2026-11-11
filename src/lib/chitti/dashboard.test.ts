@@ -533,3 +533,37 @@ describe('storage wrapper (fake storage)', () => {
     expect(findDashboardByTitle(store, '  ')).toBeNull();
   });
 });
+
+describe('one whitelist for saved charts and their citations', () => {
+  it('keeps the snapshot date on a pinned citation, so it never re-renders as a live fetch', () => {
+    const tile = sampleTile({ citations: [{ ...citations[0], mirroredAt: '2026-07-27T00:00:00.000Z' }] });
+    expect(tile.citations[0].mirroredAt).toBe('2026-07-27T00:00:00.000Z');
+    const d = addTile(createDashboard('Board'), tile);
+    expect(parseDashboard(serializeDashboard(d))!.tiles[0].citations[0].mirroredAt).toBe('2026-07-27T00:00:00.000Z');
+  });
+
+  it('keeps the chart contract (unit, ids, palette slots, evidence, highlight) through a pin', () => {
+    const tile = sampleTile({
+      spec: {
+        ...spec,
+        unit: 'per 1,000 live births',
+        highlight: ['ind'],
+        series: [
+          { id: 'ind', name: 'India', colorIndex: 3, data: [[2000, 66.6], [2020, 27.3]], evidence: { mode: 'observed', citationIds: [citations[0].id] } },
+        ],
+      },
+    });
+    expect(tile.spec).toMatchObject({
+      unit: 'per 1,000 live births',
+      highlight: ['ind'],
+      series: [{ id: 'ind', colorIndex: 3, evidence: { mode: 'observed', citationIds: [citations[0].id] } }],
+    });
+  });
+
+  it('drops a missing or non-scalar point instead of charting a fabricated zero', () => {
+    const tile = sampleTile({
+      spec: { ...spec, series: [{ name: 'India', data: [[2000, 66.6], [2010, null], [{ evil: 1 }, 5], [2020, 27.3]] as any }] },
+    });
+    expect(tile.spec.series[0].data).toEqual([[2000, 66.6], [2020, 27.3]]);
+  });
+});

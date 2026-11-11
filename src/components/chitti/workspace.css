@@ -116,6 +116,12 @@
 .cw-composer:focus-within {
   border-color: var(--cw-accent);
 }
+/* The textarea drops its own outline, so the box carries its focus ring; a 1px
+   border colour change alone is too faint a cue. */
+.cw-composer:has(textarea:focus-visible) {
+  outline: 2px solid var(--cw-accent);
+  outline-offset: 1px;
+}
 .cw-composer > div {
   display: flex;
   align-items: center;
@@ -146,7 +152,7 @@
   margin-top: 7px !important;
 }
 .cw-status[data-phase="error"] {
-  color: #cc735e;
+  color: var(--chart-5);
 }
 .cw-finding p:last-child {
   margin-bottom: 0;
@@ -210,7 +216,7 @@
   color: var(--fg-muted);
 }
 .cw-verdict[data-verified="true"] summary {
-  color: #75a986;
+  color: var(--chart-2);
 }
 .cw summary {
   cursor: pointer;
@@ -1283,7 +1289,7 @@
 }
 .cw-account-summary > span:last-child {
   margin-left: auto;
-  color: #75a986;
+  color: var(--chart-2);
   font-size: 0.65rem;
 }
 .cw-account-summary .cw-connection {

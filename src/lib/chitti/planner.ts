@@ -65,11 +65,20 @@ export function extractCountryMentions(question: string): {
   // year) is dropped from both — so the indices stay in step.
   const tokens = String(question ?? '')
     .split(/\s+/)
-    .map((w) => ({ word: w.replace(/[^A-Za-z]/g, ''), raw: w.replace(/[^A-Za-z0-9]/g, '') }))
+    // An inner hyphen is kept in `raw` so "under-5" searches as "under 5"
+    // (the scorer splits on it) instead of the unmatchable "under5".
+    .map((w) => ({ word: w.replace(/[^A-Za-z]/g, ''), raw: w.replace(/[^A-Za-z0-9-]/g, '').replace(/^-+|-+$/g, '') }))
     .filter((t) => t.word);
   const words = tokens.map((t) => t.word);
   const rawWords = tokens.map((t) => t.raw);
   const mentions: CountryMention[] = [];
+  // "US" and "UK" are how people actually write those two countries, and both
+  // are too short for the length guard below — so "GDP of the US and China"
+  // resolved China alone. "uk" is no English word and is accepted in any case;
+  // "US" only in capitals (so "show us" stays a pronoun), and only when the
+  // question has lowercase letters to contrast it with.
+  const mixedCase = /[a-z]/.test(String(question ?? ''));
+  const isShortCountry = (w: string) => w.toLowerCase() === 'uk' || (w === 'US' && mixedCase);
   let i = 0;
   while (i < words.length) {
     let advanced = false;
@@ -78,8 +87,10 @@ export function extractCountryMentions(question: string): {
       if (n === 1) {
         const w = span[0];
         const isExplicitIso3 = /^[A-Z]{3}$/.test(w); // e.g. "USA", "CHN", "GBR"
-        if (!isExplicitIso3 && w.length < 4) continue;
-        if (COUNTRY_NOISE.has(w.toLowerCase())) continue;
+        if (!isShortCountry(w)) {
+          if (!isExplicitIso3 && w.length < 4) continue;
+          if (COUNTRY_NOISE.has(w.toLowerCase())) continue;
+        }
       }
       const r = resolveCountry(span.join(' '));
       // Single-token FUZZY matches are the heuristic's noise source (a common

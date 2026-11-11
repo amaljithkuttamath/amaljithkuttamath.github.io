@@ -19,6 +19,37 @@ import {
 } from "../chart-format";
 import { cssVar, escapeHtml, prefersReducedMotion } from "./dom";
 
+// A ranking bar — one series over named categories — reads better on its
+// side once there are more than a handful of bars: rotated country names under
+// a vertical bar eat most of the canvas ("Korea, Dem. People's Rep." left ten
+// bars about 60px of plot), while a horizontal bar gives every name a full
+// line. Time bars (numeric x) and grouped bars stay vertical. Returns the
+// category list, whether to lay it out sideways, and the canvas height that
+// keeps each bar a readable thickness. Pure — exported for its unit table.
+export const HORIZONTAL_BAR_MIN = 7;
+export function barLayout(spec: ChartSpec): {
+  categories: (string | number)[];
+  horizontal: boolean;
+  height?: number;
+} {
+  const categories: (string | number)[] = [];
+  if (spec.type !== "bar" && spec.type !== "grouped-bar")
+    return { categories, horizontal: false };
+  for (const s of spec.series)
+    for (const [x] of s.data) if (!categories.includes(x)) categories.push(x);
+  const named = categories.every(
+    (c) => typeof c === "string" && !Number.isFinite(Number(c)),
+  );
+  const horizontal =
+    spec.type === "bar" &&
+    spec.series.length === 1 &&
+    named &&
+    categories.length >= HORIZONTAL_BAR_MIN;
+  return horizontal
+    ? { categories, horizontal, height: Math.max(250, 60 + categories.length * 24) }
+    : { categories, horizontal };
+}
+
 export function buildOption(
   spec: ChartSpec,
   fitLine = true,
@@ -37,13 +68,15 @@ export function buildOption(
   const opacityOf = (s: ChartSeries) =>
     selected ? (selected.series === s.name ? 1 : 0.35) :
     spec.highlight?.length && !spec.highlight.includes(seriesIdentity(s)) ? 0.35 : 1;
+  const { categories: cats, horizontal: sideways } = barLayout(spec);
   const annotations = (s: ChartSeries, categories?: (string | number)[]) =>
     (spec.annotations || []).filter(a => a.seriesId === seriesIdentity(s)).flatMap(a => {
       const point = s.data.find(([x]) => x === a.x);
       if (!point) return [];
-      return [{ name: a.label, coord: [categories ? categories.indexOf(a.x) : a.x, point[1]],
+      const at = categories ? categories.indexOf(a.x) : a.x;
+      return [{ name: a.label, coord: sideways ? [point[1], at] : [at, point[1]],
         symbol: "pin", symbolSize: 20,
-        label: { show: true, formatter: a.label, color: fg, fontSize: 11, position: "top" },
+        label: { show: true, formatter: a.label, color: fg, fontSize: 11, position: sideways ? "right" : "top" },
         itemStyle: { color: colorOf(s) } }];
     });
 
@@ -246,32 +279,38 @@ export function buildOption(
   }
 
   if (spec.type === "bar" || spec.type === "grouped-bar") {
-    // Categories come from the union of x values across series.
-    const cats: (string | number)[] = [];
-    for (const s of spec.series)
-      for (const [x] of s.data) if (!cats.includes(x)) cats.push(x);
+    // Name column: wide enough for "Korea, Dem. People's Rep." on a desktop,
+    // capped on a phone so the bars keep most of the row.
+    const narrow = typeof window !== "undefined" && window.innerWidth < 620;
+    const categoryAxis = {
+      type: "category" as const,
+      data: cats,
+      // No axis `name` for category bars — the categories are
+      // self-describing and the trailing name label was clipping at the
+      // container's right edge.
+      axisLine,
+      axisLabel: sideways
+        ? { ...baseText, interval: 0, width: narrow ? 112 : 200, overflow: "truncate" as const }
+        : { ...baseText, interval: 0, rotate: cats.length > 8 ? 40 : 0 },
+      // First category on top, so a ranking reads downward in its own order.
+      inverse: sideways,
+    };
+    // Sideways, the value ticks share one line: fewer of them, and never two
+    // overlapping ("-80%60%40%" on a phone).
+    const valueAxis = sideways
+      ? { type: "value" as const, axisLine, splitLine, splitNumber: narrow ? 3 : 5, axisLabel: { ...valueAxisLabel, hideOverlap: true } }
+      : { type: "value" as const, axisLine, splitLine, axisLabel: valueAxisLabel };
     return {
       animation: !reduce,
       color: palette,
       textStyle: baseText,
-      grid,
+      // No legend on a single series, so the band reserved for it is released.
+      grid: sideways ? { ...grid, top: 26, right: 28 } : grid,
       legend: spec.series.length > 1 ? legend : { show: false },
       toolbox,
       tooltip,
-      xAxis: {
-        type: "category",
-        data: cats,
-        // No axis `name` for category bars — the categories are
-        // self-describing and the trailing name label was clipping at the
-        // container's right edge.
-        axisLine,
-        axisLabel: {
-          ...baseText,
-          interval: 0,
-          rotate: cats.length > 8 ? 40 : 0,
-        },
-      },
-      yAxis: { type: "value", axisLine, splitLine, axisLabel: valueAxisLabel },
+      xAxis: sideways ? valueAxis : categoryAxis,
+      yAxis: sideways ? categoryAxis : valueAxis,
       series: spec.series.map((s) => {
         const map = new Map(s.data.map(([x, y]) => [x, y]));
         return {

@@ -61,11 +61,21 @@ export function esc(s: string): string {
 // renderer — escape first, then transform — instead of a library: the
 // subset the agent actually emits is small and everything is escaped
 // before any HTML is introduced, so no injection surface.
+// Emphasis needs non-space text against both delimiters, so "5 * 3 = 15 and
+// 2 * 4 = 8" keeps its multiplication signs — in a data tool a finding that
+// silently loses an operator is a wrong finding. Code spans are split out
+// first so nothing inside them is formatted.
 function inlineFormatting(escaped: string): string {
   return escaped
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    .split(/(`[^`]+`)/)
+    .map((part) =>
+      /^`[^`]+`$/.test(part)
+        ? '<code>' + part.slice(1, -1) + '</code>'
+        : part
+            .replace(/\*\*(?=\S)([^*]*[^*\s])\*\*/g, '<strong>$1</strong>')
+            .replace(/(^|[^*\w])\*(?=[^\s*])([^*\n]*[^\s*])\*(?![*\w])/g, '$1<em>$2</em>')
+    )
+    .join('');
 }
 export function inlineMd(escaped: string): string {
   // Text is already escaped. Format link labels separately so emphasis syntax

@@ -30,7 +30,11 @@ export class VFS {
     this.onChange?.({ ...this.files });
   }
   read(path: string): string {
-    return this.files[path] ?? '';
+    // Own string entries only: `files` is a plain object, so "constructor" or
+    // "__proto__" would otherwise hand back a function or an object, which then
+    // went into the message history as a tool result.
+    const v = Object.prototype.hasOwnProperty.call(this.files, path) ? this.files[path] : '';
+    return typeof v === 'string' ? v : '';
   }
   list(): string[] {
     return Object.keys(this.files);
