@@ -18,7 +18,10 @@ import {
 } from "../../lib/chitti/workspace/catalog";
 import { CATALOG_ID } from "../../lib/chitti/workspace/model";
 import { cleanShareState } from "../../lib/chitti/share";
+import { Button } from "@astryxdesign/core/Button";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Result, ResultInteraction, InlineComposer, CollapseChart } from "./Result";
+import { MicroLabel } from "./ui/primitives";
 
 const resultComponent = createComponentImplementation(
   resultApi,
@@ -35,7 +38,7 @@ const resultComponent = createComponentImplementation(
         }
       />
     ) : (
-      <p role="alert">The analysis result could not be validated.</p>
+      <p role="alert" className="cx-alert">The analysis result could not be validated.</p>
     );
   },
 );
@@ -56,39 +59,38 @@ const questionComponent = createComponentImplementation(
     };
     return (
       <form
-        className="cw-clarification"
+        className="cx-clarification"
         onSubmit={(e) => {
           e.preventDefault();
           answer(text);
         }}
       >
-        <h3>{props.question}</h3>
-        <div>
+        <MicroLabel>Chitti needs your input</MicroLabel>
+        <h3 className="cx-clarification-question">{props.question}</h3>
+        <div className="cx-clarification-options">
           {props.options
             .filter((option): option is string => typeof option === "string")
             .map((option) => (
-              <button
+              <Button
                 key={option}
-                type="button"
-                disabled={sent}
+                size="sm"
+                label={option}
+                isDisabled={sent}
                 onClick={() => answer(option)}
-              >
-                {option}
-              </button>
+              />
             ))}
         </div>
-        <label>
-          Your answer
-          <input
+        <div className="cx-clarification-own">
+          <TextInput
+            label="Your answer"
+            size="sm"
             value={text}
-            disabled={sent}
-            onChange={(e) => setText(e.target.value)}
-            maxLength={2000}
+            isDisabled={sent}
+            onChange={(value) => setText(value.slice(0, 2000))}
+            width="100%"
           />
-        </label>
-        <button disabled={sent || !text.trim()} type="submit">
-          Continue
-        </button>
+          <Button type="submit" size="sm" label="Continue" isDisabled={sent || !text.trim()} />
+        </div>
       </form>
     );
   },
@@ -149,7 +151,7 @@ export default function Surface({
     }
   }, [operations]);
   return error ? (
-    <p role="alert">{error}</p>
+    <p role="alert" className="cx-alert">{error}</p>
   ) : model ? (
     <ResultInteraction.Provider value={!disabled}>
       <InlineComposer.Provider value={inlineComposer}>
@@ -157,6 +159,6 @@ export default function Surface({
       </InlineComposer.Provider>
     </ResultInteraction.Provider>
   ) : (
-    <p role="status">Preparing result…</p>
+    <p role="status" className="cx-empty">Preparing result…</p>
   );
 }

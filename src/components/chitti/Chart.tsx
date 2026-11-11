@@ -15,6 +15,8 @@ import {
 } from "../../lib/chitti/chart-insights";
 import { ChangeExplanation, ExplanationContext } from "./ChangeExplanation";
 import { chartAriaLabel } from "../../lib/chitti/a11y";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { MicroLabel, Stat } from "./ui/primitives";
 export default function Chart({
   spec,
   onSelect,
@@ -98,67 +100,69 @@ export default function Chart({
     };
   }, [spec, fit, selected]);
   return (
-    <figure className="cw-chart">
-      <figcaption>
-        {spec.title}
-        <span>{unit}</span>
+    <figure className="cx-chart">
+      <figcaption className="cx-chart-head">
+        <span className="cx-chart-title">{spec.title}</span>
+        {unit && <MicroLabel>{unit}</MicroLabel>}
       </figcaption>
       {domain && (
-        <div className="cw-scale">
-          <span>
+        <div className="cx-scale">
+          <MicroLabel>
             {fit
               ? `Axis ${chartValue(domain.min, domain.digits)}–${chartValue(domain.max, domain.digits)}`
               : "Axis includes zero"}
-          </span>
-          <div role="group" aria-label="Line chart scale">
-            <button aria-pressed={fit} onClick={() => setFit(true)}>
-              Fit values
-            </button>
-            <button aria-pressed={!fit} onClick={() => setFit(false)}>
-              From zero
-            </button>
-          </div>
+          </MicroLabel>
+          <SegmentedControl
+            label="Line chart scale"
+            size="sm"
+            value={fit ? "fit" : "zero"}
+            onChange={(value) => setFit(value === "fit")}
+          >
+            <SegmentedControlItem value="fit" label="Fit values" />
+            <SegmentedControlItem value="zero" label="From zero" />
+          </SegmentedControl>
         </div>
       )}
       {highlights.length > 0 && (
-        <p className="cw-change-caption">Largest plotted step per series</p>
-      )}
-      {highlights.length > 0 && (
-        <div className="cw-chart-changes" aria-label="Plotted changes">
-          {highlights.map((c) => (
-            <button
-              key={`${c.series}-${c.to[0]}`}
-              disabled={!onAsk}
-              onClick={() => onAsk?.(explainChange(c), c)}
-              aria-controls={
-                selected && changeKey(selected) === changeKey(c)
-                  ? "cw-change-explanation"
-                  : undefined
-              }
-              aria-expanded={!!selected && changeKey(selected) === changeKey(c)}
-              aria-label={`Ask why: ${c.series}, ${deltaLabel(c, unit)}, ${c.from[0]} to ${c.to[0]}`}
-            >
-              <strong>
-                {c.series} <b>{deltaLabel(c, unit)}</b>
-              </strong>
-              <span>
-                {c.from[0]}–{c.to[0]} · {chartValue(c.from[1], changeDigits(c))}{" "}
-                → {chartValue(c.to[1], changeDigits(c))}
-                <i>Why?</i>
-              </span>
-            </button>
-          ))}
+        <div className="cx-changes" aria-label="Plotted changes" role="group">
+          <MicroLabel as="p" className="cx-changes-caption">Largest plotted step per series</MicroLabel>
+          <div className="cx-changes-list">
+            {highlights.map((c) => (
+              <button
+                type="button"
+                className="cx-change-card"
+                key={`${c.series}-${c.to[0]}`}
+                disabled={!onAsk}
+                onClick={() => onAsk?.(explainChange(c), c)}
+                aria-controls={
+                  selected && changeKey(selected) === changeKey(c)
+                    ? "cw-change-explanation"
+                    : undefined
+                }
+                aria-expanded={!!selected && changeKey(selected) === changeKey(c)}
+                aria-label={`Ask why: ${c.series}, ${deltaLabel(c, unit)}, ${c.from[0]} to ${c.to[0]}`}
+              >
+                <Stat
+                  label={c.series}
+                  value={deltaLabel(c, unit)}
+                  tone={c.to[1] >= c.from[1] ? "up" : "down"}
+                  detail={`${c.from[0]}–${c.to[0]} · ${chartValue(c.from[1], changeDigits(c))} → ${chartValue(c.to[1], changeDigits(c))}`}
+                />
+                <span className="cx-change-why" aria-hidden="true">Why?</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       <ChangeExplanation unit={unit} />
       {failed ? (
-        <p role="status">
+        <p role="status" className="cx-empty">
           Chart unavailable. The values are still available in Data.
         </p>
       ) : (
         <div
           ref={host}
-          className="cw-chart-canvas"
+          className="cx-chart-canvas"
           style={height ? { height } : undefined}
           role="img"
           aria-label={`${chartAriaLabel(spec)}${selected ? ` Highlighted ${selected.series}, ${selected.from[0]} to ${selected.to[0]}, ${chartValue(selected.from[1])} to ${chartValue(selected.to[1])}.` : ""}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}

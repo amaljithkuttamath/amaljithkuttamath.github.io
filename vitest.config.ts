@@ -5,5 +5,7 @@ export default defineConfig({
     environment: 'node',
     allowOnly: false,
     passWithNoTests: true,
+    // Browser API stubs for jsdom component tests; a no-op under node.
+    setupFiles: ['./src/test/dom-setup.ts'],
   },
 });

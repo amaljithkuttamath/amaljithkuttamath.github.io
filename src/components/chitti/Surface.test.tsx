@@ -35,9 +35,10 @@ describe("A2UI surfaces", () => {
       name: "answer",
       context: { requestId: "q1", value: "Per person" },
     });
+    // Astryx disables a button with aria-disabled so it keeps its focus stop.
     expect(
-      screen.getByRole("button", { name: "Total" }).hasAttribute("disabled"),
-    ).toBe(true);
+      screen.getByRole("button", { name: "Total" }).getAttribute("aria-disabled"),
+    ).toBe("true");
   });
   it("renders source provenance and filters real recorded evidence rows", async () => {
     render(<Surface operations={resultSurface(DEMOS[0].state)} />);

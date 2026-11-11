@@ -63,14 +63,15 @@ Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.t
 | --- | --- |
 | `workspace/agent.ts` | `AbstractAgent` adapter: runs, state snapshots, text, A2UI custom events, cancellation, and input replies. Provider credentials remain private configuration. |
 | `workspace/model.ts` | Whitelisted result surfaces, clarification payloads, analysis state and safe source URLs. |
-| `components/chitti/Workspace.tsx` | Chat transcript and sidebar; inline steering, branch navigation, undo/redo, private per-chat configuration, sharing and exports. |
+| `components/chitti/Workspace.tsx` | Astryx shell: `SideNav` (a `MobileNav` drawer on phones), transcript of `MessageTurn`s, per-result `Toolbar` (undo/redo/steer/steps, share-and-export menu), live `RunStatus`, and the docked `ChatComposer` with its removable context chip. Branch navigation, private per-chat configuration, sharing and exports. |
 | `workspace/conversation.ts` | Pure parent-path and branch-head navigation; no UI or protocol state. |
 | `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog. Replies dispatch A2UI actions into the waiting agent tool. |
-| `components/chitti/Result.tsx` | Finding, chart/data/source tabs and honest verification status. |
+| `components/chitti/Result.tsx` | Finding (`mdToHtml`), one view control bar, chart/data/source tabs (Astryx `TabList`, `Table` + `Pagination`, `SourceCard`s) and honest verification status (`VerificationBadge`). |
 | `components/chitti/Chart.tsx` | Lazy bundled ECharts, theme/resize lifecycle and cleanup. No CDN runtime. |
-| `components/chitti/Settings.tsx` | Provider, model, source scope and optional per-tab key storage. |
-| `components/chitti/ModelPicker.tsx` | Composer model menu, connection entry points and explicit new-chat transition for locked models. |
-| `components/chitti/Dashboards.tsx` | Existing local dashboard schema, pinning, imports, exports, shared snapshots and refresh. |
+| `components/chitti/Settings.tsx` | "Settings" `Dialog`: provider, model, source scope and optional per-tab key storage. |
+| `components/chitti/ModelPicker.tsx` | Composer model `DropdownMenu`, connection entry points and an `AlertDialog` for the explicit new-chat transition when a chat's model is locked. |
+| `components/chitti/Dashboards.tsx` | "Dashboards" view on the existing local dashboard schema: pinning, imports, exports, shared snapshots and refresh. |
+| `components/chitti/ui/*` | `theme.ts` (the one Astryx theme, dark + light tokens), `ChittiTheme.tsx` (follows the site `data-theme` toggle), `chitti.css` (the only stylesheet: layout glue on tokens, site-global and `--chart-N` bridge), and the shared composites the screens reuse. |
 | `ui/dom.ts`, `ui/chart-option.ts` | Retained pure formatting/chart helpers. The old DOM bootstrap and mutable UI globals are retired. |
 
 `/apps/chitti/catalog.json` publishes the renderer's actual catalog. AG-UI is

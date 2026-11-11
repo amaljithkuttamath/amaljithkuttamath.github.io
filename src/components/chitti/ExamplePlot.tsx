@@ -16,7 +16,7 @@ export default function ExamplePlot({ spec }: { spec: ShareStateV1["spec"] }) {
     xmax = Math.max(...xs);
   const x = (v: number) => 4 + ((v - xmin) / (xmax - xmin || 1)) * 152;
   return (
-    <svg className="cw-example-plot" viewBox="0 0 160 48" aria-hidden="true">
+    <svg className="cx-example-plot" viewBox="0 0 160 48" aria-hidden="true">
       {bars
         ? series[0].data
             .slice(0, 7)

@@ -23,6 +23,7 @@ vi.stubGlobal(
   "ResizeObserver",
   class {
     observe() {}
+    unobserve() {}
     disconnect() {}
   },
 );
@@ -55,7 +56,7 @@ it("exposes a fitted axis, actual change and keyboard-accessible explanation act
     "Why did Spain change from 83.8 to 82.3 between 2019 and 2020?",
     chartChanges(spec)[0],
   );
-  fireEvent.click(screen.getByRole("button", { name: "From zero" }));
+  fireEvent.click(screen.getByRole("radio", { name: "From zero" }));
   await waitFor(() =>
     expect(setOption.mock.calls.at(-1)![0].yAxis.min).toBeUndefined(),
   );
@@ -121,7 +122,7 @@ it("keeps the zero baseline and original values for a bar chart", async () => {
   const bar = { ...spec, type: "bar" as const };
   render(<Chart spec={bar} />);
   await waitFor(() => expect(setOption).toHaveBeenCalled());
-  expect(screen.queryByRole("button", { name: "Fit values" })).toBeNull();
+  expect(screen.queryByRole("radio", { name: "Fit values" })).toBeNull();
   expect(setOption.mock.calls[0][0].yAxis.min).toBeUndefined();
   expect(setOption.mock.calls[0][0].series[0].data).toEqual([83.8, 82.3]);
 });

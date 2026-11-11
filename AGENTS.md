@@ -54,9 +54,19 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
   `fastpath.ts` (the no-model direct answer — see below),
   `agent.ts` (facade re-exporting `session` + the split modules).
-- **UI layer** — `components/chitti/*` is one React workspace. `workspace/agent.ts`
+- **UI layer** — `components/chitti/*` is one React workspace built on the
+  Astryx design system (`@astryxdesign/core`, pre-built CSS, no build plugin).
+  `components/chitti/ui/theme.ts` is the single runtime theme (dark + light
+  tokens); `ui/ChittiTheme.tsx` follows the site's `data-theme` toggle;
+  `ui/chitti.css` is the only stylesheet (layout glue on theme tokens, plus the
+  site-global and `--chart-N` bridge ECharts reads). Shared composites live in
+  `components/chitti/ui/` (`MessageTurn`, `RunStatus`/`StepList`,
+  `SourceCard`/`VerificationBadge`, `PanelHeader`/`MicroLabel`/`Stat`, icons);
+  use an Astryx component before hand-rolling a control. `workspace/agent.ts`
   adapts the browser engine to AG-UI; `Surface.tsx` renders the registered A2UI
-  catalog. `ui/dom.ts` and `ui/chart-option.ts` remain pure shared helpers.
+  catalog. `lib/chitti/ui/dom.ts` (`mdToHtml`, the reviewed renderer for model
+  findings) and `ui/chart-option.ts` remain pure shared helpers. Component
+  tests run in jsdom with the browser-API stubs in `src/test/dom-setup.ts`.
 
 ## Conventions & gotchas
 

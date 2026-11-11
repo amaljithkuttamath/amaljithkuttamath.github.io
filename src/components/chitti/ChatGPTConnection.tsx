@@ -5,6 +5,12 @@ import {
   type ChatGPTAccount,
 } from "../../lib/chitti/chatgpt";
 import type { ModelOption } from "../../lib/chitti/providers";
+import { Button } from "@astryxdesign/core/Button";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Selector } from "@astryxdesign/core/Selector";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Text } from "@astryxdesign/core/Text";
+import { MicroLabel } from "./ui/primitives";
 type Status = {
   accounts: ChatGPTAccount[];
   authorizing?: boolean;
@@ -155,156 +161,164 @@ export default function ChatGPTConnection(props: {
       if (mounted.current) setBusy(false);
     }
   }
+  const accountLabel = accounts.find((a) => a.id === account)?.label.split(" · ")[0];
   return (
-    <div className="cw-chatgpt" data-connected={connected || undefined}>
+    <div className="cx-chatgpt" data-connected={connected || undefined}>
       {connected && (
-        <div className="cw-account-summary">
-          <span className="cw-connection" data-connected="true" />
-          <span>
-            {accounts.find((a) => a.id === account)?.label.split(" · ")[0]}
-          </span>
-          <span>Connected</span>
+        <div className="cx-account">
+          <StatusDot variant="success" label="Connected" />
+          <span className="cx-account-name">{accountLabel}</span>
+          <MicroLabel>Connected</MicroLabel>
         </div>
       )}
       {(!connected || status !== "Connected. Uses your ChatGPT plan.") && (
-        <p role="status">{status}</p>
+        <Text as="p" type="supporting" role="status">
+          {status}
+        </Text>
       )}
       {(!connected || authURL) && (
-        <div className="cw-chatgpt-actions">
+        <div className="cx-row">
           {online && !authURL && (
-            <button
-              className="cw-primary"
-              type="button"
-              disabled={busy}
+            <Button
+              label="Continue with ChatGPT"
+              isDisabled={busy}
               onClick={() => void signIn()}
-            >
-              Continue with ChatGPT
-            </button>
+            />
           )}
           {authURL && (
             <>
-              <a href={authURL} target="_blank" rel="noreferrer">
-                Open ChatGPT sign-in
-              </a>
-              <button
-                type="button"
-                disabled={busy}
+              <Button
+                label="Open ChatGPT sign-in"
+                href={authURL}
+                target="_blank"
+                rel="noreferrer"
+              />
+              <Button
+                label="Restart sign-in"
+                variant="ghost"
+                isDisabled={busy}
                 onClick={() => void signIn()}
-              >
-                Restart sign-in
-              </button>
+              />
             </>
           )}
           {!online && (
-            <button type="button" disabled={busy} onClick={() => void check()}>
-              Check connection
-            </button>
+            <Button
+              label="Check connection"
+              isDisabled={busy}
+              onClick={() => void check()}
+            />
           )}
         </div>
       )}
       {!online && !busy && (
-        <details>
-          <summary>Connect this computer</summary>
-          <p>In your local site checkout, run:</p>
-          <pre>
-            <code>
-              npm install
-              <br />
-              npm run chitti:connect
-            </code>
-          </pre>
-          <p>If this browser blocks the connection, run the local interface:</p>
-          <pre>
-            <code>
-              npm run build &amp;&amp; npm run preview -- --host 127.0.0.1
-              --port 4323
-            </code>
-          </pre>
-          <a
-            href="http://127.0.0.1:4323/apps/chitti/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open local Chitti
-          </a>
-          {" / "}
-          <a
-            href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/blob/main/docs/chitti-chatgpt.md"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Setup guide
-          </a>
-        </details>
+        <Collapsible
+          className="cx-settings-section"
+          defaultIsOpen
+          trigger={<span className="cx-settings-trigger">Connect this computer</span>}
+        >
+          <div className="cx-settings-group">
+            <Text as="p" type="supporting">In your local site checkout, run:</Text>
+            <pre className="cx-pre">
+              <code>{"npm install\nnpm run chitti:connect"}</code>
+            </pre>
+            <Text as="p" type="supporting">
+              If this browser blocks the connection, run the local interface:
+            </Text>
+            <pre className="cx-pre">
+              <code>
+                npm run build &amp;&amp; npm run preview -- --host 127.0.0.1 --port 4323
+              </code>
+            </pre>
+            <p className="cx-row">
+              <a
+                href="http://127.0.0.1:4323/apps/chitti/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open local Chitti
+              </a>
+              <a
+                href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/blob/main/docs/chitti-chatgpt.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Setup guide
+              </a>
+            </p>
+          </div>
+        </Collapsible>
       )}
       {online && (
-        <details className="cw-account-manage">
-          <summary>
-            {connected ? "Account and usage" : "Connection options"}
-          </summary>
-          {accounts.length > 0 && (
-            <label>
-              ChatGPT account
-              <select
+        <Collapsible
+          className="cx-settings-section"
+          defaultIsOpen={false}
+          trigger={
+            <span className="cx-settings-trigger">
+              {connected ? "Account and usage" : "Connection options"}
+            </span>
+          }
+        >
+          <div className="cx-settings-group">
+            {accounts.length > 0 && (
+              <Selector
+                label="ChatGPT account"
+                placeholder="Choose an account"
+                isDisabled={busy || locked}
                 value={account || ""}
-                disabled={busy || locked}
-                onChange={(e) => void select(e.target.value)}
-              >
-                <option value="" disabled>
-                  Choose an account
-                </option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                    {a.connected ? "" : " · signed out"}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div className="cw-chatgpt-actions">
-            <button type="button" disabled={busy} onClick={() => void check()}>
-              Check connection
-            </button>
-            {connected && (
-              <>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void signIn()}
-                >
-                  Reconnect
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void disconnect()}
-                >
-                  Disconnect
-                </button>
-              </>
+                onChange={(id) => void select(id)}
+                options={accounts.map((a) => ({
+                  value: a.id,
+                  label: `${a.label}${a.connected ? "" : " · signed out"}`,
+                }))}
+                width="100%"
+              />
             )}
-            {!locked && accounts.length > 0 && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void signIn(true)}
+            <div className="cx-row">
+              <Button
+                size="sm"
+                label="Check connection"
+                isDisabled={busy}
+                onClick={() => void check()}
+              />
+              {connected && (
+                <>
+                  <Button
+                    size="sm"
+                    label="Reconnect"
+                    isDisabled={busy}
+                    onClick={() => void signIn()}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    label="Disconnect"
+                    isDisabled={busy}
+                    onClick={() => void disconnect()}
+                  />
+                </>
+              )}
+              {!locked && accounts.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  label="Add account"
+                  isDisabled={busy}
+                  onClick={() => void signIn(true)}
+                />
+              )}
+            </div>
+            <Text as="p" type="supporting">
+              <a
+                href="https://chatgpt.com/settings/usage"
+                target="_blank"
+                rel="noreferrer"
               >
-                Add account
-              </button>
-            )}
+                ChatGPT plan usage
+              </a>
+              . Credentials stay on this computer. No automatic API billing.
+            </Text>
           </div>
-          <p>
-            <a
-              href="https://chatgpt.com/settings/usage"
-              target="_blank"
-              rel="noreferrer"
-            >
-              ChatGPT plan usage
-            </a>
-            . Credentials stay on this computer. No automatic API billing.
-          </p>
-        </details>
+        </Collapsible>
       )}
     </div>
   );

@@ -47,6 +47,24 @@ import { highlightChanges, deltaLabel } from "../../lib/chitti/chart-insights";
 import { within } from "@testing-library/react";
 import { DEMOS } from "../../lib/chitti/demos";
 import { providerMeta } from "../../lib/chitti/providers";
+// Recorded examples open from their cards on the empty state (the one entry
+// point); a native <select> in the sidebar used to duplicate it.
+async function openExample(demo: (typeof DEMOS)[number]) {
+  fireEvent.click(
+    within(screen.getByRole("region", { name: "Recorded analyses" })).getByRole(
+      "button",
+      { name: demo.question },
+    ),
+  );
+  await screen.findByRole("heading", { name: demo.question });
+}
+// Chart steering controls are Astryx selectors: open the listbox, pick an option.
+async function chooseOption(label: string, option: string) {
+  fireEvent.click(await screen.findByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+const contextChip = () =>
+  within(screen.getByRole("group", { name: "Follow-up context" }));
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
@@ -62,15 +80,17 @@ it("locks a chat's model, switches only in a new chat, and restores its original
   fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain the limits of these indicators" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByText("An answer to keep.");
-  fireEvent.click(screen.getByLabelText("Choose model: original-model"));
+  const modelMenu = (id: string) => screen.getByRole("button", { name: `Choose model: ${id}` });
+  fireEvent.click(modelMenu("original-model"));
   const next = providerMeta("openrouter").models[0];
-  fireEvent.click(screen.getByRole("button", { name: `${next.label} OpenRouter · configured` }));
-  expect(screen.getByLabelText("Choose model: original-model")).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: (name) => name.startsWith(next.label) }));
+  // The chat keeps its model until the user confirms a new chat.
+  expect(modelMenu("original-model")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Start new chat" }));
   expect(screen.queryByText("An answer to keep.")).toBeNull();
-  expect(screen.getByLabelText(`Choose model: ${next.id}`)).toBeTruthy();
+  expect(modelMenu(next.id)).toBeTruthy();
   fireEvent.click(within(screen.getByRole("region", { name: "Recent chats" })).getByRole("button", { name: "Explain the limits of these indicators" }));
-  expect(screen.getByLabelText("Choose model: original-model")).toBeTruthy();
+  expect(modelMenu("original-model")).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Expand on that answer" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
@@ -86,11 +106,11 @@ it("keeps the previous artifact visible while a new AG-UI run appends a new repl
   );
   render(<Workspace />);
   const previous = DEMOS[0];
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${previous.id}` },
-  });
+  await openExample(previous);
   await screen.findByRole("heading", { name: previous.question });
-  fireEvent.click(screen.getByRole("checkbox", { name: "Use current view" }));
+  // Detach the current view: the follow-up becomes a fresh question.
+  fireEvent.click(contextChip().getByRole("button", { name: /^Remove / }));
+  expect(contextChip().getByRole("button", { name: "Use current view" })).toBeTruthy();
   const question = "Chart life expectancy in Japan since 1960";
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: question },
@@ -122,12 +142,9 @@ it("keeps the previous artifact visible while a new AG-UI run appends a new repl
 it("lets the user steer a recorded result and return to the exact parent view without a key", async () => {
   render(<Workspace />);
   const demo = DEMOS[2];
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
+  await openExample(demo);
   const series = demo.state.spec!.series[0].name;
-  const focus = await screen.findByLabelText("Focus chart");
-  fireEvent.change(focus, { target: { value: series } });
+  await chooseOption("Focus chart", series);
   await screen.findByRole("heading", { name: `Focus on ${series}` });
   expect(
     screen.getAllByText(`Focused ${series}; 1 series hidden.`).length,
@@ -135,34 +152,27 @@ it("lets the user steer a recorded result and return to the exact parent view wi
   expect(runFastPath).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await screen.findByRole("heading", { name: demo.question });
-  expect(screen.getByLabelText("Focus chart")).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Focus chart" })).toBeTruthy();
 });
 
 it("keeps one composer, undoes and redoes a branch, and clears redo when the user steers again", async () => {
   render(<Workspace />);
   const demo = DEMOS[2];
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
-  fireEvent.change(await screen.findByLabelText("Focus chart"), {
-    target: { value: demo.state.spec!.series[0].name },
-  });
+  await openExample(demo);
+  await chooseOption("Focus chart", demo.state.spec!.series[0].name);
   await screen.findByRole("button", { name: "Undo" });
   expect(screen.getAllByRole("textbox")).toHaveLength(1);
   expect(screen.queryByLabelText("Ask about this view")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await screen.findByRole("heading", { name: demo.question });
-  expect(
-    (screen.getByLabelText("Use current view") as HTMLInputElement).checked,
-  ).toBe(true);
+  // The restored view is attached as the follow-up's context.
+  expect(contextChip().getByRole("button", { name: /^Remove / })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Redo" }));
   await screen.findByRole("heading", {
     name: `Focus on ${demo.state.spec!.series[0].name}`,
   });
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  fireEvent.change(await screen.findByLabelText("Focus chart"), {
-    target: { value: demo.state.spec!.series[1].name },
-  });
+  await chooseOption("Focus chart", demo.state.spec!.series[1].name);
   await screen.findByRole("heading", {
     name: `Focus on ${demo.state.spec!.series[1].name}`,
   });
@@ -187,12 +197,8 @@ it("uses the restored evidence for the next model request after undo", async () 
   });
   vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
   render(<Workspace />);
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
-  fireEvent.change(await screen.findByLabelText("Focus chart"), {
-    target: { value: demo.state.spec!.series[0].name },
-  });
+  await openExample(demo);
+  await chooseOption("Focus chart", demo.state.spec!.series[0].name);
   fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: "Explain the restored comparison" },
@@ -206,9 +212,7 @@ it("uses the restored evidence for the next model request after undo", async () 
 });
 it("keeps a model-key request beside the unchanged result", async () => {
   render(<Workspace />);
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${DEMOS[0].id}` },
-  });
+  await openExample(DEMOS[0]);
   fireEvent.change(screen.getByLabelText("Ask a data question"), {
     target: { value: "Explain the causal mechanism" },
   });
@@ -236,9 +240,7 @@ it("keeps explanation progress and the answer beside the selected change without
   });
   vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
   render(<Workspace />);
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
+  await openExample(demo);
   fireEvent.click(
     await screen.findByRole("button", {
       name: `Ask why: ${change.series}, ${deltaLabel(change, demo.state.spec!.y_axis)}, ${change.from[0]} to ${change.to[0]}`,
@@ -284,9 +286,7 @@ it("keeps explanation progress and the answer beside the selected change without
 it("keeps missing-key and retry controls in the change, not a new conversation turn", async () => {
   render(<Workspace />);
   const demo = DEMOS[2];
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
+  await openExample(demo);
   const change = highlightChanges(demo.state.spec!)[0];
   fireEvent.click(
     await screen.findByRole("button", {
@@ -302,9 +302,9 @@ it("keeps missing-key and retry controls in the change, not a new conversation t
   expect(screen.queryByRole("region", { name: "Current request" })).toBeNull();
   expect(createSession).not.toHaveBeenCalled();
   expect(screen.getByRole("heading", { name: demo.question })).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${DEMOS[0].id}` },
-  });
+  // Switch to another recorded result: the explanation must not follow it.
+  fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+  await openExample(DEMOS[0]);
   await waitFor(() =>
     expect(screen.queryByRole("region", { name: /Explanation:/ })).toBeNull(),
   );
@@ -325,9 +325,7 @@ it("stops an inline explanation and retries against the same evidence", async ()
   );
   vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
   render(<Workspace />);
-  fireEvent.change(screen.getByLabelText("Open result"), {
-    target: { value: `example:${demo.id}` },
-  });
+  await openExample(demo);
   fireEvent.click(
     await screen.findByRole("button", {
       name: `Ask why: ${change.series}, ${deltaLabel(change, demo.state.spec!.y_axis)}, ${change.from[0]} to ${change.to[0]}`,
@@ -382,7 +380,7 @@ it("keeps prior answers in the selected branch's model context", async () => {
   const ask = vi.fn().mockResolvedValue({ finding: "First, rates fell. Second, causes need more evidence.", chartSpec: null, rows: demo.state.rows, citations: demo.state.citations, verification: null, cost: 0 });
   vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
   render(<Workspace />);
-  fireEvent.change(screen.getByLabelText("Open result"), { target: { value: `example:${demo.id}` } });
+  await openExample(demo);
   fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain the finding" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await screen.findByText("First, rates fell. Second, causes need more evidence.");
@@ -396,15 +394,31 @@ it("keeps prior answers in the selected branch's model context", async () => {
 it("opens a fresh chat without erasing earlier branches", async () => {
   render(<Workspace />);
   const demo = DEMOS[2];
-  fireEvent.change(screen.getByLabelText("Open result"), { target: { value: `example:${demo.id}` } });
-  fireEvent.change(await screen.findByLabelText("Focus chart"), { target: { value: demo.state.spec!.series[0].name } });
+  await openExample(demo);
+  await chooseOption("Focus chart", demo.state.spec!.series[0].name);
   await screen.findByRole("button", { name: "Undo" });
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-  fireEvent.change(await screen.findByLabelText("Focus chart"), { target: { value: demo.state.spec!.series[1].name } });
+  await chooseOption("Focus chart", demo.state.spec!.series[1].name);
   await screen.findByRole("heading", { name: `Focus on ${demo.state.spec!.series[1].name}` });
   expect(within(screen.getByRole("region", { name: "Recent chats" })).getAllByRole("button")).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
   expect(screen.getByRole("heading", { name: "What do you want to find out?" })).toBeTruthy();
   expect(screen.queryByText("Chart rendered")).toBeNull();
   expect(within(screen.getByRole("region", { name: "Recent chats" })).getAllByRole("button")).toHaveLength(2);
+});
+
+it("sends on Enter, keeps Shift+Enter for a new line, and still sends on Ctrl/⌘+Enter", async () => {
+  render(<Workspace />);
+  const box = screen.getByLabelText("Ask a data question");
+  fireEvent.change(box, { target: { value: "Explain the causal mechanism" } });
+  fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+  expect(screen.queryByRole("region", { name: "Current request" })).toBeNull();
+  expect((box as HTMLTextAreaElement).value).toBe("Explain the causal mechanism");
+  fireEvent.keyDown(box, { key: "Enter" });
+  await screen.findByRole("button", { name: "Connect model" });
+  expect(screen.getByRole("heading", { name: "Explain the causal mechanism" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+  fireEvent.change(box, { target: { value: "Explain the limits" } });
+  fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+  await screen.findByRole("heading", { name: "Explain the limits" });
 });

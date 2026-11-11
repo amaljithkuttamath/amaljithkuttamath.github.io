@@ -1,4 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
+import { Button } from "@astryxdesign/core/Button";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import type { ChartChange } from "../../lib/chitti/chart-insights";
 import {
   chartValue,
@@ -8,6 +10,9 @@ import {
 import type { Analysis } from "../../lib/chitti/workspace/model";
 import { safeLink } from "../../lib/chitti/workspace/model";
 import { mdToHtml } from "../../lib/chitti/ui/dom";
+import { verificationLabel } from "./ui/Evidence";
+import { MicroLabel, Stat } from "./ui/primitives";
+import { RunStatus } from "./ui/RunStatus";
 
 export interface InlineExplanation {
   change: ChartChange;
@@ -24,77 +29,82 @@ export function ChangeExplanation({ unit }: { unit?: string }) {
   if (!detail) return null;
   const { change, analysis } = detail;
   const pending = ["running", "waiting"].includes(analysis.phase);
+  const failed = ["needs-key", "error", "stopped"].includes(analysis.phase);
   const answer = analysis.result?.answer;
+  const actions = (
+    <>
+      {analysis.phase === "needs-key" && (
+        <Button size="sm" label="Connect model" onClick={detail.onConnect} />
+      )}
+      {failed && <Button size="sm" label="Retry explanation" onClick={detail.onRetry} />}
+      {pending ? (
+        <Button size="sm" variant="ghost" label="Stop explanation" onClick={detail.onStop} />
+      ) : (
+        <Button size="sm" variant="ghost" label="Close explanation" onClick={detail.onClose} />
+      )}
+    </>
+  );
   return (
     <section
       id="cw-change-explanation"
-      className="cw-change-explanation"
+      className="cx-explanation"
       aria-label={`Explanation: ${change.series}, ${change.from[0]} to ${change.to[0]}`}
       aria-busy={pending}
     >
-      <div className="cw-explanation-evidence">
-        <strong>
-          {change.series} <span>{deltaLabel(change, unit)}</span>
-        </strong>
-        <span>
-          {change.from[0]}–{change.to[0]} ·{" "}
-          {chartValue(change.from[1], changeDigits(change))} →{" "}
-          {chartValue(change.to[1], changeDigits(change))}
-        </span>
-        <small>Highlighted on chart</small>
+      <div className="cx-explanation-evidence">
+        <Stat
+          label={change.series}
+          value={deltaLabel(change, unit)}
+          tone={change.to[1] >= change.from[1] ? "up" : "down"}
+          detail={`${change.from[0]}–${change.to[0]} · ${chartValue(change.from[1], changeDigits(change))} → ${chartValue(change.to[1], changeDigits(change))}`}
+        />
+        <MicroLabel>Highlighted on chart</MicroLabel>
       </div>
-      <div className="cw-explanation-body">
+      <div className="cx-explanation-body">
         <div aria-live="polite">
           {answer ? (
             <div
-              className="cw-explanation-answer"
+              className="cx-finding"
               dangerouslySetInnerHTML={{ __html: mdToHtml(answer) }}
             />
           ) : (
-            <p>
-              {pending
-                ? "Checking this change against the sources…"
-                : analysis.status}
-            </p>
+            <RunStatus
+              phase={analysis.phase}
+              status={analysis.status}
+              pendingText={pending ? "Checking this change against the sources…" : undefined}
+              hint={null}
+            />
           )}
         </div>
         {answer && (
-          <details className="cw-explanation-sources">
-            <summary>
-              Sources ·{" "}
-              {analysis.result?.verification?.status === "verified"
-                ? "Evidence check passed"
-                : "Not verified"}
-            </summary>
-            {analysis.result?.citations.map((c) => (
-              <a
-                key={c.id}
-                href={safeLink(c.url)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {c.sourceLabel}: {c.indicatorName || c.indicatorId}
-              </a>
-            ))}
+          <Collapsible
+            className="cx-explanation-sources"
+            defaultIsOpen={false}
+            trigger={
+              <MicroLabel>
+                Sources ·{" "}
+                {analysis.result?.verification
+                  ? verificationLabel(analysis.result.verification.status)
+                  : "Not verified"}
+              </MicroLabel>
+            }
+          >
+            <ul className="cx-link-list">
+              {analysis.result?.citations.map((c) => (
+                <li key={c.id}>
+                  <a href={safeLink(c.url)} target="_blank" rel="noopener noreferrer">
+                    {c.sourceLabel}: {c.indicatorName || c.indicatorId}
+                  </a>
+                </li>
+              ))}
+            </ul>
             {!analysis.result?.citations.length && (
-              <p>No source records returned.</p>
+              <p className="cx-empty">No source records returned.</p>
             )}
-          </details>
+          </Collapsible>
         )}
         {detail.clarification}
-        <div className="cw-explanation-actions">
-          {analysis.phase === "needs-key" && (
-            <button onClick={detail.onConnect}>Connect model</button>
-          )}
-          {["needs-key", "error", "stopped"].includes(analysis.phase) && (
-            <button onClick={detail.onRetry}>Retry explanation</button>
-          )}
-          {pending ? (
-            <button onClick={detail.onStop}>Stop explanation</button>
-          ) : (
-            <button onClick={detail.onClose}>Close explanation</button>
-          )}
-        </div>
+        <div className="cx-explanation-actions">{actions}</div>
       </div>
     </section>
   );

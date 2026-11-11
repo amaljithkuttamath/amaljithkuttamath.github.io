@@ -127,7 +127,10 @@ it("keeps catalog failures visible for an already connected account", async () =
     />,
   );
   await screen.findByText("Model catalog unavailable");
-  expect(screen.getByRole("status").textContent).toBe(
+  // Astryx buttons carry their own (empty) live regions for loading
+  // announcements; the only status with content is the connection message.
+  const announced = screen.getAllByRole("status").filter((e) => e.textContent);
+  expect(announced.map((e) => e.textContent)).toEqual([
     "Model catalog unavailable",
-  );
+  ]);
 });

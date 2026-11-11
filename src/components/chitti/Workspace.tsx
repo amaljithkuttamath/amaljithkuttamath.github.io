@@ -37,7 +37,46 @@ import { conversationPath, conversationHeads } from "../../lib/chitti/workspace/
 import ExamplePlot from "./ExamplePlot";
 import Surface from "./Surface";
 import Dashboards, { download } from "./Dashboards";
-import "./workspace.css";
+import "@astryxdesign/core/reset.css";
+import "@astryxdesign/core/astryx.css";
+import "./ui/chitti.css";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ChatComposer } from "@astryxdesign/core/Chat";
+import { ClickableCard } from "@astryxdesign/core/ClickableCard";
+import { Code } from "@astryxdesign/core/Code";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Kbd } from "@astryxdesign/core/Kbd";
+import { MobileNav } from "@astryxdesign/core/MobileNav";
+import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Text } from "@astryxdesign/core/Text";
+import { Token } from "@astryxdesign/core/Token";
+import { Toolbar } from "@astryxdesign/core/Toolbar";
+import { ChittiTheme } from "./ui/ChittiTheme";
+import { MessageTurn } from "./ui/MessageTurn";
+import { MicroLabel, PanelHeader } from "./ui/primitives";
+import { RunStatus, StepList } from "./ui/RunStatus";
+import {
+  ContextIcon,
+  DashboardIcon,
+  DownloadIcon,
+  PinIcon,
+  PlusIcon,
+  RedoIcon,
+  SendIcon,
+  SettingsIcon,
+  ShareIcon,
+  SparkIcon,
+  SteerIcon,
+  StepsIcon,
+  UndoIcon,
+} from "./ui/icons";
 function initialConfig(): Config {
   let provider: ProviderId = "chatgpt",
     apiKey = "",
@@ -64,7 +103,7 @@ function initialConfig(): Config {
     rlm: false,
   };
 }
-export default function Workspace() {
+function WorkspaceApp() {
   const [config, setConfig] = useState(initialConfig);
   const configRef = useRef(config);
   configRef.current = config;
@@ -80,7 +119,7 @@ export default function Workspace() {
   const [turns, setTurns] = useState<Analysis[]>([]);
   const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
   const [useCurrent, setUseCurrent] = useState(false);
   const [redo, setRedo] = useState<string[]>([]);
   const [latestRequest, setLatestRequest] = useState("");
@@ -366,6 +405,9 @@ export default function Workspace() {
     composer.current?.focus();
   };
   const currentRequest = turns.find((t) => t.id === latestRequest);
+  // A request that is running, or ended without a result, stays visible beside the view.
+  const inflight = !!currentRequest && (running ||
+    (!currentRequest.result && ["needs-key", "error", "stopped"].includes(currentRequest.phase)));
   const change = useMemo(
     () =>
       active?.result
@@ -474,99 +516,168 @@ export default function Workspace() {
           ) : null,
       }
     : null;
+  const attachable = !!active?.result;
+  const attached = useCurrent && attachable;
   const composerView = (
-    <>
-      <form
-        className="cw-composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <label htmlFor="cw-question">
-          {useCurrent && active?.result
-            ? "Ask a follow-up"
-            : "Ask a data question"}
-        </label>
-        {active?.result && (
-          <label className="cw-context-toggle">
-            <input
-              type="checkbox"
-              checked={useCurrent}
-              disabled={running}
-              onChange={(e) => setUseCurrent(e.target.checked)}
-            />
-            Use current view
-          </label>
-        )}
+    <ChatComposer
+      className="cx-composer"
+      density="compact"
+      elevation="none"
+      onSubmit={() => void submit()}
+      value={question}
+      onChange={setQuestion}
+      isStopShown={running}
+      onStop={() => agent.stop()}
+      headerActions={
+        attachable ? (
+          <div className="cx-context" role="group" aria-label="Follow-up context">
+            {attached ? (
+              <>
+                <MicroLabel>Follow-up uses</MicroLabel>
+                <Token
+                  size="sm"
+                  color="cyan"
+                  icon={<ContextIcon />}
+                  label={active!.result!.spec?.title || active!.question}
+                  isDisabled={running}
+                  onRemove={() => setUseCurrent(false)}
+                />
+              </>
+            ) : (
+              <>
+                <MicroLabel>New question, no context</MicroLabel>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<ContextIcon />}
+                  label="Use current view"
+                  isDisabled={running}
+                  onClick={() => setUseCurrent(true)}
+                />
+              </>
+            )}
+          </div>
+        ) : undefined
+      }
+      input={
         <textarea
           id="cw-question"
+          className="cx-composer-input"
           aria-label="Ask a data question"
+          aria-describedby="cx-composer-help"
           ref={composer}
           value={question}
-          rows={2}
+          rows={1}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void submit();
-            }
+            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+            if (e.shiftKey && !(e.metaKey || e.ctrlKey)) return;
+            e.preventDefault();
+            void submit();
           }}
           placeholder={
-            useCurrent && active?.result
+            attached
               ? "Ask a follow-up or change the chart…"
               : "Compare life expectancy in Japan, Italy and Spain since 1960"
           }
         />
-        <div>
-          <ModelPicker value={config} locked={modelLocked} running={running}
-            onChoose={value => { let remember = false; try { remember = !!sessionStorage.getItem("chitti:key"); } catch {} saveConfig(value, remember); }}
-            onConnect={connect} onNewChat={newAnalysis} />
-          {running ? (
-            <button type="button" onClick={() => agent.stop()}>
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="cw-primary"
-              disabled={!question.trim()}
-            >
-              Send{" "}
-              <span aria-hidden="true">↗</span>
-            </button>
-          )}
-        </div>
-      </form>
-    </>
+      }
+      footerActions={
+        <ModelPicker value={config} locked={modelLocked} running={running}
+          onChoose={value => { let remember = false; try { remember = !!sessionStorage.getItem("chitti:key"); } catch {} saveConfig(value, remember); }}
+          onConnect={connect} onNewChat={newAnalysis} />
+      }
+      sendActions={
+        <span className="cx-composer-help" id="cx-composer-help">
+          <Kbd keys="enter" /> to send · <Kbd keys="shift+enter" /> new line
+        </span>
+      }
+      sendButton={
+        running ? (
+          <Button label="Stop" icon={<Icon icon="stop" />} onClick={() => agent.stop()} />
+        ) : (
+          <Button
+            label="Send"
+            variant="primary"
+            icon={<SendIcon />}
+            isDisabled={!question.trim()}
+            onClick={() => void submit()}
+          />
+        )
+      }
+    />
   );
+  const navigation = (
+    <SideNav
+      className="cx-sidenav"
+      header={
+        <SideNavHeading
+          icon={<span className="cx-brand-mark" aria-hidden="true" />}
+          heading="Chitti"
+          subheading="Data, in conversation"
+        />
+      }
+      topContent={
+        <Button
+          className="cx-new-chat"
+          label="New chat"
+          icon={<PlusIcon />}
+          width="100%"
+          isDisabled={running}
+          onClick={() => { setMobileNav(false); newAnalysis(); }}
+        />
+      }
+      footer={
+        <div className="cx-nav-footer">
+          <SideNavItem label="Dashboards" icon={<DashboardIcon />} isSelected={dashboards}
+            aria-pressed={dashboards}
+            onClick={() => { setMobileNav(false); setDashboards(!dashboards); setPin(null); }} />
+          <SideNavItem label="Settings" icon={<SettingsIcon />} onClick={() => { setMobileNav(false); connect(); }} />
+          <Text as="p" type="supporting" className="cx-nav-note">Chats stay in this tab. Pin a chart or export a result to keep it.</Text>
+        </div>
+      }
+    >
+      <section id="cw-recent-chats" aria-label="Recent chats" className="cx-recent">
+        <SideNavSection title="Recent chats">
+          {recentChats.map(t => {
+            const root = resolveTurn(conversationPath(t.id, parents.current)[0]);
+            const depth = conversationPath(t.id, parents.current).length - 1;
+            return <SideNavItem key={t.id} label={root?.question || t.question} isSelected={selected === t.id}
+              aria-current={selected === t.id ? "page" : undefined} isDisabled={running}
+              endContent={depth > 0 ? <MicroLabel>+{depth}</MicroLabel> : undefined}
+              onClick={() => { setMobileNav(false); openChat(t.id); }} />;
+          })}
+          {!recentChats.length && <Text as="p" type="supporting" className="cx-nav-empty">Your chats appear here.</Text>}
+        </SideNavSection>
+      </section>
+    </SideNav>
+  );
+  const exportItems = (result: NonNullable<Analysis["result"]>, turn: Analysis): DropdownMenuOption[] => [
+    { label: "Copy share link", icon: <ShareIcon />, onClick: () => void share() },
+    { label: "Download CSV", icon: <DownloadIcon />, isDisabled: !result.rows.length,
+      onClick: () => download("chitti-data.csv", rowsToCSV(result.rows), "text/csv") },
+    { label: "Download Markdown", icon: <DownloadIcon />, onClick: () => download("chitti-analysis.md", buildFindingOkf({
+        question: turn.question, finding: result.answer, spec: result.spec, citations: result.citations,
+        verification: result.verification, createdAt: result.ts }), "text/markdown") },
+    ...(result.spec ? [{ type: "divider" as const }, { label: "Pin to dashboard", icon: <PinIcon />,
+      onClick: () => { setPin(result); setDashboards(true); } }] : []),
+  ];
   return (
-    <div className="cw">
-      <header className="cw-header">
-        <h1>Chitti</h1><span className="cw-subtitle">Data, in conversation</span>
-      </header>
-      <div className="cw-workspace">
-        <aside className="cw-sidebar" aria-label="Chat navigation" data-history-open={historyOpen}>
-          <button className="cw-new-chat" disabled={running} onClick={newAnalysis}>+ New chat</button>
-          <button className="cw-mobile-history-toggle" aria-expanded={historyOpen} aria-controls="cw-recent-chats" onClick={() => setHistoryOpen(!historyOpen)}>Recent chats ({recentChats.length})</button>
-          <section id="cw-recent-chats" aria-label="Recent chats">
-            <h2>Recent chats</h2>
-            {!recentChats.length && <p>Your chats appear here.</p>}
-            {recentChats.map(t => <button key={t.id} disabled={running} aria-current={selected === t.id ? "page" : undefined} onClick={() => openChat(t.id)}>{resolveTurn(conversationPath(t.id, parents.current)[0])?.question || t.question}{parents.current[t.id] && <small>{t.question}</small>}</button>)}
-          </section>
-          <label className="cw-example-select">Recorded examples
-            <select aria-label="Open result" value={example ? selected : ""} disabled={running} onChange={e => { if (e.target.value) openChat(e.target.value); }}>
-              <option value="">Choose an example</option>
-              {DEMOS.map(d => <option value={`example:${d.id}`} key={d.id}>{d.question}</option>)}
-            </select>
-          </label>
-          <div className="cw-sidebar-bottom">
-            <button onClick={() => { setDashboards(!dashboards); setPin(null); }} aria-pressed={dashboards}>Saved charts</button>
-            <button aria-label="Model settings" onClick={() => connect()}>Settings</button>
-            <small>Chats stay in this session. Save a chart or export a result to keep it.</small>
-          </div>
-        </aside>
-        <section className="cw-main" aria-label="Analysis workspace">
+    <div className="cx-app">
+      <div className="cx-mobilebar">
+        <IconButton label="Open chats" tooltip="Chats, dashboards and settings" variant="ghost" icon={<Icon icon="menu" />}
+          aria-expanded={mobileNav} onClick={() => setMobileNav(true)} />
+        <span className="cx-brand"><span className="cx-brand-mark" aria-hidden="true" />Chitti</span>
+        <MicroLabel>Data, in conversation</MicroLabel>
+      </div>
+      {mobileNav && (
+        <MobileNav isOpen={mobileNav} onOpenChange={setMobileNav} side="start">
+          <div className="cx-drawer-nav">{navigation}</div>
+        </MobileNav>
+      )}
+      <div className="cx-workspace">
+        <aside className="cx-rail" aria-label="Chat navigation">{!mobileNav && navigation}</aside>
+        <section className="cx-main" aria-label="Analysis workspace">
           {dashboards ? (
             <Dashboards
               pin={pin}
@@ -578,130 +689,95 @@ export default function Workspace() {
             />
           ) : (
             <>
-              <div className="cw-transcript" aria-label="Conversation">
-              {previousTurns.map((turn, index) => <article className="cw-analysis cw-previous-turn" key={turn.id}>
-                <div className="cw-request"><span>You{turn.origin === "example" ? " · recorded example" : ""}</span><h2>{turn.question}</h2></div>
-                <div className="cw-assistant-label">Chitti</div>
+              <div className="cx-transcript" aria-label="Conversation">
+              {previousTurns.map((turn, index) => <MessageTurn key={turn.id}
+                who={`You${turn.origin === "example" ? " · recorded example" : ""}`} question={turn.question}
+                toolbar={<div className="cx-turn-meta"><Button size="sm" variant="ghost" label="Continue from here" isDisabled={running} onClick={() => openChat(turn.id)} /></div>}>
                 {turn.result && <CollapseChart.Provider value={JSON.stringify(turn.result.spec) === JSON.stringify(previousTurns[index - 1]?.result?.spec)}><Result result={turn.result} /></CollapseChart.Provider>}
-                {!turn.result && <p>{turn.status}</p>}
-                <button className="cw-continue" disabled={running} onClick={() => openChat(turn.id)}>Continue from here</button>
-              </article>)}
+                {!turn.result && <Text as="p" type="supporting">{turn.status}</Text>}
+              </MessageTurn>)}
               {notice && (
-                <p className="cw-notice" role="status">
-                  {notice}
-                </p>
+                <Banner
+                  className="cx-notice"
+                  status="info"
+                  title={<span role="status">{notice}</span>}
+                  isDismissable
+                  dismissLabel="Dismiss notice"
+                  onDismiss={() => setNotice("")}
+                  collapsible={false}
+                />
               )}
               {active ? (
-                <article className="cw-analysis" ref={activeArticle}>
-                  <header className="cw-turn-head">
-                    <div className="cw-request">
-                      <span>
-                        {active.origin === "example"
-                          ? "Example"
-                          : active.origin === "shared"
-                            ? "Shared"
-                            : "You"}
-                      </span>
-                      <h2>{active.question}</h2>
+                <MessageTurn
+                  isCurrent
+                  turnRef={activeArticle}
+                  who={active.origin === "example" ? "Recorded example" : active.origin === "shared" ? "Shared result" : "You"}
+                  question={active.question}
+                  aside={
+                    <div className="cx-change" aria-label="Workspace change">
+                      <p role="status" className="cx-change-text">
+                        {navigationNote && <span>{navigationNote} </span>}
+                        {active.origin === "example" || active.origin === "shared"
+                          ? "Opened recorded chart and sources."
+                          : change}
+                      </p>
+                      {active.origin === "view" && <Badge variant="cyan" label="View only · source data unchanged" />}
+                      {(active.phase === "running" || active.phase === "waiting") && (
+                        <Badge variant="warning" label="Draft · not yet verified" />
+                      )}
                     </div>
-                    <div className="cw-change" aria-label="Workspace change">
-                      <span className="cw-change-author">Chitti</span>
-                      <div>
-                        <p role="status">
-                          {navigationNote && <span>{navigationNote} </span>}
-                          {active.origin === "example" ||
-                          active.origin === "shared"
-                            ? "Opened recorded chart and sources."
-                            : change}
-                        </p>
-                        {active.origin === "view" && (
-                          <small>View only. Source data unchanged.</small>
-                        )}
-                        {(active.phase === "running" ||
-                          active.phase === "waiting") && (
-                          <small>Draft; not yet verified.</small>
-                        )}
-                      </div>
-                      <div className="cw-change-actions">
+                  }
+                  toolbar={
+                    <Toolbar
+                      label="Result actions"
+                      size="sm"
+                      className="cx-toolbar cx-turn-toolbar"
+                      startContent={<>
                         {Object.hasOwn(parents.current, selected) && (
-                          <button disabled={running} onClick={undo}>
-                            Undo
-                          </button>
+                          <IconButton variant="ghost" label="Undo" tooltip="Undo" icon={<UndoIcon />} isDisabled={running} onClick={undo} />
                         )}
                         {!!redo.length && (
-                          <button disabled={running} onClick={redoChange}>
-                            Redo
-                          </button>
+                          <IconButton variant="ghost" label="Redo" tooltip="Redo" icon={<RedoIcon />} isDisabled={running} onClick={redoChange} />
                         )}
-                        <button
-                          disabled={running}
-                          onClick={() => {
-                            setUseCurrent(true);
-                            composer.current?.focus();
-                          }}
-                        >
-                          Steer
-                        </button>
-                        <button
-                          onClick={() => setReceipt(!receipt)}
-                          aria-expanded={receipt}
-                        >
-                          Steps
-                          {active.trace.length ? ` ${active.trace.length}` : ""}
-                        </button>
-                      </div>
-                    </div>
-                  </header>
+                        <Button variant="ghost" label="Steer" icon={<SteerIcon />} isDisabled={running}
+                          onClick={() => { setUseCurrent(true); composer.current?.focus(); }} />
+                        <Button variant="ghost" label={`Steps${active.trace.length ? ` ${active.trace.length}` : ""}`}
+                          icon={<StepsIcon />} aria-expanded={receipt} onClick={() => setReceipt(!receipt)} />
+                      </>}
+                      endContent={<>
+                        {active.origin === "direct" && active.phase === "done" && (
+                          <Button label="Analyze with model" icon={<SparkIcon />} isDisabled={running}
+                            onClick={() => void submit(active.question, true)} />
+                        )}
+                        {active.result && (
+                          <DropdownMenu
+                            alignment="end"
+                            button={{ label: "Share & export", icon: <ShareIcon />, size: "sm" }}
+                            items={exportItems(active.result, active)}
+                          />
+                        )}
+                      </>}
+                    />
+                  }
+                >
                   {receipt && (
-                    <section
-                      className="cw-receipts"
-                      aria-label="Execution steps"
-                    >
-                      {active.cost !== undefined && (
-                        <p>Model cost: ${active.cost.toFixed(4)}</p>
-                      )}
+                    <section className="cx-receipts" aria-label="Execution steps">
+                      <PanelHeader level={3} eyebrow="Receipt" title="Execution steps"
+                        description={active.cost !== undefined ? `Model cost: $${active.cost.toFixed(4)}` : undefined} />
                       {!active.trace.length && (
-                        <p>
-                          {active.origin === "example" ||
-                          active.origin === "shared"
+                        <Text as="p" type="supporting">
+                          {active.origin === "example" || active.origin === "shared"
                             ? "This snapshot includes the result and sources, not the original execution log."
                             : "No completed steps yet."}
-                        </p>
+                        </Text>
                       )}
-                      {active.trace.map((step, i) => (
-                        <details
-                          key={`${step.ts}-${i}`}
-                          open={step.status === "running"}
-                        >
-                          <summary>
-                            <span data-state={step.status}>
-                              {step.status === "ok"
-                                ? "✓"
-                                : step.status === "error"
-                                  ? "!"
-                                  : "·"}
-                            </span>
-                            <strong>{step.tool.replaceAll("_", " ")}</strong>
-                            <span>{step.argSummary}</span>
-                          </summary>
-                          {step.detail && <pre>{step.detail}</pre>}
-                        </details>
-                      ))}
+                      <StepList trace={active.trace} defaultIsExpanded />
                       {Object.entries(active.files).map(([name, body]) => (
-                        <details key={name}>
-                          <summary>{name}</summary>
-                          <pre>{body}</pre>
-                          <button
-                            onClick={() =>
-                              download(
-                                name.split("/").at(-1) || "file.txt",
-                                body,
-                              )
-                            }
-                          >
-                            Download file
-                          </button>
-                        </details>
+                        <Collapsible key={name} className="cx-file" defaultIsOpen={false} trigger={<Code>{name}</Code>}>
+                          <pre className="cx-pre">{body}</pre>
+                          <Button size="sm" icon={<DownloadIcon />} label="Download file"
+                            onClick={() => download(name.split("/").at(-1) || "file.txt", body)} />
+                        </Collapsible>
                       ))}
                     </section>
                   )}
@@ -717,165 +793,81 @@ export default function Workspace() {
                       />
                     </ExplanationContext.Provider>
                   ) : active.phase === "running" ? (
-                    <div className="cw-pending">
-                      <span className="cw-pulse" />
-                      Reading sources and preparing the result…
+                    <div className="cx-pending" aria-hidden="true">
+                      <Skeleton height={14} width="72%" />
+                      <Skeleton height={14} width="54%" index={1} />
+                      <Skeleton height={220} index={2} />
                     </div>
                   ) : null}
-                  {active.result && (
-                    <details className="cw-export">
-                      <summary>Save or export</summary>
-                      <footer className="cw-actions cw-result-actions">
-                        <button onClick={() => void share()}>
-                          Share result
-                        </button>
-                        <button
-                          disabled={!active.result.rows.length}
-                          onClick={() =>
-                            download(
-                              "chitti-data.csv",
-                              rowsToCSV(active.result!.rows),
-                              "text/csv",
-                            )
-                          }
-                        >
-                          Download CSV
-                        </button>
-                        <button
-                          onClick={() =>
-                            download(
-                              "chitti-analysis.md",
-                              buildFindingOkf({
-                                question: active.question,
-                                finding: active.result!.answer,
-                                spec: active.result!.spec,
-                                citations: active.result!.citations,
-                                verification: active.result!.verification,
-                                createdAt: active.result!.ts,
-                              }),
-                              "text/markdown",
-                            )
-                          }
-                        >
-                          Markdown
-                        </button>
-                        {active.result.spec && (
-                          <button
-                            onClick={() => {
-                              setPin(active.result);
-                              setDashboards(true);
-                            }}
-                          >
-                            Pin chart
-                          </button>
-                        )}
-                        {active.origin === "direct" &&
-                          active.phase === "done" && (
-                            <button
-                              disabled={running}
-                              onClick={() => void submit(active.question, true)}
-                            >
-                              Analyze with model
-                            </button>
-                          )}
-                      </footer>
-                    </details>
-                  )}
-                </article>
-              ) : (
-                <div className="cw-start">
-                  <h2>What do you want to find out?</h2>
-                  <p>
-                    Compare countries, follow a trend, or check a claim against
-                    public data.
-                  </p>
+                </MessageTurn>
+              ) : inflight ? null : (
+                <div className="cx-start">
+                  <MicroLabel>Live public data · every number cited</MicroLabel>
+                  <Heading level={2} className="cx-start-title">What do you want to find out?</Heading>
+                  <Text as="p" type="large" color="secondary" className="cx-start-lede">
+                    Compare countries, follow a trend, or check a claim against public data.
+                  </Text>
                   {!!redo.length && (
-                    <button disabled={running} onClick={redoChange}>
-                      Redo
-                    </button>
+                    <Button size="sm" variant="ghost" icon={<RedoIcon />} label="Redo" isDisabled={running} onClick={redoChange} />
                   )}
-                  <section
-                    className="cw-examples"
-                    aria-label="Recorded analyses"
-                  >
-                    <h3>Explore a recorded analysis</h3>
-                    <div>
+                  <section className="cx-examples" aria-label="Recorded analyses">
+                    <MicroLabel as="p">Explore a recorded analysis</MicroLabel>
+                    <div className="cx-example-grid">
                       {DEMOS.map((d) => (
-                        <button
-                          key={d.id}
-                          onClick={() => {
-                            openChat(`example:${d.id}`);
-                          }}
-                        >
+                        <ClickableCard key={d.id} className="cx-example" label={d.question} padding={4}
+                          onClick={() => openChat(`example:${d.id}`)}>
                           <ExamplePlot spec={d.state.spec} />
-                          <strong>{d.question}</strong>
-                          <span>{d.sources.join(" / ")}</span>
-                        </button>
+                          <span className="cx-example-question">{d.question}</span>
+                          <span className="cx-example-sources">
+                            {d.sources.map(source => <Badge key={source} variant="neutral" label={source} />)}
+                          </span>
+                        </ClickableCard>
                       ))}
                     </div>
                   </section>
-                  <p className="cw-source-line">
+                  <p className="cx-provenance">
                     World Bank, Our World in Data, IMF and WHO. Every result
                     keeps its sources.
                   </p>
                 </div>
               )}
-              {currentRequest &&
-                (running ||
-                  (!currentRequest.result &&
-                    ["needs-key", "error", "stopped"].includes(
-                      currentRequest.phase,
-                    ))) && (
-                  <section className="cw-inflight" aria-label="Current request">
+              {currentRequest && inflight && (
+                  <section className="cx-inflight" aria-label="Current request">
                     {selected !== currentRequest.id && (
-                      <p className="cw-request-text">
-                        {currentRequest.question}
-                      </p>
+                      <div className="cx-turn-ask">
+                        <MicroLabel>You</MicroLabel>
+                        <Heading level={2} className="cx-turn-question">{currentRequest.question}</Heading>
+                      </div>
                     )}
-                    <p role="status">{currentRequest.status}</p>
-                    <div className="cw-actions">
-                      {running && (
-                        <button
-                          onClick={() => {
+                    <RunStatus
+                      phase={currentRequest.phase === "done" || currentRequest.phase === "idle" ? "running" : currentRequest.phase}
+                      status={currentRequest.status}
+                      trace={currentRequest.trace}
+                      actions={<>
+                        {running && (
+                          <Button size="sm" label="Stop and steer" onClick={() => {
                             setUseCurrent(true);
                             agent.stop();
                             composer.current?.focus();
-                          }}
-                        >
-                          Stop and steer
-                        </button>
+                          }} />
+                        )}
+                        {currentRequest.phase === "needs-key" && (
+                          <Button size="sm" label="Connect model" onClick={() => connect()} />
+                        )}
+                        {["needs-key", "error"].includes(currentRequest.phase) && (
+                          <Button size="sm" variant="ghost" label="Retry" onClick={() =>
+                            void submit(currentRequest.question, false, contexts.current[currentRequest.id] || null)} />
+                        )}
+                      </>}
+                    >
+                      {clarification?.runId === currentRequest.id && (
+                        <Surface operations={clarification.operations} onAction={respond} />
                       )}
-                      {currentRequest.phase === "needs-key" && (
-                        <button onClick={() => connect()}>
-                          Connect model
-                        </button>
-                      )}
-                      {["needs-key", "error"].includes(
-                        currentRequest.phase,
-                      ) && (
-                        <button
-                          onClick={() =>
-                            void submit(
-                              currentRequest.question,
-                              false,
-                              contexts.current[currentRequest.id] || null,
-                            )
-                          }
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </div>
-                    {clarification?.runId === currentRequest.id && (
-                      <Surface
-                        operations={clarification.operations}
-                        onAction={respond}
-                      />
-                    )}
+                    </RunStatus>
                   </section>
                 )}
               </div>
-              <div className="cw-composer-dock">{composerView}<p className="cw-composer-help">Enter a question · Ctrl/⌘ + Enter to send · Answers keep their sources</p></div>
+              <div className="cx-dock">{composerView}</div>
             </>
           )}
         </section>
@@ -889,5 +881,13 @@ export default function Workspace() {
         />
       )}
     </div>
+  );
+}
+
+export default function Workspace() {
+  return (
+    <ChittiTheme>
+      <WorkspaceApp />
+    </ChittiTheme>
   );
 }
