@@ -250,3 +250,60 @@ it("routes view edits through the agent without spending a key or fetching data"
   expect(createSession).not.toHaveBeenCalled();
   expect(runFastPath).not.toHaveBeenCalled();
 });
+
+describe("direct choices", () => {
+  const plan = {
+    indicatorQuery: "rural population",
+    countries: ["IND"],
+    countryNames: ["India"],
+    chartType: "line" as const,
+  };
+  const candidates = [
+    { id: "SP.RUR.TOTL", name: "Rural population", source: "worldbank" },
+    { id: "SP.RUR.TOTL.ZS", name: "Rural population (% of total population)", source: "worldbank" },
+  ];
+  it("turns an ambiguous lookup into a choice, with no chart and no model, even with a key", async () => {
+    const runFastPath = vi.fn().mockResolvedValue({ ok: false, reason: "ambiguous", phrase: "rural population", candidates });
+    const createSession = vi.fn();
+    const agent = new ChittiAgent(config, { runFastPath, createSession });
+    const surfaces: unknown[] = [];
+    agent.subscribe({ onCustomEvent: ({ event }) => { surfaces.push(event); } });
+    question(agent, "rural population of India");
+    await agent.runAgent({ runId: "amb" });
+    expect(createSession).not.toHaveBeenCalled();
+    expect(surfaces).toHaveLength(0);
+    expect(agent.state.analysis.result).toBeNull();
+    expect(agent.state.analysis.phase).toBe("done");
+    expect(agent.state.analysis.choice).toEqual({ phrase: "rural population", plan: expect.objectContaining({ indicatorQuery: "rural population" }), candidates });
+    expect(agent.state.analysis.status).toContain("fits more than one series");
+  });
+  it("runs the series the user picked, records it with the other choices, and stamps the run's bounds", async () => {
+    const demo = DEMOS[0].state;
+    const runFastPath = vi.fn().mockResolvedValue({
+      plan, hit: { id: candidates[1].id, name: candidates[1].name, source: "worldbank" },
+      spec: demo.spec, rows: demo.rows, citations: demo.citations, summary: "s", trace: [], alternatives: [candidates[0]],
+    });
+    const agent = new ChittiAgent({ ...config, apiKey: "" }, { runFastPath, createSession: vi.fn() });
+    agent.useDirect(plan, candidates[1]);
+    question(agent, "Rural population (% of total population)");
+    await agent.runAgent({ runId: "pick" });
+    expect(runFastPath.mock.calls[0][0]).toBe(plan);
+    expect(runFastPath.mock.calls[0][1].chosen).toEqual(candidates[1]);
+    const a = agent.state.analysis;
+    expect(a.direct).toEqual({ plan, series: candidates[1], alternatives: [candidates[0]] });
+    expect(a.startedAt).toBeTypeOf("number");
+    expect(a.endedAt).toBeGreaterThanOrEqual(a.startedAt);
+    expect(a.provider).toBeUndefined();
+  });
+  it("never escalates a chosen-series lookup to the model when it fails", async () => {
+    const runFastPath = vi.fn().mockResolvedValue({ ok: false, reason: "no-data", hit: { id: "X", name: "Rural population", source: "worldbank" } });
+    const createSession = vi.fn();
+    const agent = new ChittiAgent(config, { runFastPath, createSession });
+    agent.useDirect(plan, candidates[0]);
+    question(agent, "Remove India");
+    await agent.runAgent({ runId: "edit" }).catch(() => {});
+    expect(createSession).not.toHaveBeenCalled();
+    expect(agent.state.analysis.phase).toBe("error");
+    expect(agent.state.analysis.status).toBe("Rural population has no values for those countries and years.");
+  });
+});

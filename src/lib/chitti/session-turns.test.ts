@@ -88,3 +88,23 @@ describe("a chart turn that runs out of budget", () => {
     expect(summaries).toHaveLength(1);
   });
 });
+
+describe("the trace the thinking block renders", () => {
+  it("carries each tool step's measured duration and the model's own reasoning text, unaltered", async () => {
+    const session = createSession(cfg);
+    const cb = callbacks();
+    mock.mockResolvedValueOnce({ ...turn("write_file", { path: "n.md", content: "x" }), reasoning: "I should save a note <b>first</b>." });
+    mock.mockResolvedValueOnce(turn("finish_explanation", { explanation: "Done." }));
+    await session.ask("Write a note", cb);
+    const trace = cb.onTrace.mock.calls.at(-1)![0] as import("./receipts").TraceEvent[];
+    const step = trace.find((e) => e.tool === "write_file")!;
+    expect(step.status).toBe("ok");
+    expect(typeof step.durationMs).toBe("number");
+    expect(step.durationMs).toBeGreaterThanOrEqual(0);
+    const thought = trace.find((e) => e.tool === "reasoning")!;
+    // Verbatim: rendering (and escaping) is the UI's job, never the engine's.
+    expect(thought.detail).toBe("I should save a note <b>first</b>.");
+    // No reasoning arrives → no reasoning step is invented.
+    expect(trace.filter((e) => e.tool === "reasoning")).toHaveLength(1);
+  });
+});

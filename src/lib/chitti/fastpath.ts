@@ -276,14 +276,37 @@ export interface FastPathResult {
   // agent's turns show. Identical TraceEvent shape; there are simply no model
   // steps in it, because none happened.
   trace: TraceEvent[];
+  // Other series the same phrase fits — the rest of an ambiguous choice after
+  // the user picked one, or the series a tuned leaf beat in a tie. Never a
+  // reason to chart them; the UI offers them as "switch to" choices. Empty
+  // when the phrase had one clear reading.
+  alternatives: SeriesCandidate[];
 }
+
+// One series the fast path could look up, as offered to the user when a phrase
+// fits more than one. Everything here comes from the knowledge base; nothing is
+// fetched to build it.
+export interface SeriesCandidate {
+  id: string;
+  name: string;
+  source: string;
+}
+
+// At most this many series are offered for one ambiguous phrase. More than a
+// handful stops being a choice and becomes a search, which is the agent's job.
+export const MAX_CANDIDATES = 4;
 
 // Why the fast path declined, when it declined after starting. Surfaced so the
 // caller can escalate honestly rather than showing a dead end.
 export type FastPathMiss =
   | { ok: false; reason: 'no-match' }
   | { ok: false; reason: 'weak-match'; best: SeriesHit }
-  | { ok: false; reason: 'no-data'; hit: SeriesHit };
+  | { ok: false; reason: 'no-data'; hit: SeriesHit }
+  // The phrase fits several series equally well. Nothing was fetched or
+  // charted: the caller offers `candidates` and re-runs with the one the user
+  // picks (`runFastPath(plan, { chosen })`). Only raised when at least two
+  // candidates answer every word of the phrase; otherwise it stays a no-match.
+  | { ok: false; reason: 'ambiguous'; phrase: string; candidates: SeriesCandidate[] };
 
 // Run a parsed plan with NO model call: search, fetch, chart, cite. Streams the
 // same TraceEvent shape the agent does, so the receipt UI renders it unchanged
@@ -295,6 +318,10 @@ export async function runFastPath(
     sources?: string[];
     onTrace?: (events: TraceEvent[]) => void;
     signal?: AbortSignal;
+    // A series the USER picked (from an ambiguous choice, a "switch to" row,
+    // or the series an earlier direct answer used). Skips the search: the
+    // choice is the person's, so there is nothing left to guess.
+    chosen?: SeriesCandidate;
   } = {}
 ): Promise<FastPathResult | FastPathMiss> {
   const trace: TraceEvent[] = [];
@@ -302,6 +329,8 @@ export async function runFastPath(
   const settle = (ev: TraceEvent, status: 'ok' | 'error', detail: string) => {
     ev.status = status;
     ev.detail = detail;
+    // Measured, not estimated: push time to settle time on this machine.
+    ev.durationMs = Math.max(0, Date.now() - ev.ts);
     opts.onTrace?.([...trace]);
   };
 
@@ -326,15 +355,42 @@ export async function runFastPath(
   // It also costs no request, so a KB hit skips a network round trip entirely.
   let hit: SeriesHit | null = null;
   let via = '';
-  const kbHit = pickKbHit(searchKb(plan.indicatorQuery, opts.sources));
-  if (kbHit === 'ambiguous') {
-    settle(findEv, 'error', 'more than one series fits');
-    return { ok: false, reason: 'no-match' };
-  }
-  if (kbHit) {
-    hit = { id: kbHit.seriesId, name: kbHit.name, source: kbHit.source };
-    // The route is the explanation a similarity score cannot give — show it.
-    via = ' · via ' + kbHit.path.slice(1).join(' › ');
+  let alternatives: SeriesCandidate[] = [];
+  const ranked = searchKb(plan.indicatorQuery, opts.sources);
+  if (opts.chosen) {
+    if (!opts.chosen.id || !adapterOfId(opts.chosen.id)) {
+      settle(findEv, 'error', 'chosen series is not available');
+      return { ok: false, reason: 'no-match' };
+    }
+    hit = { id: opts.chosen.id, name: opts.chosen.name || opts.chosen.id, source: opts.chosen.source };
+    via = ' · chosen by you';
+    // The same choices the unchosen lookup would have offered — the ambiguous
+    // candidates, or the tuned winner and its ties — minus the one in use.
+    const pick = pickKbHit(ranked);
+    const offered =
+      pick === 'ambiguous'
+        ? kbCandidates(ranked)
+        : pick
+          ? [{ id: pick.seriesId, name: pick.name, source: pick.source }, ...tiedAlternatives(ranked, pick)]
+          : [];
+    alternatives = offered.filter((c) => c.id !== opts.chosen!.id);
+  } else {
+    const kbHit = pickKbHit(ranked);
+    if (kbHit === 'ambiguous') {
+      const candidates = kbCandidates(ranked);
+      if (candidates.length >= 2) {
+        settle(findEv, 'error', `more than one series fits: ${candidates.map((c) => c.name).join('; ')}`);
+        return { ok: false, reason: 'ambiguous', phrase: plan.indicatorQuery, candidates };
+      }
+      settle(findEv, 'error', 'more than one series fits');
+      return { ok: false, reason: 'no-match' };
+    }
+    if (kbHit) {
+      hit = { id: kbHit.seriesId, name: kbHit.name, source: kbHit.source };
+      // The route is the explanation a similarity score cannot give — show it.
+      via = ' · via ' + kbHit.path.slice(1).join(' › ');
+      alternatives = tiedAlternatives(ranked, kbHit);
+    }
   }
 
   if (!hit) {
@@ -417,7 +473,7 @@ export async function runFastPath(
   settle(chartEv, 'ok', `${spec.series.length} series`);
 
   return {
-    plan, hit, spec, rows, citations, trace,
+    plan, hit, spec, rows, citations, trace, alternatives,
     summary: buildFastSummary(plan, rows, label),
   };
 }
@@ -445,6 +501,36 @@ export function pickKbHit(hits: KbHit[]): KbHit | 'ambiguous' | null {
   const tied = hits.some((h) => h.seriesId !== top.seriesId && h.score >= top.score);
   if (tied && !top.tuned) return 'ambiguous';
   return top;
+}
+
+// The series an ambiguous ranking offers as a choice: every distinct hit that
+// clears the KB bar AND answers every word of the phrase, best first, capped at
+// MAX_CANDIDATES. A hit that leaves a word unanswered is not offered — picking
+// it would be choosing to drop part of the question. Pure — exported for its
+// unit table.
+//
+// Within one score the shorter (more general) name comes first, so "Rural
+// population" is offered before "Rural population living in areas where
+// elevation is below 5 meters". That is display order only — nothing here is
+// committed to; the user still picks.
+export function kbCandidates(hits: KbHit[]): SeriesCandidate[] {
+  const eligible: KbHit[] = [];
+  for (const h of hits) {
+    if (h.score < KB_MIN_SCORE || h.unmatched.length) continue;
+    if (eligible.some((c) => c.seriesId === h.seriesId)) continue;
+    eligible.push(h);
+  }
+  return eligible
+    .sort((a, b) => b.score - a.score || a.name.length - b.name.length)
+    .slice(0, MAX_CANDIDATES)
+    .map((h) => ({ id: h.seriesId, name: h.name, source: h.source }));
+}
+
+// The series a tuned leaf beat only by winning a tie (the "core wins" rule):
+// charting the tuned one is still right, but the tie is disclosed so the user
+// can switch. Same eligibility as kbCandidates, and only exact ties. Pure.
+export function tiedAlternatives(hits: KbHit[], top: KbHit): SeriesCandidate[] {
+  return kbCandidates(hits.filter((h) => h.seriesId !== top.seriesId && h.score >= top.score));
 }
 
 // Choose the human label for the chart title, axis and summary.

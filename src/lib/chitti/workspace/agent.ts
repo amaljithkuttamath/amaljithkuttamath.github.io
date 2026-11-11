@@ -8,7 +8,12 @@ import {
   type SessionOptions,
 } from "../session";
 import { editView, type ViewEdit } from "./steering";
-import { parseFastPath, runFastPath } from "../fastpath";
+import {
+  parseFastPath,
+  runFastPath,
+  type FastPathPlan,
+  type SeriesCandidate,
+} from "../fastpath";
 import { cleanShareState, type ShareStateV1 } from "../share";
 import {
   resultSurface,
@@ -49,6 +54,7 @@ export class ChittiAgent extends AbstractAgent {
   private workspace: ShareStateV1 | null = null;
   private conversation: { role: "user" | "assistant"; content: string }[] = [];
   private viewEdit: ViewEdit | null = null;
+  private direct: { plan: FastPathPlan; series: SeriesCandidate } | null = null;
   private session: ChittiSession | null = null;
   private settings: Settings;
   private controller: AbortController | null = null;
@@ -82,6 +88,14 @@ export class ChittiAgent extends AbstractAgent {
     if (!this.workspace) this.session = null;
     this.viewEdit = edit || null;
   }
+  /** The next run is a direct lookup of this exact series with this plan: an
+   * ambiguity the user resolved, a "switch to" choice, or an edited token on a
+   * direct answer. No search and no model; a miss never escalates. */
+  useDirect(plan: FastPathPlan, series: SeriesCandidate) {
+    if (this.isRunning)
+      throw new Error("Wait for the current run or stop it first.");
+    this.direct = { plan, series };
+  }
   useConversation(messages: { role: "user" | "assistant"; content: string }[]) {
     this.conversation = messages.slice(-20).map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
   }
@@ -89,6 +103,7 @@ export class ChittiAgent extends AbstractAgent {
     this.conversation = [];
     this.workspace = null;
     this.viewEdit = null;
+    this.direct = null;
     this.stop();
     this.session = null;
     this.forceAgent = false;
@@ -121,8 +136,10 @@ export class ChittiAgent extends AbstractAgent {
       this.forceAgent = false;
       const workspace = this.workspace;
       const viewEdit = this.viewEdit;
+      const direct = this.direct;
       this.workspace = null;
       this.viewEdit = null;
+      this.direct = null;
       const startedAt = Date.now();
       const cfg = { ...this.settings, sources: [...this.settings.sources] };
       const analysis: Analysis = {
@@ -134,11 +151,15 @@ export class ChittiAgent extends AbstractAgent {
         result: null,
         trace: [],
         files: {},
+        startedAt,
       };
       const send = (event: BaseEvent) => {
         if (!sink.closed) sink.next(event);
       };
-      const publish = () =>
+      const publish = () => {
+        // The run's end is stamped on its first terminal snapshot.
+        if (!["running", "waiting"].includes(analysis.phase))
+          analysis.endedAt ??= Date.now();
         send({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
@@ -146,6 +167,7 @@ export class ChittiAgent extends AbstractAgent {
             question: this.pendingQuestion,
           },
         } as BaseEvent);
+      };
       const surface = (operations: unknown[]) =>
         send({
           type: EventType.CUSTOM,
@@ -226,8 +248,9 @@ export class ChittiAgent extends AbstractAgent {
             return;
           }
           let directFailure: DirectFailure = null;
-          const plan =
-            !workspace && !this.session && !forceAgent
+          const plan = direct
+            ? direct.plan
+            : !workspace && !this.session && !forceAgent
               ? parseFastPath(question)
               : null;
           if (plan) {
@@ -242,6 +265,7 @@ export class ChittiAgent extends AbstractAgent {
                     if (directActive) trace(events);
                   },
                   signal,
+                  chosen: direct?.series,
                 }),
                 new Promise<never>((_, reject) =>
                   signal.addEventListener(
@@ -264,12 +288,36 @@ export class ChittiAgent extends AbstractAgent {
                   verification: null,
                   ts: new Date().toISOString(),
                 });
+                if (result.hit?.id)
+                  analysis.direct = {
+                    plan: result.plan || plan,
+                    series: {
+                      id: result.hit.id,
+                      name: result.hit.name,
+                      source: result.hit.source,
+                    },
+                    alternatives: result.alternatives || [],
+                  };
                 patch({
                   phase: "done",
                   status: "Direct from source; no model used",
                   trace: result.trace,
                 });
                 surface(resultSurface(analysis.result!));
+                return;
+              }
+              if (result.reason === "ambiguous" && !direct) {
+                // Refuse to guess, and say so as a choice: nothing is
+                // fetched or charted until the user picks a series.
+                patch({
+                  phase: "done",
+                  status: `“${result.phrase}” fits more than one series. Pick one to look it up directly.`,
+                  choice: {
+                    phrase: result.phrase,
+                    plan,
+                    candidates: result.candidates,
+                  },
+                });
                 return;
               }
               directFailure =
@@ -280,6 +328,16 @@ export class ChittiAgent extends AbstractAgent {
             } finally {
               directActive = false;
             }
+            // A lookup the user asked for by series never escalates to a
+            // model: it either answers directly or says why it could not.
+            if (direct)
+              throw new Error(
+                directFailure === "unreachable"
+                  ? "The data source did not respond, so this direct lookup could not finish. Retry."
+                  : directFailure
+                    ? `${directFailure.noData} has no values for those countries and years.`
+                    : "That series could not be looked up directly.",
+              );
           }
           if (cfg.directOnly || (cfg.provider === "chatgpt" ? !cfg.chatgptAccount : !cfg.apiKey.trim())) {
             patch({
@@ -293,6 +351,7 @@ export class ChittiAgent extends AbstractAgent {
             origin: "agent",
             status: "Planning analysis",
             model: cfg.model,
+            provider: cfg.provider,
           });
           if (workspace) this.session = null;
           this.session ||= this.dependencies.createSession(cfg, {

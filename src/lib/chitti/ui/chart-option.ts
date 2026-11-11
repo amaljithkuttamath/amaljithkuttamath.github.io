@@ -50,6 +50,17 @@ export function barLayout(spec: ChartSpec): {
     : { categories, horizontal };
 }
 
+// Dark-theme chart palette, used only when the CSS variables are missing.
+export const CHART_FALLBACK = ["#ff6b93", "#4fd8fb", "#ffcf4a", "#b9a2ff", "#7fe08f", "#ff9a5c", "#f59ee8", "#d6d0be"];
+
+// A line chart labels each series at its right end (name + last value) instead
+// of a legend while there are few enough series for the labels to stay legible.
+// Pure — exported for its unit table.
+export const END_LABEL_MAX = 6;
+export function usesEndLabels(spec: ChartSpec): boolean {
+  return spec.type === "line" && spec.series.length > 0 && spec.series.length <= END_LABEL_MAX;
+}
+
 export function buildOption(
   spec: ChartSpec,
   fitLine = true,
@@ -62,8 +73,9 @@ export function buildOption(
   const faint = cssVar("--fg-faint") || "rgba(255,255,255,0.08)";
   const bg = cssVar("--bg") || "#0b0d0c";
 
-  const palette = ["#719bd2", "#68ae89", "#d5a353", "#b690cf", "#d57c79", "#61aeb8", "#cb94b5", "#a9aa68"]
-    .map((fallback, i) => cssVar(`--chart-${i + 1}`) || fallback);
+  // The page defines --chart-1…8 for both themes (components/chitti/ui/
+  // chitti.css); the fallback is the dark set, for a render with no stylesheet.
+  const palette = CHART_FALLBACK.map((fallback, i) => cssVar(`--chart-${i + 1}`) || fallback);
   const colorOf = (s: ChartSeries) => palette[s.colorIndex! % palette.length];
   const opacityOf = (s: ChartSeries) =>
     selected ? (selected.series === s.name ? 1 : 0.35) :
@@ -216,16 +228,17 @@ export function buildOption(
           type: "slider" as const,
           height: 16,
           bottom: 4,
-          borderColor: faint,
+          borderColor: "transparent",
           backgroundColor: "transparent",
-          fillerColor: "rgba(217,161,59,0.10)",
+          fillerColor: faint,
+          moveHandleSize: 0,
           dataBackground: {
             lineStyle: { color: faint },
             areaStyle: { color: faint },
           },
           selectedDataBackground: {
-            lineStyle: { color: signal },
-            areaStyle: { color: "rgba(217,161,59,0.15)" },
+            lineStyle: { color: muted },
+            areaStyle: { color: faint },
           },
           handleStyle: { color: signal, borderColor: signal },
           moveHandleStyle: { color: muted },
@@ -341,13 +354,14 @@ export function buildOption(
   const domain = fitLine ? lineDomain(spec) : null;
   const linePalette = palette;
   const highlights = highlightChanges(spec);
-  const endLabels = spec.series.length <= 6;
+  const endLabels = usesEndLabels(spec);
   return {
     animation: !reduce,
     color: linePalette,
     textStyle: baseText,
-    grid: { ...grid, right: endLabels ? 100 : 18 },
-    legend: spec.series.length > 1 ? legend : { show: false },
+    // The end labels replace the legend, so the band it reserved is released.
+    grid: { ...grid, top: endLabels ? 16 : grid.top, right: endLabels ? 112 : 18 },
+    legend: spec.series.length > 1 && !endLabels ? legend : { show: false },
     toolbox,
     tooltip,
     dataZoom,
@@ -378,13 +392,18 @@ export function buildOption(
         smooth: false,
         showSymbol: lineCats.length <= 20,
         symbolSize: 4,
+        // Name in the series colour, last value in ink: the label is the
+        // legend, so it must carry the colour that identifies the line.
         endLabel: {
           show: endLabels,
           formatter: (p: any) =>
-            `${s.name} ${chartValue(Number(p.value), Math.max(2, domain?.digits || 0))}`,
-          color: fg,
-          fontSize: 10,
-          width: 90,
+            `{n|${s.name}} {v|${chartValue(Number(Array.isArray(p.value) ? p.value[1] : p.value), Math.max(1, domain?.digits || 0))}}`,
+          rich: {
+            n: { color: colorOf(s), fontSize: 11, fontFamily: "Inter, sans-serif", fontWeight: 500 },
+            v: { color: fg, fontSize: 11, fontFamily: "JetBrains Mono, monospace" },
+          },
+          distance: 6,
+          width: 104,
           overflow: "truncate",
         },
         labelLayout: { moveOverlap: "shiftY" },
@@ -456,7 +475,9 @@ export function buildOption(
         lineStyle: {
           width: spec.highlight?.includes(seriesIdentity(s)) ? 3 : 2,
           color: colorOf(s),
-          type: (["solid", "dashed", "dotted"] as const)[s.colorIndex! % 3],
+          // With end labels naming every line, the dash cycle (the non-colour
+          // cue for a legend) is not needed; past that it identifies lines.
+          type: endLabels ? "solid" : (["solid", "dashed", "dotted"] as const)[s.colorIndex! % 3],
           opacity: opacityOf(s),
         },
         itemStyle: {

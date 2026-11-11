@@ -1,6 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Button } from "./ui/controls";
 import type { ChartChange } from "../../lib/chitti/chart-insights";
 import {
   chartValue,
@@ -77,18 +76,16 @@ export function ChangeExplanation({ unit }: { unit?: string }) {
           )}
         </div>
         {answer && (
-          <Collapsible
-            className="cx-explanation-sources"
-            defaultIsOpen={false}
-            trigger={
+          <details className="cx-disclosure cx-explanation-sources">
+            <summary>
               <MicroLabel>
                 Sources ·{" "}
                 {analysis.result?.verification
                   ? verificationLabel(analysis.result.verification.status)
                   : "Not verified"}
               </MicroLabel>
-            }
-          >
+            </summary>
+            <div className="cx-disclosure-body">
             <ul className="cx-link-list">
               {analysis.result?.citations.map((c) => (
                 <li key={c.id}>
@@ -101,7 +98,8 @@ export function ChangeExplanation({ unit }: { unit?: string }) {
             {!analysis.result?.citations.length && (
               <p className="cx-empty">No source records returned.</p>
             )}
-          </Collapsible>
+            </div>
+          </details>
         )}
         {detail.clarification}
         <div className="cx-explanation-actions">{actions}</div>

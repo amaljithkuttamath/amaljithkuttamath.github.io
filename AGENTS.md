@@ -54,19 +54,22 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   `planner.ts`, `verifier.ts`, `spec.ts`, `okf.ts`, `dashboard.ts`,
   `fastpath.ts` (the no-model direct answer — see below),
   `agent.ts` (facade re-exporting `session` + the split modules).
-- **UI layer** — `components/chitti/*` is one React workspace built on the
-  Astryx design system (`@astryxdesign/core`, pre-built CSS, no build plugin).
-  `components/chitti/ui/theme.ts` is the single runtime theme (dark + light
-  tokens); `ui/ChittiTheme.tsx` follows the site's `data-theme` toggle;
-  `ui/chitti.css` is the only stylesheet (layout glue on theme tokens, plus the
-  site-global and `--chart-N` bridge ECharts reads). Shared composites live in
-  `components/chitti/ui/` (`MessageTurn`, `RunStatus`/`StepList`,
-  `SourceCard`/`VerificationBadge`, `PanelHeader`/`MicroLabel`/`Stat`, icons);
-  use an Astryx component before hand-rolling a control. `workspace/agent.ts`
-  adapts the browser engine to AG-UI; `Surface.tsx` renders the registered A2UI
-  catalog. `lib/chitti/ui/dom.ts` (`mdToHtml`, the reviewed renderer for model
-  findings) and `ui/chart-option.ts` remain pure shared helpers. Component
-  tests run in jsdom with the browser-API stubs in `src/test/dom-setup.ts`.
+- **UI layer** — `components/chitti/*` is one chat-first React workspace on
+  our own small component set (`components/chitti/ui/controls.tsx`: native
+  `<button>`, `<select>`, `<dialog>`, `<details>`, radio/range inputs, a
+  tablist and a menu button) and ONE stylesheet, `ui/chitti.css`, whose token
+  block defines dark and light (following the site's `data-theme`), the
+  `--chart-1…8` palette and the site/ECharts globals (`--bg`, `--fg`, …). No
+  design-system dependency; no colours or font sizes outside that token block
+  (six sizes, none under 11px). Shared composites live in
+  `components/chitti/ui/` (`ThinkingBlock`, `ChartCard`, `ChartPanel`,
+  `Composer`, `Evidence`, `RunStatus`, `MessageTurn`) with pure helpers
+  `interpretation.ts` and `suggest.ts`; reuse them rather than hand-rolling.
+  `workspace/agent.ts` adapts the browser engine to AG-UI; `Surface.tsx`
+  renders the registered A2UI catalog. `lib/chitti/ui/dom.ts` (`mdToHtml`, the
+  reviewed renderer for model findings) and `ui/chart-option.ts` remain pure
+  shared helpers. Component tests run in jsdom with the few browser-API stubs
+  in `src/test/dom-setup.ts`.
 
 ## Conventions & gotchas
 
@@ -108,6 +111,13 @@ Three layers, kept acyclic (full map in `ARCHITECTURE.md`):
   catalogue order for the generated one. The scorer matches at the START of a
   word, never as a free substring ("male" must not find "female"). The cases
   live in `fastpath.test.ts`; add to that table when you change any of this.
+  **An ambiguous phrase becomes a choice, never a chart.** When `pickKbHit`
+  refuses and at least two series answer every word of the phrase
+  (`kbCandidates`), `runFastPath` returns `reason: 'ambiguous'` with those
+  candidates and fetches nothing; the UI offers them and charts only the one
+  the user picks (`runFastPath(plan, { chosen })`). A series the user picked is
+  their choice, so it skips the search — but it is still never picked FOR them.
+  The choice cases live in `fastpath-choice.test.ts`.
 - **The knowledge base has two tiers, and the tuned one wins.** `kb.ts` resolves
   a phrase to a series by navigating a hierarchy rather than scoring a flat list
   — a leaf inherits its ancestors' vocabulary, so "child mortality" reaches an

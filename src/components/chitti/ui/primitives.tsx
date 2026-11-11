@@ -1,33 +1,19 @@
 import type { ReactNode } from "react";
-import { Heading, type HeadingLevel } from "@astryxdesign/core/Heading";
-import { Text } from "@astryxdesign/core/Text";
-
-/**
- * Small composites Chitti repeats on every screen. Each is built from Astryx
- * primitives; `chitti.css` gives them their HUD treatment through tokens.
- */
 
 /** Mono, uppercase, tracked micro-label: metadata, eyebrows and units. */
 export function MicroLabel({
   children,
-  as = "span",
+  as: As = "span",
   className = "",
 }: {
   children: ReactNode;
   as?: "span" | "p" | "div";
   className?: string;
 }) {
-  return (
-    <Text as={as} type="supporting" className={`cx-micro ${className}`.trim()}>
-      {children}
-    </Text>
-  );
+  return <As className={`cx-micro ${className}`.trim()}>{children}</As>;
 }
 
-/**
- * A header for any panel: optional eyebrow, a heading, optional description
- * and an actions slot that wraps under the title on narrow screens.
- */
+/** A header for a page-level panel: eyebrow, heading, description, actions. */
 export function PanelHeader({
   eyebrow,
   title,
@@ -38,47 +24,44 @@ export function PanelHeader({
 }: {
   eyebrow?: ReactNode;
   title: ReactNode;
-  level?: HeadingLevel;
+  level?: 2 | 3;
   description?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {
+  const H = level === 2 ? "h2" : "h3";
   return (
     <header className={`cx-panel-header ${className}`.trim()}>
       <div className="cx-panel-header-text">
         {eyebrow && <MicroLabel>{eyebrow}</MicroLabel>}
-        <Heading level={level} className="cx-panel-title">
-          {title}
-        </Heading>
-        {description && (
-          <Text as="p" type="supporting" className="cx-panel-description">
-            {description}
-          </Text>
-        )}
+        <H className="cx-panel-title">{title}</H>
+        {description && <p className="cx-panel-description">{description}</p>}
       </div>
       {actions && <div className="cx-panel-actions">{actions}</div>}
     </header>
   );
 }
 
-/**
- * A labelled number: micro-label, tabular value, optional detail line. Used
- * for plotted changes, the explanation's evidence and dashboard summaries.
- */
+/** A labelled number: label, tabular value, optional detail line. */
 export function Stat({
   label,
   value,
   detail,
   tone = "neutral",
+  color,
 }: {
   label: ReactNode;
   value: ReactNode;
   detail?: ReactNode;
   tone?: "neutral" | "up" | "down";
+  color?: string;
 }) {
   return (
     <span className="cx-stat" data-tone={tone}>
-      <span className="cx-stat-label">{label}</span>
+      <span className="cx-stat-label">
+        {color && <span className="cx-swatch" style={{ background: color }} aria-hidden="true" />}
+        {label}
+      </span>
       <span className="cx-stat-value">{value}</span>
       {detail && <span className="cx-stat-detail">{detail}</span>}
     </span>

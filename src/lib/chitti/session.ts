@@ -1404,6 +1404,14 @@ export function createSession(cfg: ProviderConfig, opts?: SessionOptions): Chitt
         ev.detail = err?.message ?? String(err);
         updateTrace();
         return 'ERROR: ' + (err?.message ?? String(err));
+      } finally {
+        // Measured wall-clock time for the step (push → settle), so the
+        // thinking timeline can show a real per-step duration. A step that
+        // already measured itself (route/verify/llm receipts) keeps its own.
+        if (ev.durationMs === undefined) {
+          ev.durationMs = Math.max(0, Date.now() - ev.ts);
+          updateTrace();
+        }
       }
     }
 

@@ -23,22 +23,9 @@ import {
 import { refreshDashboard } from "../../lib/chitti/dashboards-agent";
 import type { ShareStateV1 } from "../../lib/chitti/share";
 import Chart from "./Chart";
-import { AlertDialog } from "@astryxdesign/core/AlertDialog";
-import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { ClickableCard } from "@astryxdesign/core/ClickableCard";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { FileInput } from "@astryxdesign/core/FileInput";
-import { Icon } from "@astryxdesign/core/Icon";
-import { MoreMenu } from "@astryxdesign/core/MoreMenu";
-import { ProgressBar } from "@astryxdesign/core/ProgressBar";
-import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
-import { Toolbar } from "@astryxdesign/core/Toolbar";
+import { Button, Confirm, Menu, Notice, TextField } from "./ui/controls";
 import { MicroLabel, PanelHeader } from "./ui/primitives";
-import { DashboardIcon, DownloadIcon, PinIcon, PlusIcon, RefreshIcon, ShareIcon } from "./ui/icons";
+import { BackIcon, DashboardIcon, DownloadIcon, MoreIcon, PinIcon, PlusIcon, RefreshIcon, ShareIcon } from "./ui/icons";
 import type { ChartSpec } from "../../lib/chitti/core";
 // Chart re-initialises ECharts whenever its `spec` identity changes, so the
 // titled spec is memoised per tile: an inline `{...tile.spec, title}` rebuilt
@@ -186,14 +173,12 @@ export default function Dashboards({
       setMessage("Clipboard unavailable. Export JSON instead.");
     }
   };
-  const [importFile, setImportFile] = useState<File | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [removing, setRemoving] = useState<
     { kind: "board"; id: string } | { kind: "tile"; id: string; title: string } | null
   >(null);
   const importDashboard = async (file: File | null) => {
-    setImportFile(file);
     if (!file) return;
     if (file.size > 1_000_000) {
       setMessage("Dashboard file is too large.");
@@ -206,7 +191,6 @@ export default function Dashboards({
     }
     if (save(prepareImportedDashboard(parsed, boards.map((b) => b.title))))
       setMessage("Dashboard imported.");
-    setImportFile(null);
   };
   const confirmRemoval = () => {
     if (!removing || !board) return;
@@ -241,7 +225,7 @@ export default function Dashboards({
             <Button
               variant="ghost"
               size="sm"
-              icon={<Icon icon="chevronLeft" />}
+              icon={<BackIcon />}
               label="All dashboards"
               onClick={() => {
                 setActive(null);
@@ -250,34 +234,22 @@ export default function Dashboards({
               }}
             />
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Icon icon="chevronLeft" />}
-              label="Back to analysis"
-              onClick={onClose}
-            />
+            <Button variant="ghost" size="sm" icon={<BackIcon />} label="Back to analysis" onClick={onClose} />
           )
         }
       />
       {message && (
-        <Text as="p" type="supporting" role="status" className="cx-dash-message">
+        <p className="cx-status-text" role="status">
           {message}
-        </Text>
+        </p>
       )}
       {pin && (
-        <Banner
-          status="info"
-          title={`Choose a dashboard for “${pin.spec?.title}”.`}
-          description="Pick an existing dashboard below, or name a new one."
-          collapsible={false}
-        />
+        <Notice title={`Choose a dashboard for “${pin.spec?.title}”.`}>Pick an existing dashboard below, or name a new one.</Notice>
       )}
       {!board ? (
         <>
           <div className="cx-dash-create">
             <form
-              className="cx-row cx-grow"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (!title.trim()) return;
@@ -287,133 +259,108 @@ export default function Dashboards({
                 setTitle("");
               }}
             >
-              <TextInput
-                label="New dashboard title"
-                isLabelHidden
-                placeholder="New dashboard title"
-                value={title}
-                onChange={setTitle}
-                width="100%"
-                containerClassName="cx-grow"
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                icon={<PlusIcon />}
-                label={pin ? "Create & pin" : "Create"}
-                isDisabled={!title.trim()}
-              />
+              <TextField className="cx-grow" label="New dashboard title" hideLabel placeholder="New dashboard title" value={title} onChange={setTitle} />
+              <Button type="submit" variant="primary" icon={<PlusIcon />} label={pin ? "Create & pin" : "Create"} disabled={!title.trim()} />
             </form>
-            <FileInput
-              label="Import dashboard"
-              isLabelHidden
-              placeholder="Import dashboard (.json)"
-              accept="application/json,.json"
-              value={importFile}
-              onChange={(file) => void importDashboard(file as File | null)}
-            />
+            <label className="cx-file">
+              <span className="cx-btn" data-size="sm" data-variant="quiet">
+                <span className="cx-btn-icon" aria-hidden="true">
+                  <DownloadIcon />
+                </span>
+                Import dashboard (.json)
+              </span>
+              <input
+                className="cx-sr-only"
+                type="file"
+                aria-label="Import dashboard"
+                accept="application/json,.json"
+                onChange={(e) => void importDashboard(e.target.files?.[0] || null)}
+              />
+            </label>
           </div>
           {boards.length ? (
             <div className="cx-board-grid">
               {boards.map((b) => (
-                <ClickableCard
+                <button
+                  type="button"
                   key={b.id}
                   className="cx-board-card"
-                  label={pin ? `Pin to ${b.title}` : `Open ${b.title}`}
+                  aria-label={pin ? `Pin to ${b.title}` : `Open ${b.title}`}
                   onClick={() => (pin ? pinTo(b) : setActive(b.id))}
-                  padding={4}
                 >
-                  <span className="cx-board-icon" aria-hidden="true">
+                  <span className="cx-btn-icon" aria-hidden="true">
                     <DashboardIcon />
                   </span>
                   <span className="cx-board-title">{b.title}</span>
                   <MicroLabel>
-                    {b.tiles.length} {b.tiles.length === 1 ? "chart" : "charts"} ·{" "}
-                    {new Date(b.updated).toLocaleDateString()}
+                    {b.tiles.length} {b.tiles.length === 1 ? "chart" : "charts"} · {new Date(b.updated).toLocaleDateString()}
                   </MicroLabel>
-                </ClickableCard>
+                </button>
               ))}
             </div>
           ) : (
-            <EmptyState
-              className="cx-empty-state"
-              icon={<DashboardIcon />}
-              title="No dashboards yet"
-              description="Pin a chart from any result, or import a dashboard file."
-              headingLevel={3}
-            />
+            <div className="cx-empty-state">
+              <h3>No dashboards yet</h3>
+              <p>Pin a chart from any result, or import a dashboard file.</p>
+            </div>
           )}
         </>
       ) : (
         <>
-          <Toolbar
-            label="Dashboard actions"
-            size="sm"
-            className="cx-toolbar"
-            startContent={<MicroLabel>{shared ? "Read-only snapshot" : "Pinned charts"}</MicroLabel>}
-            endContent={
-              <>
-                {shared ? (
-                  <Button
-                    variant="primary"
-                    label="Save a copy"
-                    onClick={() => {
-                      const imported = prepareImportedDashboard(
-                        shared,
-                        boards.map((b) => b.title),
-                      );
-                      if (save(imported)) {
-                        setShared(null);
-                        setActive(imported.id);
-                      }
-                    }}
-                  />
-                ) : busy ? (
-                  <Button label="Stop refresh" onClick={() => controller.current?.abort()} />
-                ) : (
-                  <Button
-                    variant="primary"
-                    icon={<RefreshIcon />}
-                    label="Refresh data"
-                    onClick={() => void refresh()}
-                  />
-                )}
-                <MoreMenu
-                  label="More dashboard actions"
-                  alignment="end"
-                  items={[
-                    { label: "Copy share link", icon: <ShareIcon />, onClick: () => void share() },
-                    {
-                      label: "Export JSON",
-                      icon: <DownloadIcon />,
-                      onClick: () =>
-                        download("chitti-dashboard.json", serializeDashboard(board), "application/json"),
-                    },
-                    ...(shared
-                      ? []
-                      : [
-                          { type: "divider" as const },
-                          {
-                            label: "Rename dashboard",
-                            isDisabled: busy,
-                            onClick: () => {
-                              setName(board.title);
-                              setRenaming(board.id);
-                            },
-                          },
-                          {
-                            label: "Delete dashboard",
-                            variant: "destructive" as const,
-                            isDisabled: busy,
-                            onClick: () => setRemoving({ kind: "board", id: board.id }),
-                          },
-                        ]),
-                  ]}
-                />
-              </>
-            }
-          />
-          {busy && <ProgressBar label="Refreshing source data" isLabelHidden isIndeterminate />}
+          <div className="cx-row" role="toolbar" aria-label="Dashboard actions">
+            <MicroLabel>{shared ? "Read-only snapshot" : "Pinned charts"}</MicroLabel>
+            <span className="cx-grow" />
+            {shared ? (
+              <Button
+                variant="primary"
+                label="Save a copy"
+                onClick={() => {
+                  const imported = prepareImportedDashboard(shared, boards.map((b) => b.title));
+                  if (save(imported)) {
+                    setShared(null);
+                    setActive(imported.id);
+                  }
+                }}
+              />
+            ) : busy ? (
+              <Button label="Stop refresh" onClick={() => controller.current?.abort()} />
+            ) : (
+              <Button variant="primary" icon={<RefreshIcon />} label="Refresh data" onClick={() => void refresh()} />
+            )}
+            <Menu
+              label="More dashboard actions"
+              trigger={<MoreIcon />}
+              align="end"
+              items={[
+                { label: "Copy share link", icon: <ShareIcon />, onSelect: () => void share() },
+                {
+                  label: "Export JSON",
+                  icon: <DownloadIcon />,
+                  onSelect: () => download("chitti-dashboard.json", serializeDashboard(board), "application/json"),
+                },
+                ...(shared
+                  ? []
+                  : [
+                      { type: "divider" as const },
+                      {
+                        label: "Rename dashboard",
+                        disabled: busy,
+                        onSelect: () => {
+                          setName(board.title);
+                          setRenaming(board.id);
+                        },
+                      },
+                      {
+                        label: "Delete dashboard",
+                        danger: true,
+                        disabled: busy,
+                        onSelect: () => setRemoving({ kind: "board", id: board.id }),
+                      },
+                    ]),
+              ]}
+            />
+          </div>
+          {busy && <div className="cx-progress" role="progressbar" aria-label="Refreshing source data" />}
           {renaming && (
             <form
               className="cx-row"
@@ -422,118 +369,94 @@ export default function Dashboards({
                 const value = name.trim();
                 if (!value) return;
                 const tile = board.tiles.find((t) => t.id === renaming);
-                if (save(tile ? renameTile(board, tile.id, value) : renameDashboard(board, value)))
-                  setRenaming(null);
+                if (save(tile ? renameTile(board, tile.id, value) : renameDashboard(board, value))) setRenaming(null);
               }}
             >
-              <TextInput
+              <TextField
+                className="cx-grow"
                 label={board.tiles.some((t) => t.id === renaming) ? "Chart title" : "Dashboard name"}
-                isLabelHidden
+                hideLabel
                 value={name}
                 onChange={setName}
-                hasAutoFocus
-                containerClassName="cx-grow"
-                width="100%"
+                autoFocus
               />
-              <Button type="submit" label="Save name" isDisabled={busy || !name.trim()} />
+              <Button type="submit" label="Save name" disabled={busy || !name.trim()} />
               <Button variant="ghost" label="Cancel" onClick={() => setRenaming(null)} />
             </form>
           )}
-          {shared && (
-            <Banner
-              status="info"
-              title="Shared snapshot"
-              description="Save a copy to edit or refresh it."
-              collapsible={false}
-            />
-          )}
+          {shared && <Notice title="Shared snapshot">Save a copy to edit or refresh it.</Notice>}
           {!board.tiles.length && (
-            <EmptyState
-              className="cx-empty-state"
-              icon={<PinIcon />}
-              title="No charts on this dashboard"
-              description="Open a result and choose Pin to dashboard from its export menu."
-              headingLevel={3}
-            />
+            <div className="cx-empty-state">
+              <h3>No charts on this dashboard</h3>
+              <p>Open a result and choose Pin to dashboard from its share menu.</p>
+            </div>
           )}
           <div className="cx-tile-grid">
             {board.tiles.map((tile, i) => (
-              <Card className="cx-tile" key={tile.id} padding={4}>
+              <article className="cx-tile" key={tile.id} aria-label={tile.title}>
                 <div className="cx-tile-head">
                   <MicroLabel>{tile.citations[0]?.sourceLabel || "Chart"}</MicroLabel>
                   {!shared && (
-                    <MoreMenu
+                    <Menu
                       label={`Chart actions: ${tile.title}`}
-                      size="sm"
-                      alignment="end"
-                      isDisabled={busy}
+                      trigger={<MoreIcon />}
+                      variant="ghost"
+                      align="end"
+                      disabled={busy}
                       items={[
-                        { label: "Move up", isDisabled: i === 0, onClick: () => save(moveTile(board, tile.id, "up")) },
-                        {
-                          label: "Move down",
-                          isDisabled: i === board.tiles.length - 1,
-                          onClick: () => save(moveTile(board, tile.id, "down")),
-                        },
+                        { label: "Move up", disabled: i === 0, onSelect: () => save(moveTile(board, tile.id, "up")) },
+                        { label: "Move down", disabled: i === board.tiles.length - 1, onSelect: () => save(moveTile(board, tile.id, "down")) },
                         {
                           label: "Rename chart",
-                          onClick: () => {
+                          onSelect: () => {
                             setName(tile.title);
                             setRenaming(tile.id);
                           },
                         },
                         { type: "divider" },
-                        {
-                          label: "Remove chart",
-                          variant: "destructive",
-                          onClick: () => setRemoving({ kind: "tile", id: tile.id, title: tile.title }),
-                        },
+                        { label: "Remove chart", danger: true, onSelect: () => setRemoving({ kind: "tile", id: tile.id, title: tile.title }) },
                       ]}
                     />
                   )}
                 </div>
                 {tile.stale && (
-                  <Banner
-                    status="warning"
-                    title={`Refresh failed: ${tile.stale.reason}`}
-                    description="Showing the previous data."
-                    collapsible={false}
-                  />
+                  <Notice tone="warn" title={`Refresh failed: ${tile.stale.reason}`}>
+                    Showing the previous data.
+                  </Notice>
                 )}
                 <TileChart spec={tile.spec} title={tile.title} />
-                <Text as="p" type="supporting">
-                  {tile.sourceNote}
-                </Text>
-                <Collapsible
-                  className="cx-tile-sources"
-                  defaultIsOpen={false}
-                  trigger={<MicroLabel>Sources &amp; data · {tile.rows.length} rows</MicroLabel>}
-                >
-                  <ul className="cx-link-list">
-                    {tile.citations.map((c) => (
-                      <li key={c.id}>
-                        {c.sourceLabel}: {c.indicatorName},{" "}
-                        {c.mirroredAt ? `snapshot ${c.mirroredAt}` : `fetched ${c.fetchedAt}`}
-                      </li>
-                    ))}
-                  </ul>
-                </Collapsible>
-              </Card>
+                <p className="cx-tile-note">{tile.sourceNote}</p>
+                <details className="cx-disclosure">
+                  <summary>
+                    <MicroLabel>Sources &amp; data · {tile.rows.length} rows</MicroLabel>
+                  </summary>
+                  <div className="cx-disclosure-body">
+                    <ul className="cx-link-list">
+                      {tile.citations.map((c) => (
+                        <li key={c.id}>
+                          {c.sourceLabel}: {c.indicatorName}, {c.mirroredAt ? `snapshot ${c.mirroredAt}` : `fetched ${c.fetchedAt}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </details>
+              </article>
             ))}
           </div>
-          <AlertDialog
-            isOpen={!!removing}
-            onOpenChange={(open) => {
-              if (!open) setRemoving(null);
-            }}
-            title={removing?.kind === "tile" ? "Remove this chart?" : "Delete this dashboard?"}
-            description={
-              removing?.kind === "tile"
-                ? `“${removing.title}” and its recorded rows will be removed from this dashboard.`
-                : "The dashboard and every pinned chart on it will be deleted from this browser."
-            }
-            actionLabel={removing?.kind === "tile" ? "Remove chart" : "Delete dashboard"}
-            onAction={confirmRemoval}
-          />
+          {removing && (
+            <Confirm
+              title={removing.kind === "tile" ? "Remove this chart?" : "Delete this dashboard?"}
+              description={
+                removing.kind === "tile"
+                  ? `“${removing.title}” and its recorded rows will be removed from this dashboard.`
+                  : "The dashboard and every pinned chart on it will be deleted from this browser."
+              }
+              actionLabel={removing.kind === "tile" ? "Remove chart" : "Delete dashboard"}
+              danger
+              onCancel={() => setRemoving(null)}
+              onAction={confirmRemoval}
+            />
+          )}
         </>
       )}
     </section>

@@ -18,10 +18,9 @@ import {
 } from "../../lib/chitti/workspace/catalog";
 import { CATALOG_ID } from "../../lib/chitti/workspace/model";
 import { cleanShareState } from "../../lib/chitti/share";
-import { Button } from "@astryxdesign/core/Button";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { Result, ResultInteraction, InlineComposer, CollapseChart } from "./Result";
 import { MicroLabel } from "./ui/primitives";
+import { Button, TextField } from "./ui/controls";
 
 const resultComponent = createComponentImplementation(
   resultApi,
@@ -75,21 +74,19 @@ const questionComponent = createComponentImplementation(
                 key={option}
                 size="sm"
                 label={option}
-                isDisabled={sent}
+                disabled={sent}
                 onClick={() => answer(option)}
               />
             ))}
         </div>
         <div className="cx-clarification-own">
-          <TextInput
+          <TextField
             label="Your answer"
-            size="sm"
             value={text}
-            isDisabled={sent}
+            disabled={sent}
             onChange={(value) => setText(value.slice(0, 2000))}
-            width="100%"
           />
-          <Button type="submit" size="sm" label="Continue" isDisabled={sent || !text.trim()} />
+          <Button type="submit" size="sm" label="Continue" disabled={sent || !text.trim()} />
         </div>
       </form>
     );

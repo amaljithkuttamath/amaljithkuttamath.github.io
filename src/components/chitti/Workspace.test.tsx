@@ -58,11 +58,17 @@ async function openExample(demo: (typeof DEMOS)[number]) {
   );
   await screen.findByRole("heading", { name: demo.question });
 }
-// Chart steering controls are Astryx selectors: open the listbox, pick an option.
+// Chart steering controls are native selects: choose the option by value.
 async function chooseOption(label: string, option: string) {
-  fireEvent.click(await screen.findByRole("combobox", { name: label }));
-  fireEvent.click(await screen.findByRole("option", { name: option }));
+  const select = (await screen.findByRole("combobox", { name: label })) as HTMLSelectElement;
+  expect([...select.options].map((o) => o.textContent)).toContain(option);
+  fireEvent.change(select, { target: { value: option } });
 }
+// The composer is the one text entry: a combobox (it offers type-ahead).
+const composerCount = () => {
+  expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+  return screen.getAllByRole("combobox", { name: "Ask a data question" }).length;
+};
 const contextChip = () =>
   within(screen.getByRole("group", { name: "Follow-up context" }));
 afterEach(() => {
@@ -83,7 +89,8 @@ it("locks a chat's model, switches only in a new chat, and restores its original
   const modelMenu = (id: string) => screen.getByRole("button", { name: `Choose model: ${id}` });
   fireEvent.click(modelMenu("original-model"));
   const next = providerMeta("openrouter").models[0];
-  fireEvent.click(screen.getByRole("menuitem", { name: (name) => name.startsWith(next.label) }));
+  // Model choices are radio items in the menu (one is checked).
+  fireEvent.click(screen.getByRole("menuitemradio", { name: (name) => name.startsWith(next.label) }));
   // The chat keeps its model until the user confirms a new chat.
   expect(modelMenu("original-model")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Start new chat" }));
@@ -132,6 +139,7 @@ it("keeps the previous artifact visible while a new AG-UI run appends a new repl
       citations: previous.state.citations,
       summary: "Result from the test source",
       trace: [],
+      alternatives: [],
     }),
   );
   await screen.findByRole("heading", { name: question });
@@ -161,7 +169,7 @@ it("keeps one composer, undoes and redoes a branch, and clears redo when the use
   await openExample(demo);
   await chooseOption("Focus chart", demo.state.spec!.series[0].name);
   await screen.findByRole("button", { name: "Undo" });
-  expect(screen.getAllByRole("textbox")).toHaveLength(1);
+  expect(composerCount()).toBe(1);
   expect(screen.queryByLabelText("Ask about this view")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await screen.findByRole("heading", { name: demo.question });
@@ -356,7 +364,7 @@ it("starts with the user's question and lets them deliberately open evidence", a
     screen.getByRole("heading", { name: "What do you want to find out?" }),
   ).toBeTruthy();
   expect(screen.queryByText("Chart rendered")).toBeNull();
-  expect(screen.getAllByRole("textbox")).toHaveLength(1);
+  expect(composerCount()).toBe(1);
   fireEvent.click(
     within(screen.getByRole("region", { name: "Recorded analyses" })).getByRole(
       "button",

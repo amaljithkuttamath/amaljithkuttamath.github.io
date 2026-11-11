@@ -1,6 +1,7 @@
 import { cleanShareState, type ShareStateV1 } from "../share";
 import type { TraceEvent } from "../receipts";
-import type { ProviderConfig } from "../providers";
+import type { ProviderConfig, ProviderId } from "../providers";
+import type { FastPathPlan, SeriesCandidate } from "../fastpath";
 import type { SessionOptions } from "../session";
 export type Phase =
   | "idle"
@@ -21,6 +22,18 @@ export interface Analysis {
   files: Record<string, string>;
   cost?: number;
   model?: string;
+  // Which provider ran the model steps (never the key). Set only on agent turns.
+  provider?: ProviderId;
+  // Wall-clock bounds of the run, stamped by the adapter. `endedAt` is set on
+  // the first terminal snapshot; absent while running. Never estimated.
+  startedAt?: number;
+  endedAt?: number;
+  // A direct (no-model) answer: the parsed plan and the series it used, so the
+  // chart's tokens can re-run the same lookup with an edited plan, plus the
+  // other series the phrase fits (offered as "switch to", never charted).
+  direct?: { plan: FastPathPlan; series: SeriesCandidate; alternatives: SeriesCandidate[] };
+  // An ambiguous direct lookup: nothing was charted; these are the choices.
+  choice?: { phrase: string; plan: FastPathPlan; candidates: SeriesCandidate[] };
 }
 export interface Question {
   id: string;

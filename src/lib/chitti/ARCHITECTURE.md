@@ -63,15 +63,16 @@ Unchanged, already-scoped modules: `providers.ts`, `countries.ts`, `chart-link.t
 | --- | --- |
 | `workspace/agent.ts` | `AbstractAgent` adapter: runs, state snapshots, text, A2UI custom events, cancellation, and input replies. Provider credentials remain private configuration. |
 | `workspace/model.ts` | Whitelisted result surfaces, clarification payloads, analysis state and safe source URLs. |
-| `components/chitti/Workspace.tsx` | Astryx shell: `SideNav` (a `MobileNav` drawer on phones), transcript of `MessageTurn`s, per-result `Toolbar` (undo/redo/steer/steps, share-and-export menu), live `RunStatus`, and the docked `ChatComposer` with its removable context chip. Branch navigation, private per-chat configuration, sharing and exports. |
+| `components/chitti/Workspace.tsx` | The chat shell: sidebar (a rail beside an open chart panel, a `<dialog>` drawer on phones), the thread of `MessageTurn`s (user bubble → thinking block → finding → chart card → sources → check badge → follow-up chips), the in-flight request, the docked `Composer`, and the right-hand `ChartPanel`. Branch navigation, private per-chat configuration, sharing and exports. |
 | `workspace/conversation.ts` | Pure parent-path and branch-head navigation; no UI or protocol state. |
-| `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog. Replies dispatch A2UI actions into the waiting agent tool. |
-| `components/chitti/Result.tsx` | Finding (`mdToHtml`), one view control bar, chart/data/source tabs (Astryx `TabList`, `Table` + `Pagination`, `SourceCard`s) and honest verification status (`VerificationBadge`). |
+| `components/chitti/Surface.tsx` | Official A2UI processor and React renderer, with a two-component catalog (result, clarification). Replies dispatch A2UI actions into the waiting agent tool. |
+| `components/chitti/Result.tsx` | Finding (`mdToHtml`), the `ChartCard` and the numbered source lines. |
 | `components/chitti/Chart.tsx` | Lazy bundled ECharts, theme/resize lifecycle and cleanup. No CDN runtime. |
-| `components/chitti/Settings.tsx` | "Settings" `Dialog`: provider, model, source scope and optional per-tab key storage. |
-| `components/chitti/ModelPicker.tsx` | Composer model `DropdownMenu`, connection entry points and an `AlertDialog` for the explicit new-chat transition when a chat's model is locked. |
+| `components/chitti/Settings.tsx` | "Settings" dialog: provider, model, source scope and optional per-tab key storage. |
+| `components/chitti/ModelPicker.tsx` | Composer model menu (radio items), connection entry points and the explicit new-chat confirmation when a chat's model is locked. |
 | `components/chitti/Dashboards.tsx` | "Dashboards" view on the existing local dashboard schema: pinning, imports, exports, shared snapshots and refresh. |
-| `components/chitti/ui/*` | `theme.ts` (the one Astryx theme, dark + light tokens), `ChittiTheme.tsx` (follows the site `data-theme` toggle), `chitti.css` (the only stylesheet: layout glue on tokens, site-global and `--chart-N` bridge), and the shared composites the screens reuse. |
+| `components/chitti/ui/controls.tsx` | The control set, on native elements: `Button`/`IconButton` (disabled = `aria-disabled`, still focusable), `Chip`, `Token`, `Segmented` (radio inputs), `Tabs` (tablist, arrow keys), `Menu` (menu button), `Dialog`/`Confirm` (`<dialog>`), `TextField`, `Select`, `Checkbox`, `Notice`. |
+| `components/chitti/ui/*` (composites) | `ThinkingBlock` (the turn's trace as a disclosure), `ChartCard` (tokens, switch row, tabs, view tools, provenance line), `ChartPanel`, `Composer` (type-ahead + preview line), `Evidence` (`CheckBadge`, `SourceLines`, `SourceCard`), `RunStatus`, `MessageTurn`; pure helpers `interpretation.ts` (tokens, provenance, panel stats, follow-ups) and `suggest.ts` (offline type-ahead and the send preview). `chitti.css` is the only stylesheet; its single token block defines both themes and the site/ECharts globals. |
 | `ui/dom.ts`, `ui/chart-option.ts` | Retained pure formatting/chart helpers. The old DOM bootstrap and mutable UI globals are retired. |
 
 `/apps/chitti/catalog.json` publishes the renderer's actual catalog. AG-UI is
@@ -132,6 +133,26 @@ original chart; other series remain visible. A highlight identifies the measured
 change, not proof of a causal mechanism. The prompt requests a short sourced
 answer and explicitly separates observation from cause. Inline explanations are
 session-only and are not added to the existing result's share/export payload.
+
+A direct (no-model) answer records its plan and the series it used
+(`Analysis.direct`). The chart card's tokens — remove a country, add one, change
+the years — and the "Switch to" row re-run that lookup through
+`ChittiAgent.useDirect(plan, series)` → `runFastPath(plan, { chosen })`: no
+search, no model, no key, and a failure never escalates to a model. An
+ambiguous phrase (`pickKbHit` → `'ambiguous'`) now ends the run with
+`Analysis.choice` (the fast path's `reason: 'ambiguous'` miss, up to
+`MAX_CANDIDATES` series that answer every word of the phrase): the reply offers
+the candidates and draws NO chart until the user picks one. A tuned series that
+wins a tie is charted as before, with the tied series disclosed as switches.
+The thinking block renders only what the trace carries: per-step
+`durationMs` (measured at settle time in `session.ts` dispatch and in the fast
+path), the model's `reasoning` events as plain text, and the verifier's verdict;
+the run's own `startedAt`/`endedAt` give the total time.
+
+The UI is our own small component set on native elements (no design-system
+dependency). The composer's type-ahead and preview are offline and pure; a
+series picked from the list is the user's choice and is looked up directly
+while its phrase stays in the message.
 
 There is still no durable background agent or remote workspace service.
 

@@ -15,21 +15,35 @@ import {
 } from "../../lib/chitti/chart-insights";
 import { ChangeExplanation, ExplanationContext } from "./ChangeExplanation";
 import { chartAriaLabel } from "../../lib/chitti/a11y";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Segmented } from "./ui/controls";
 import { MicroLabel, Stat } from "./ui/primitives";
 export default function Chart({
   spec,
   onSelect,
   onAsk,
+  showTitle = true,
+  showChanges = true,
+  fit: fitProp,
+  onFitChange,
+  zoom = true,
 }: {
   spec: ChartSpec;
+  showTitle?: boolean;
+  /** The "largest plotted step" cards (the markers stay on the chart). */
+  showChanges?: boolean;
+  /** Controlled scale: when given, the caller renders the Fit/From zero control. */
+  fit?: boolean;
+  onFitChange?: (fit: boolean) => void;
+  /** ECharts' own zoom slider; off where the caller supplies a year range. */
+  zoom?: boolean;
   onSelect?: (name: string) => void;
   onAsk?: (question: string, change: ChartChange) => void;
 }) {
   const unit = chartUnit(spec);
   const explanation = useContext(ExplanationContext);
   const selected = explanation?.change;
-  const [fit, setFit] = useState(true);
+  const [ownFit, setFit] = useState(true);
+  const fit = fitProp ?? ownFit;
   const domain = useMemo(() => lineDomain(spec), [spec]);
   const highlights = useMemo(() => highlightChanges(spec), [spec]);
   const height = useMemo(() => barLayout(spec).height, [spec]);
@@ -43,15 +57,21 @@ export default function Chart({
     let disposed = false,
       chart: import("echarts/core").EChartsType | undefined;
     const resize = new ResizeObserver(() => chart?.resize());
-    const theme = new MutationObserver(() =>
-      chart?.setOption(buildOption(spec, fit, selected), true),
-    );
+    const option = () => {
+      const o = buildOption(spec, fit, selected) as Record<string, unknown>;
+      if (!zoom && Array.isArray(o.dataZoom) && o.dataZoom.length) {
+        o.dataZoom = [];
+        o.grid = { ...(o.grid as object), bottom: 8 };
+      }
+      return o;
+    };
+    const theme = new MutationObserver(() => chart?.setOption(option(), true));
     setFailed(false);
     void import("./chart-runtime")
       .then(({ init }) => {
         if (disposed || !host.current) return;
         chart = init(host.current);
-        chart.setOption(buildOption(spec, fit, selected));
+        chart.setOption(option());
         chart.on("click", (params) => {
           const data = params.data as { changeYear?: number } | undefined;
           const year =
@@ -98,32 +118,45 @@ export default function Chart({
       theme.disconnect();
       chart?.dispose();
     };
-  }, [spec, fit, selected]);
+  }, [spec, fit, selected, zoom]);
   return (
     <figure className="cx-chart">
-      <figcaption className="cx-chart-head">
+      <figcaption className={showTitle ? "cx-chart-head" : "cx-sr-only"}>
         <span className="cx-chart-title">{spec.title}</span>
         {unit && <MicroLabel>{unit}</MicroLabel>}
       </figcaption>
-      {domain && (
+      {domain && onFitChange === undefined && (
         <div className="cx-scale">
           <MicroLabel>
             {fit
               ? `Axis ${chartValue(domain.min, domain.digits)}–${chartValue(domain.max, domain.digits)}`
               : "Axis includes zero"}
           </MicroLabel>
-          <SegmentedControl
+          <Segmented
             label="Line chart scale"
-            size="sm"
             value={fit ? "fit" : "zero"}
             onChange={(value) => setFit(value === "fit")}
-          >
-            <SegmentedControlItem value="fit" label="Fit values" />
-            <SegmentedControlItem value="zero" label="From zero" />
-          </SegmentedControl>
+            options={[
+              { value: "fit", label: "Fit values" },
+              { value: "zero", label: "From zero" },
+            ]}
+          />
         </div>
       )}
-      {highlights.length > 0 && (
+      {failed ? (
+        <p role="status" className="cx-empty">
+          Chart unavailable. The values are still available in Data.
+        </p>
+      ) : (
+        <div
+          ref={host}
+          className="cx-chart-canvas"
+          style={height ? { height } : undefined}
+          role="img"
+          aria-label={`${chartAriaLabel(spec)}${selected ? ` Highlighted ${selected.series}, ${selected.from[0]} to ${selected.to[0]}, ${chartValue(selected.from[1])} to ${chartValue(selected.to[1])}.` : ""}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}
+        />
+      )}
+      {showChanges && highlights.length > 0 && (
         <div className="cx-changes" aria-label="Plotted changes" role="group">
           <MicroLabel as="p" className="cx-changes-caption">Largest plotted step per series</MicroLabel>
           <div className="cx-changes-list">
@@ -155,19 +188,6 @@ export default function Chart({
         </div>
       )}
       <ChangeExplanation unit={unit} />
-      {failed ? (
-        <p role="status" className="cx-empty">
-          Chart unavailable. The values are still available in Data.
-        </p>
-      ) : (
-        <div
-          ref={host}
-          className="cx-chart-canvas"
-          style={height ? { height } : undefined}
-          role="img"
-          aria-label={`${chartAriaLabel(spec)}${selected ? ` Highlighted ${selected.series}, ${selected.from[0]} to ${selected.to[0]}, ${chartValue(selected.from[1])} to ${chartValue(selected.to[1])}.` : ""}${domain && fit ? ` Fitted axis ${chartValue(domain.min, domain.digits)} to ${chartValue(domain.max, domain.digits)}.` : ""}`}
-        />
-      )}
     </figure>
   );
 }

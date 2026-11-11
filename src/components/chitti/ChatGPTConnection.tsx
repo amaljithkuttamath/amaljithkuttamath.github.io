@@ -5,11 +5,7 @@ import {
   type ChatGPTAccount,
 } from "../../lib/chitti/chatgpt";
 import type { ModelOption } from "../../lib/chitti/providers";
-import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { Selector } from "@astryxdesign/core/Selector";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Text } from "@astryxdesign/core/Text";
+import { Button, Select } from "./ui/controls";
 import { MicroLabel } from "./ui/primitives";
 type Status = {
   accounts: ChatGPTAccount[];
@@ -166,22 +162,22 @@ export default function ChatGPTConnection(props: {
     <div className="cx-chatgpt" data-connected={connected || undefined}>
       {connected && (
         <div className="cx-account">
-          <StatusDot variant="success" label="Connected" />
+          <span className="cx-model-dot" data-on="" role="img" aria-label="Connected" />
           <span className="cx-account-name">{accountLabel}</span>
           <MicroLabel>Connected</MicroLabel>
         </div>
       )}
       {(!connected || status !== "Connected. Uses your ChatGPT plan.") && (
-        <Text as="p" type="supporting" role="status">
+        <p className="cx-status-text" role="status">
           {status}
-        </Text>
+        </p>
       )}
       {(!connected || authURL) && (
         <div className="cx-row">
           {online && !authURL && (
             <Button
               label="Continue with ChatGPT"
-              isDisabled={busy}
+              disabled={busy}
               onClick={() => void signIn()}
             />
           )}
@@ -196,7 +192,7 @@ export default function ChatGPTConnection(props: {
               <Button
                 label="Restart sign-in"
                 variant="ghost"
-                isDisabled={busy}
+                disabled={busy}
                 onClick={() => void signIn()}
               />
             </>
@@ -204,26 +200,23 @@ export default function ChatGPTConnection(props: {
           {!online && (
             <Button
               label="Check connection"
-              isDisabled={busy}
+              disabled={busy}
               onClick={() => void check()}
             />
           )}
         </div>
       )}
       {!online && !busy && (
-        <Collapsible
-          className="cx-settings-section"
-          defaultIsOpen
-          trigger={<span className="cx-settings-trigger">Connect this computer</span>}
-        >
-          <div className="cx-settings-group">
-            <Text as="p" type="supporting">In your local site checkout, run:</Text>
+        <details className="cx-disclosure" open>
+          <summary>Connect this computer</summary>
+          <div className="cx-disclosure-body">
+            <p className="cx-status-text">In your local site checkout, run:</p>
             <pre className="cx-pre">
               <code>{"npm install\nnpm run chitti:connect"}</code>
             </pre>
-            <Text as="p" type="supporting">
+            <p className="cx-status-text">
               If this browser blocks the connection, run the local interface:
-            </Text>
+            </p>
             <pre className="cx-pre">
               <code>
                 npm run build &amp;&amp; npm run preview -- --host 127.0.0.1 --port 4323
@@ -246,38 +239,30 @@ export default function ChatGPTConnection(props: {
               </a>
             </p>
           </div>
-        </Collapsible>
+        </details>
       )}
       {online && (
-        <Collapsible
-          className="cx-settings-section"
-          defaultIsOpen={false}
-          trigger={
-            <span className="cx-settings-trigger">
-              {connected ? "Account and usage" : "Connection options"}
-            </span>
-          }
-        >
-          <div className="cx-settings-group">
+        <details className="cx-disclosure">
+          <summary>{connected ? "Account and usage" : "Connection options"}</summary>
+          <div className="cx-disclosure-body">
             {accounts.length > 0 && (
-              <Selector
+              <Select
                 label="ChatGPT account"
                 placeholder="Choose an account"
-                isDisabled={busy || locked}
+                disabled={busy || locked}
                 value={account || ""}
                 onChange={(id) => void select(id)}
                 options={accounts.map((a) => ({
                   value: a.id,
                   label: `${a.label}${a.connected ? "" : " · signed out"}`,
                 }))}
-                width="100%"
               />
             )}
             <div className="cx-row">
               <Button
                 size="sm"
                 label="Check connection"
-                isDisabled={busy}
+                disabled={busy}
                 onClick={() => void check()}
               />
               {connected && (
@@ -285,14 +270,14 @@ export default function ChatGPTConnection(props: {
                   <Button
                     size="sm"
                     label="Reconnect"
-                    isDisabled={busy}
+                    disabled={busy}
                     onClick={() => void signIn()}
                   />
                   <Button
                     size="sm"
                     variant="ghost"
                     label="Disconnect"
-                    isDisabled={busy}
+                    disabled={busy}
                     onClick={() => void disconnect()}
                   />
                 </>
@@ -302,12 +287,12 @@ export default function ChatGPTConnection(props: {
                   size="sm"
                   variant="ghost"
                   label="Add account"
-                  isDisabled={busy}
+                  disabled={busy}
                   onClick={() => void signIn(true)}
                 />
               )}
             </div>
-            <Text as="p" type="supporting">
+            <p className="cx-status-text">
               <a
                 href="https://chatgpt.com/settings/usage"
                 target="_blank"
@@ -316,9 +301,9 @@ export default function ChatGPTConnection(props: {
                 ChatGPT plan usage
               </a>
               . Credentials stay on this computer. No automatic API billing.
-            </Text>
+            </p>
           </div>
-        </Collapsible>
+        </details>
       )}
     </div>
   );

@@ -1,10 +1,8 @@
 import type { SVGProps } from "react";
 
 /**
- * Line glyphs for actions Astryx's semantic icon set does not name (undo,
- * pin, share…). Same 24px grid, 1.5 stroke and currentColor as the built-in
- * icons, so they sit beside them; pass them to `<Icon icon={…} />` or a
- * button's `icon` prop. Decorative: the control around them carries the name.
+ * Chitti's line glyphs: one 24px grid, 1.5 stroke, currentColor. Decorative:
+ * the control around them carries the accessible name.
  */
 type Glyph = (props: SVGProps<SVGSVGElement>) => React.JSX.Element;
 const glyph =
@@ -46,3 +44,13 @@ export const SendIcon = glyph("M5 12h14", "m13 6 6 6-6 6");
 export const ChartIcon = glyph("M3 3v18h18", "m7 15 4-4 3 3 5-6");
 export const ContextIcon = glyph("M4 5h16v10H4Z", "M8 19h8", "M12 15v4");
 export const RefreshIcon = glyph("M21 12a9 9 0 1 1-2.64-6.36L21 8", "M21 3v5h-5");
+export const ExpandIcon = glyph("M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7");
+export const CloseIcon = glyph("M6 6l12 12", "M18 6 6 18");
+export const MenuIcon = glyph("M4 7h16", "M4 12h16", "M4 17h16");
+export const BackIcon = glyph("m15 18-6-6 6-6");
+export const StopIcon = glyph("M7 7h10v10H7Z");
+export const UpIcon = glyph("M12 19V5", "m6 11 6-6 6 6");
+export const FullscreenIcon = glyph("M8 3H3v5", "M16 3h5v5", "M8 21H3v-5", "M16 21h5v-5");
+export const SearchIcon = glyph("M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z", "m20 20-3.5-3.5");
+export const CheckIcon = glyph("m5 12 4.5 4.5L19 7");
+export const MoreIcon = glyph("M5 12h.01", "M12 12h.01", "M19 12h.01");

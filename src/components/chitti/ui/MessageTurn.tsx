@@ -1,44 +1,42 @@
 import type { ReactNode, Ref } from "react";
-import { Heading } from "@astryxdesign/core/Heading";
-import { MicroLabel } from "./primitives";
 
 /**
- * One conversation turn: the question as asked (a heading, so the transcript
- * has an outline), an optional toolbar row, then Chitti's reply. Used for the
- * active turn and for every earlier turn in the branch.
+ * One conversation turn: the user's message as a bubble (its text is a
+ * heading, so the transcript has an outline), then Chitti's reply. Used for
+ * the active turn, earlier turns and the in-flight request.
  */
 export function MessageTurn({
   who,
   question,
-  aside,
-  toolbar,
+  meta,
   children,
   isCurrent = false,
   turnRef,
+  label,
 }: {
-  who: ReactNode;
+  /** Shown above the bubble when it is not simply "You" (a recorded example…). */
+  who?: ReactNode;
   question: string;
-  aside?: ReactNode;
-  toolbar?: ReactNode;
+  meta?: ReactNode;
   children?: ReactNode;
   isCurrent?: boolean;
   turnRef?: Ref<HTMLElement>;
+  label?: string;
 }) {
   return (
-    <article className="cx-turn" data-current={isCurrent || undefined} ref={turnRef}>
-      <div className="cx-turn-ask">
-        <MicroLabel>{who}</MicroLabel>
-        <Heading level={2} className="cx-turn-question">
-          {question}
-        </Heading>
-        {aside}
+    <article className="cx-turn" data-current={isCurrent || undefined} ref={turnRef} aria-label={label}>
+      <div className="cx-ask">
+        {who && <span className="cx-micro">{who}</span>}
+        <div className="cx-you">
+          <h2>{question}</h2>
+        </div>
+        {meta && <div className="cx-ask-meta">{meta}</div>}
       </div>
-      {toolbar}
-      <div className="cx-turn-reply">
-        <MicroLabel className="cx-turn-author">
-          <span className="cx-author-mark" aria-hidden="true" />
+      <div className="cx-reply">
+        <div className="cx-who">
+          <span className="cx-glyph" aria-hidden="true" />
           Chitti
-        </MicroLabel>
+        </div>
         {children}
       </div>
     </article>

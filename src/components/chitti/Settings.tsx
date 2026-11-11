@@ -1,14 +1,6 @@
 import ChatGPTConnection from "./ChatGPTConnection";
 import { useEffect, useRef, useState } from "react";
-import { Banner } from "@astryxdesign/core/Banner";
-import { Button } from "@astryxdesign/core/Button";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { IconButton } from "@astryxdesign/core/IconButton";
-import { Selector } from "@astryxdesign/core/Selector";
-import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { Button, Checkbox, Dialog, IconButton, Notice, Select, TextField } from "./ui/controls";
 import {
   PROVIDERS,
   fetchModels,
@@ -95,201 +87,143 @@ export default function Settings({
   );
   return (
     <Dialog
-      isOpen
-      onOpenChange={(open) => {
-        if (!open) onClose();
+      title="Settings"
+      description="Model, key and data sources for new chats"
+      onClose={onClose}
+      as="form"
+      onSubmit={() => {
+        if (canSave) onSave(draft, remember);
       }}
-      purpose="form"
-      width={540}
-      maxHeight="88dvh"
-      padding={0}
-    >
-      <form
-        className="cx-settings"
-        aria-label="Settings"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (canSave) onSave(draft, remember);
-        }}
-      >
-        <DialogHeader
-          title="Settings"
-          subtitle="Model, key and data sources for new chats"
-          onOpenChange={(open) => {
-            if (!open) onClose();
-          }}
-          hasDivider
-          className="cx-settings-header"
-        />
-        <div className="cx-settings-body">
-          {locked && (
-            <Banner
-              status="info"
-              title="This chat keeps its model"
-              description="Start a new chat to switch model or provider."
-              collapsible={false}
-            />
-          )}
-          <Selector
-            label="Provider"
-            isDisabled={locked}
-            value={draft.provider}
-            onChange={(id) => changeProvider(id as ProviderId)}
-            options={PROVIDERS.map((p) => ({ value: p.id, label: p.label }))}
-            width="100%"
-          />
-          {draft.provider === "chatgpt" && (
-            <ChatGPTConnection
-              account={draft.chatgptAccount}
-              locked={locked}
-              onAccount={(id) => {
-                if (!locked) setDraft((d) => ({ ...d, chatgptAccount: id }));
-              }}
-              onModels={(list) => {
-                setModels(list);
-                if (!locked)
-                  setDraft((d) => ({
-                    ...d,
-                    model: list.some((m) => m.id === d.model)
-                      ? d.model
-                      : list[0]?.id || "",
-                  }));
-              }}
-            />
-          )}
-          {draft.provider !== "chatgpt" && (
-            <>
-              <TextInput
-                type="password"
-                label="API key"
-                description="Kept in this browser tab only. Never written into results, links or exports."
-                isDisabled={locked}
-                value={draft.apiKey}
-                autoComplete="off"
-                onChange={(apiKey) => setDraft({ ...draft, apiKey })}
-                width="100%"
-              />
-              <CheckboxInput
-                label="Remember in this tab until it closes"
-                isDisabled={locked}
-                value={remember}
-                onChange={setRemember}
-              />
-            </>
-          )}
-          <div className="cx-settings-model">
-            {draft.provider === "chatgpt" ? (
-              <Selector
-                label="Model"
-                isDisabled={locked || !models.length}
-                placeholder={draft.model || "Connect to load your models"}
-                value={models.some((m) => m.id === draft.model) ? draft.model : ""}
-                onChange={(model) => setDraft({ ...draft, model })}
-                options={models.map((m) => ({ value: m.id, label: m.label }))}
-                width="100%"
-              />
-            ) : (
-              <>
-                <TextInput
-                  label="Model"
-                  isDisabled={locked}
-                  value={draft.model}
-                  onChange={(model) =>
-                    setDraft({
-                      ...draft,
-                      model,
-                      requestReasoning:
-                        models.find((m) => m.id === model)?.reasoning === true,
-                    })
-                  }
-                  width="100%"
-                  {...({ list: "cx-models" } as object)}
-                />
-                <datalist id="cx-models">
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </datalist>
-              </>
-            )}
-            <IconButton
-              label="Refresh models"
-              tooltip="Refresh models"
-              icon={<RefreshIcon />}
-              isDisabled={locked}
-              onClick={() => void load()}
-            />
-          </div>
-          {status && (
-            <Text as="p" type="supporting" role="status">
-              {status}
-            </Text>
-          )}
-          <Collapsible
-            className="cx-settings-section"
-            defaultIsOpen={false}
-            trigger={
-              <span className="cx-settings-trigger">
-                Data sources <MicroLabel>{draft.sources.length} selected</MicroLabel>
-              </span>
-            }
-          >
-            <div className="cx-settings-group">
-              <Text as="p" type="supporting">
-                Results include links to the source records.
-              </Text>
-              {SOURCES.map((source) => (
-                <CheckboxInput
-                  key={source.id}
-                  label={source.label}
-                  isDisabled={locked}
-                  value={draft.sources.includes(source.id)}
-                  onChange={(checked) =>
-                    setDraft({
-                      ...draft,
-                      sources: checked
-                        ? [...draft.sources, source.id]
-                        : draft.sources.filter((id) => id !== source.id),
-                    })
-                  }
-                />
-              ))}
-            </div>
-          </Collapsible>
-          <Collapsible
-            className="cx-settings-section"
-            defaultIsOpen={false}
-            trigger={<span className="cx-settings-trigger">Advanced</span>}
-          >
-            <div className="cx-settings-group">
-              <CheckboxInput
-                label="Allow nested model calls (uses this provider)"
-                isDisabled={locked}
-                value={draft.rlm}
-                onChange={(rlm) => setDraft({ ...draft, rlm })}
-              />
-              <CheckboxInput
-                label="Use Jev for dataset routing and evidence review"
-                description="Jev sends search candidates and analysis evidence to the hosted relay. Credentials and conversation history are excluded."
-                isDisabled={locked || !jevBase}
-                value={!!draft.jev}
-                onChange={(checked) =>
-                  setDraft({
-                    ...draft,
-                    jev: checked && jevBase ? { base: jevBase } : undefined,
-                  })
-                }
-              />
-            </div>
-          </Collapsible>
-        </div>
-        <footer className="cx-settings-footer">
+      className="cx-settings"
+      footer={
+        <>
           <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button type="submit" variant="primary" label="Save settings" isDisabled={!canSave} />
-        </footer>
-      </form>
+          <Button type="submit" variant="primary" label="Save settings" disabled={!canSave} />
+        </>
+      }
+    >
+      {locked && (
+        <Notice title="This chat keeps its model">Start a new chat to switch model or provider.</Notice>
+      )}
+      <Select
+        label="Provider"
+        disabled={locked}
+        value={draft.provider}
+        onChange={(id) => changeProvider(id as ProviderId)}
+        options={PROVIDERS.map((p) => ({ value: p.id, label: p.label }))}
+      />
+      {draft.provider === "chatgpt" && (
+        <ChatGPTConnection
+          account={draft.chatgptAccount}
+          locked={locked}
+          onAccount={(id) => {
+            if (!locked) setDraft((d) => ({ ...d, chatgptAccount: id }));
+          }}
+          onModels={(list) => {
+            setModels(list);
+            if (!locked)
+              setDraft((d) => ({
+                ...d,
+                model: list.some((m) => m.id === d.model) ? d.model : list[0]?.id || "",
+              }));
+          }}
+        />
+      )}
+      {draft.provider !== "chatgpt" && (
+        <>
+          <TextField
+            type="password"
+            label="API key"
+            description="Kept in this browser tab only. Never written into results, links or exports."
+            disabled={locked}
+            value={draft.apiKey}
+            autoComplete="off"
+            onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+          />
+          <Checkbox label="Remember in this tab until it closes" disabled={locked} checked={remember} onChange={setRemember} />
+        </>
+      )}
+      <div className="cx-settings-model">
+        {draft.provider === "chatgpt" ? (
+          <Select
+            label="Model"
+            disabled={locked || !models.length}
+            placeholder={draft.model || "Connect to load your models"}
+            value={models.some((m) => m.id === draft.model) ? draft.model : ""}
+            onChange={(model) => setDraft({ ...draft, model })}
+            options={models.map((m) => ({ value: m.id, label: m.label }))}
+          />
+        ) : (
+          <>
+            <TextField
+              label="Model"
+              disabled={locked}
+              value={draft.model}
+              list="cx-models"
+              onChange={(model) =>
+                setDraft({
+                  ...draft,
+                  model,
+                  requestReasoning: models.find((m) => m.id === model)?.reasoning === true,
+                })
+              }
+            />
+            <datalist id="cx-models">
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </datalist>
+          </>
+        )}
+        <IconButton label="Refresh models" icon={<RefreshIcon />} disabled={locked} onClick={() => void load()} />
+      </div>
+      {status && (
+        <p className="cx-status-text" role="status">
+          {status}
+        </p>
+      )}
+      <details className="cx-disclosure">
+        <summary>
+          Data sources <MicroLabel>{draft.sources.length} selected</MicroLabel>
+        </summary>
+        <div className="cx-disclosure-body">
+          <p className="cx-status-text">Results include links to the source records.</p>
+          {SOURCES.map((source) => (
+            <Checkbox
+              key={source.id}
+              label={source.label}
+              disabled={locked}
+              checked={draft.sources.includes(source.id)}
+              onChange={(checked) =>
+                setDraft({
+                  ...draft,
+                  sources: checked ? [...draft.sources, source.id] : draft.sources.filter((id) => id !== source.id),
+                })
+              }
+            />
+          ))}
+        </div>
+      </details>
+      <details className="cx-disclosure">
+        <summary>Advanced</summary>
+        <div className="cx-disclosure-body">
+          <Checkbox
+            label="Allow nested model calls (uses this provider)"
+            disabled={locked}
+            checked={draft.rlm}
+            onChange={(rlm) => setDraft({ ...draft, rlm })}
+          />
+          <Checkbox
+            label="Use Jev for dataset routing and evidence review"
+            description="Jev sends search candidates and analysis evidence to the hosted relay. Credentials and conversation history are excluded."
+            disabled={locked || !jevBase}
+            checked={!!draft.jev}
+            onChange={(checked) => setDraft({ ...draft, jev: checked && jevBase ? { base: jevBase } : undefined })}
+          />
+        </div>
+      </details>
     </Dialog>
   );
 }
