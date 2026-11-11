@@ -116,11 +116,9 @@ export interface ProviderMeta {
 // These slugs are only used as a last-resort fallback. Do NOT trust them to
 // be current; the live fetch will replace them within a second of page load.
 export const PROVIDERS: ProviderMeta[] = [
-  {
-    id: 'chatgpt', label: 'ChatGPT subscription', models: [], defaultModel: '',
-    keyUrl: 'https://chatgpt.com/settings/usage', keyLabel: 'Manage ChatGPT access',
-    note: 'Sign in through the local companion to use your ChatGPT plan.',
-  },
+  // OpenRouter is listed first and is the default: it needs only a pasted key,
+  // while the ChatGPT option needs a helper program installed on the visitor's
+  // computer before its sign-in button even appears.
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -151,6 +149,11 @@ export const PROVIDERS: ProviderMeta[] = [
     keyLabel: 'Get a free OpenRouter key',
     note: 'Free models load dynamically. nemotron-3-ultra-550b is the most reliable free model we’ve tested for this tool-calling pipeline — smaller free models can be unpredictable at multi-step tool use.',
     freeNote: true,
+  },
+  {
+    id: 'chatgpt', label: 'ChatGPT subscription', models: [], defaultModel: '',
+    keyUrl: 'https://chatgpt.com/settings/usage', keyLabel: 'Manage ChatGPT access',
+    note: 'Sign in through the local companion to use your ChatGPT plan.',
   },
   {
     id: 'openai',

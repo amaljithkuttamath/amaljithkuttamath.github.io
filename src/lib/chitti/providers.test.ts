@@ -803,3 +803,13 @@ describe('complete — transport hardening (retry / fallback / timeout / malform
     expect(err.message).toMatch(/OpenRouter rejected this API key/);
   });
 });
+
+describe('provider order', () => {
+  it('lists and defaults to a provider that needs no install', async () => {
+    const { PROVIDERS, providerMeta } = await import('./providers');
+    expect(PROVIDERS[0].id).toBe('openrouter');
+    expect(PROVIDERS.map((p) => p.id)).toContain('chatgpt');
+    // The unknown-id fallback follows the first entry.
+    expect(providerMeta('nope' as never).id).toBe('openrouter');
+  });
+});

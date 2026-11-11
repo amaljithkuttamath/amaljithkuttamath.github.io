@@ -46,7 +46,7 @@ import {
 } from "./ui/icons";
 
 function initialConfig(): Config {
-  let provider: ProviderId = "chatgpt",
+  let provider: ProviderId = "openrouter",
     apiKey = "",
     model = "",
     chatgptAccount: string | undefined;
