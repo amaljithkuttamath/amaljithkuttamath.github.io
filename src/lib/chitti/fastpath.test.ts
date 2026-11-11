@@ -362,8 +362,8 @@ describe('buildFastSummary — each change carries its own years', () => {
       rows([['India', 'IND', 1960, 45], ['India', 'IND', 2023, 72], ['South Sudan', 'SSD', 2011, 55], ['South Sudan', 'SSD', 2019, 58]]),
       'Life expectancy'
     );
-    expect(s).toContain('India 45 → 72 (+60%), 1960–2023');
-    expect(s).toContain('South Sudan 55 → 58 (+5.45%), 2011–2019');
+    expect(s).toContain('India from 45 to 72 (+60%) between 1960 and 2023');
+    expect(s).toContain('South Sudan from 55 to 58 (+5.5%) between 2011 and 2019');
   });
   it('keeps the single shared heading when every country spans the same years', () => {
     const s = buildFastSummary(
@@ -371,6 +371,56 @@ describe('buildFastSummary — each change carries its own years', () => {
       rows([['India', 'IND', 1960, 45], ['India', 'IND', 2023, 72], ['South Sudan', 'SSD', 1960, 40], ['South Sudan', 'SSD', 2023, 58]]),
       'Life expectancy'
     );
-    expect(s.startsWith('Life expectancy, 1960–2023: ')).toBe(true);
+    expect(s).toBe(
+      'Life expectancy rose in both countries between 1960 and 2023: India from 45 to 72 (+60%) and South Sudan from 40 to 58 (+45%).'
+    );
+  });
+});
+
+describe('buildFastSummary — reads as a sentence, and every word is computed', () => {
+  const plan: FastPathPlan = {
+    indicatorQuery: 'life expectancy', countries: ['JPN', 'ITA', 'ESP'], countryNames: ['Japan', 'Italy', 'Spain'],
+    chartType: 'line',
+  };
+  const three = (it: number, es: number) =>
+    rows([
+      ['Spain', 'ESP', 1960, 69], ['Spain', 'ESP', 2023, es],
+      ['Japan', 'JPN', 1960, 68], ['Japan', 'JPN', 2023, 84],
+      ['Italy', 'ITA', 1960, 70], ['Italy', 'ITA', 2023, it],
+    ]);
+
+  it('says "rose in all three" only when all three rose, in the order they were asked', () => {
+    expect(buildFastSummary(plan, three(83, 83.5), 'Life expectancy (years)')).toBe(
+      'Life expectancy (years) rose in all three countries between 1960 and 2023: Japan from 68 to 84 (+23.5%), Italy from 70 to 83 (+18.6%) and Spain from 69 to 83.5 (+21%).'
+    );
+  });
+
+  it('drops the summary verb when directions differ, and states each one', () => {
+    const s = buildFastSummary(plan, three(66, 69), 'Life expectancy (years)');
+    expect(s).toBe(
+      'Life expectancy (years), 1960 to 2023: Japan rose from 68 to 84 (+23.5%); Italy fell from 70 to 66 (−5.7%); Spain was unchanged at 69.'
+    );
+    expect(s).not.toMatch(/all three|both/);
+  });
+
+  it('quotes a percent series in percentage points, not a percent of a percent', () => {
+    const s = buildFastSummary(
+      { ...plan, countries: ['ESP'], countryNames: ['Spain'] },
+      rows([['Spain', 'ESP', 2000, 4], ['Spain', 'ESP', 2020, 5]]),
+      'Unemployment, total (% of total labor force)'
+    );
+    expect(s).toBe(
+      'Unemployment, total (% of total labor force) in Spain rose from 4 in 2000 to 5 in 2020 (+1 percentage point).'
+    );
+  });
+
+  it('names a single-year value and the extremes plainly', () => {
+    const bar = { ...plan, chartType: 'bar' as const };
+    expect(buildFastSummary(bar, rows([['Japan', 'JPN', 2019, 84.4]]), 'Life expectancy (years)')).toBe(
+      'Life expectancy (years) in Japan was 84.4 in 2019.'
+    );
+    expect(
+      buildFastSummary(bar, rows([['Japan', 'JPN', 2019, 84.4], ['Italy', 'ITA', 2019, 83.5]]), 'Life expectancy (years)')
+    ).toBe('Life expectancy (years) in 2019: Japan is highest at 84.4 and Italy lowest at 83.5.');
   });
 });

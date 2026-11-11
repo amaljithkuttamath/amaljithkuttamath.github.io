@@ -604,40 +604,85 @@ const num = (n: number): string =>
 // A factual sentence derived ENTIRELY from the fetched rows — first and last
 // values, the change between them. It states what the data says and stops.
 // It is deliberately not "insight": no model ran, so nothing here may read as
-// interpretation the app cannot back up. Pure; exported for its unit table.
+// interpretation the app cannot back up.
+//
+// It is written to be READ, not parsed: "X rose in all three countries between
+// 1960 and 2023: Japan from 67.86 to 83.68 (+23.3%), …" rather than a row of
+// "67.86 → 83.68" fragments. Every word is still computed — "rose in all
+// three" is a count of the signs of the changes, and when the directions
+// differ the sentence says so per country instead of generalising. Countries
+// appear in the order the question named them. Pure; exported for its unit
+// table.
+const COUNT_WORDS = ['', '', 'both', 'all three', 'all four', 'all five', 'all six'];
+
+// How one endpoint-to-endpoint change is quoted. A series measured in percent
+// reports the difference in percentage points: "+25%" for a move from 4% to 5%
+// reads as 25 points to most people, which is the wrong number.
+function changeNote(s: { absChange: number; pctChange: number | null }, percentUnit: boolean): string {
+  const sign = (n: number) => (n >= 0 ? '+' : '−') + num(Math.abs(n));
+  if (percentUnit) return ` (${sign(s.absChange)} percentage ${num(Math.abs(s.absChange)) === '1' ? 'point' : 'points'})`;
+  if (s.pctChange === null) return '';
+  return ` (${sign(Math.round(s.pctChange * 10) / 10)}%)`;
+}
+
+// "A", "A and B", "A, B and C".
+function listOf(items: string[]): string {
+  if (items.length < 3) return items.join(' and ');
+  return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+}
+
 export function buildFastSummary(plan: FastPathPlan, rows: DataRow[], label: string): string {
   if (plan.chartType === 'bar') {
     const sorted = [...rows].sort((a, b) => (b.value as number) - (a.value as number));
     if (!sorted.length) return '';
     const year = sorted[0].year;
     if (sorted.length === 1) {
-      return `${sorted[0].country}: ${num(sorted[0].value as number)} (${label}, ${year}).`;
+      return `${label} in ${sorted[0].country} was ${num(sorted[0].value as number)} in ${year}.`;
     }
     const hi = sorted[0];
     const lo = sorted[sorted.length - 1];
     return (
-      `In ${year}, ${hi.country} is highest at ${num(hi.value as number)} and ` +
-      `${lo.country} lowest at ${num(lo.value as number)} (${label}).`
+      `${label} in ${year}: ${hi.country} is highest at ${num(hi.value as number)} and ` +
+      `${lo.country} lowest at ${num(lo.value as number)}.`
     );
   }
-  const stats = growthStats(rows).filter((s) => s.firstYear !== s.lastYear);
+  const order = (iso3: string) => {
+    const at = plan.countries.indexOf(iso3);
+    return at === -1 ? plan.countries.length : at;
+  };
+  const stats = growthStats(rows)
+    .filter((s) => s.firstYear !== s.lastYear)
+    .sort((a, b) => order(a.iso3) - order(b.iso3));
   if (!stats.length) return '';
+  const percentUnit = /%/.test(label);
+  const dirOf = (s: { absChange: number }) => (s.absChange > 0 ? 'rose' : s.absChange < 0 ? 'fell' : 'was unchanged');
   if (stats.length === 1) {
     const s = stats[0];
-    const dir = s.absChange >= 0 ? 'rose' : 'fell';
-    const pct = s.pctChange === null ? '' : ` (${s.pctChange >= 0 ? '+' : ''}${num(s.pctChange)}%)`;
-    return `${s.country}: ${label} ${dir} from ${num(s.firstValue)} in ${s.firstYear} to ${num(s.lastValue)} in ${s.lastYear}${pct}.`;
+    if (s.absChange === 0)
+      return `${label} in ${s.country} was ${num(s.firstValue)} in both ${s.firstYear} and ${s.lastYear}.`;
+    return `${label} in ${s.country} ${dirOf(s)} from ${num(s.firstValue)} in ${s.firstYear} to ${num(s.lastValue)} in ${s.lastYear}${changeNote(s, percentUnit)}.`;
   }
-  // Several countries: report the span and each endpoint compactly, without
-  // ranking or editorialising.
-  const parts = stats.map(
-    (s) => `${s.country} ${num(s.firstValue)} → ${num(s.lastValue)}${s.pctChange === null ? '' : ` (${s.pctChange >= 0 ? '+' : ''}${num(s.pctChange)}%)`}`
-  );
-  // One shared span in the heading only when every country actually has it.
+  // One shared span is stated once only when every country actually has it.
   // Otherwise each country carries its own years: stamping India's 1960–2023
   // on South Sudan's 2011–2019 change misdates the number.
   const first = stats[0];
   const shared = stats.every((s) => s.firstYear === first.firstYear && s.lastYear === first.lastYear);
-  if (shared) return `${label}, ${first.firstYear}–${first.lastYear}: ${parts.join('; ')}.`;
-  return `${label}: ${stats.map((s, i) => `${parts[i]}, ${s.firstYear}–${s.lastYear}`).join('; ')}.`;
+  const sameDir = stats.every((s) => dirOf(s) === dirOf(first)) && first.absChange !== 0;
+  const years = (s: (typeof stats)[number]) => (shared ? '' : ` between ${s.firstYear} and ${s.lastYear}`);
+  if (sameDir) {
+    const all = COUNT_WORDS[stats.length] ?? `all ${stats.length}`;
+    const parts = stats.map(
+      (s) => `${s.country} from ${num(s.firstValue)} to ${num(s.lastValue)}${changeNote(s, percentUnit)}${years(s)}`
+    );
+    const span = shared ? ` between ${first.firstYear} and ${first.lastYear}` : '';
+    return `${label} ${dirOf(first)} in ${all} countries${span}: ${listOf(parts)}.`;
+  }
+  // Directions differ: no summary verb, each country states its own.
+  const parts = stats.map((s) =>
+    s.absChange === 0
+      ? `${s.country} was unchanged at ${num(s.firstValue)}${years(s)}`
+      : `${s.country} ${dirOf(s)} from ${num(s.firstValue)} to ${num(s.lastValue)}${changeNote(s, percentUnit)}${years(s)}`
+  );
+  const span = shared ? `, ${first.firstYear} to ${first.lastYear}` : '';
+  return `${label}${span}: ${parts.join('; ')}.`;
 }

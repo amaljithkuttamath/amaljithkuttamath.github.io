@@ -646,6 +646,7 @@ export default function Workspace() {
         variant="ghost"
         size="sm"
         label="Steer"
+        title="Steer"
         icon={<SteerIcon />}
         disabled={running}
         onClick={() => {
@@ -655,7 +656,7 @@ export default function Workspace() {
       />
       <span className="cx-tools-end">
         {active.origin === "direct" && active.phase === "done" && (
-          <Button size="sm" variant="ghost" label="Analyze with model" icon={<SparkIcon />} disabled={running} onClick={() => void submit(active.question, true)} />
+          <Button size="sm" variant="ghost" label="Analyze with model" title="Analyze with model" icon={<SparkIcon />} disabled={running} onClick={() => void submit(active.question, true)} />
         )}
         {active.result && <Menu label="Share & export" icon={<ShareIcon />} items={exportItems(active.result, active)} align="end" placement="above" variant="ghost" />}
       </span>

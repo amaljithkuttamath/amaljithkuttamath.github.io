@@ -540,6 +540,21 @@ button.cx-token:hover { background: var(--cx-raise); }
 .cx-next { display: flex; gap: 7px; flex-wrap: wrap; }
 .cx-tools { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .cx-tools-end { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+/* In a narrow thread (chart panel open, or a phone) the labelled buttons no
+   longer fit on one line and the right-hand group dropped to a second,
+   right-aligned row. There the actions become icon buttons on a single row;
+   the label stays in the accessibility tree and as the tooltip. */
+.cx-app[data-panel] .cx-tools { flex-wrap: nowrap; }
+.cx-app[data-panel] .cx-tools-end { flex-wrap: nowrap; }
+.cx-app[data-panel] .cx-tools .cx-btn-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.cx-app[data-panel] .cx-tools .cx-btn { position: relative; min-width: 32px; justify-content: center; }
+@media (max-width: 700px) {
+  .cx-tools, .cx-tools-end { flex-wrap: nowrap; }
+  .cx-tools .cx-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .cx-tools .cx-btn { position: relative; min-width: 32px; justify-content: center; }
+}
 
 /* Choice (ambiguity) */
 .cx-choice { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--cx-warn) 40%, transparent); border-radius: var(--r-md); background: var(--cx-warn-wash); }
