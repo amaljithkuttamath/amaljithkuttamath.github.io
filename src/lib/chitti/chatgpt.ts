@@ -32,7 +32,7 @@ export async function companion<T>(
         "ChatGPT request timed out. Check the companion and retry.",
       );
     throw new Error(
-      "Start the Chitti companion, then reconnect. Allow local network access if your browser asks.",
+      "The helper app on this computer did not answer. Start it, then check again. If your browser asks to allow local network access, allow it.",
     );
   }
   const result = await response.json();

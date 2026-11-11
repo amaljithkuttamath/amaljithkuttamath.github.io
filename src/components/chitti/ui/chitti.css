@@ -671,6 +671,13 @@ button.cx-token:hover { background: var(--cx-raise); }
 .cx-chatgpt { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--cx-hair); border-radius: var(--r-md); }
 .cx-account { display: flex; align-items: center; gap: 8px; font-size: var(--fs-3); }
 .cx-status-text { font-size: var(--fs-2); color: var(--cx-dim); }
+.cx-helper { display: flex; flex-direction: column; gap: 10px; }
+.cx-helper h3 { font-size: var(--fs-3); font-weight: 600; }
+.cx-helper > p { font-size: var(--fs-2); color: var(--cx-dim); }
+.cx-steps { margin: 0; padding-left: 20px; list-style: decimal; display: flex; flex-direction: column; gap: 10px; font-size: var(--fs-2); }
+.cx-steps li > span { display: block; margin-bottom: 6px; }
+.cx-steps li > .cx-status-text { margin-top: 8px; }
+.cx-helper-alt { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 /* Dashboards */
 .cx-dashboards { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 1100px; margin: 0 auto; padding: 22px 24px 40px; }

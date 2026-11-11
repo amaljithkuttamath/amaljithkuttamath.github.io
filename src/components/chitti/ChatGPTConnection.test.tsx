@@ -25,6 +25,19 @@ it("explains how to start the companion without asking for an API key", async ()
   expect(screen.getByText(/npm run chitti:connect/)).toBeTruthy();
   expect(screen.queryByLabelText("API key")).toBeNull();
 });
+it("says why a helper is needed and offers the no-install route", async () => {
+  vi.mocked(companion).mockRejectedValue(new Error("The helper app on this computer did not answer."));
+  const onUseApiKey = vi.fn();
+  render(<ChatGPTConnection onAccount={vi.fn()} onModels={vi.fn()} onUseApiKey={onUseApiKey} />);
+  await screen.findByRole("heading", { name: "This option needs a helper app on your computer" });
+  expect(screen.getByText(/nowhere safe to keep a ChatGPT login/)).toBeTruthy();
+  expect(screen.getByText(/git clone/)).toBeTruthy();
+  // One clear next action, and no sign-in button until the helper answers.
+  expect(screen.getAllByRole("button", { name: "Check connection" })).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Continue with ChatGPT" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Use an API key instead" }));
+  expect(onUseApiKey).toHaveBeenCalledTimes(1);
+});
 it("selects a connected account and its catalog without moving credentials into the UI", async () => {
   vi.mocked(companion).mockResolvedValue({
     accounts: [{ id: "issued", label: "Account · issued", connected: true }],

@@ -116,6 +116,7 @@ export default function Settings({
         <ChatGPTConnection
           account={draft.chatgptAccount}
           locked={locked}
+          onUseApiKey={locked ? undefined : () => changeProvider("openrouter")}
           onAccount={(id) => {
             if (!locked) setDraft((d) => ({ ...d, chatgptAccount: id }));
           }}
