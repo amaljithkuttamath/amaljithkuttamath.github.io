@@ -30,7 +30,7 @@ it("says why a helper is needed and offers the no-install route", async () => {
   const onUseApiKey = vi.fn();
   render(<ChatGPTConnection onAccount={vi.fn()} onModels={vi.fn()} onUseApiKey={onUseApiKey} />);
   await screen.findByRole("heading", { name: "This option needs a helper app on your computer" });
-  expect(screen.getByText(/nowhere safe to keep a ChatGPT login/)).toBeTruthy();
+  expect(screen.getByText(/does not hand a login to a website/)).toBeTruthy();
   expect(screen.getByText(/git clone/)).toBeTruthy();
   // One clear next action, and no sign-in button until the helper answers.
   expect(screen.getAllByRole("button", { name: "Check connection" })).toHaveLength(1);

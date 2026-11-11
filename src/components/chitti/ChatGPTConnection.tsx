@@ -207,11 +207,11 @@ export default function ChatGPTConnection(props: {
         <section className="cx-helper" aria-labelledby="cx-helper-title">
           <h3 id="cx-helper-title">This option needs a helper app on your computer</h3>
           <p>
-            Chitti is a website with no server of its own, so it has nowhere safe
-            to keep a ChatGPT login. A small helper program that you run yourself
-            keeps the login on this computer and passes Chitti's requests to
-            ChatGPT. It is not running yet, or your browser blocked Chitti from
-            reaching it.
+            ChatGPT completes this kind of sign-in only with a program running
+            on your own computer; it does not hand a login to a website. So a
+            small helper that you run yourself receives the login, keeps it on
+            this computer, and passes Chitti's requests to ChatGPT. It is not
+            running yet, or your browser blocked Chitti from reaching it.
           </p>
           <ol className="cx-steps">
             <li>
