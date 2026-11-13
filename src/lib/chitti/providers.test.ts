@@ -176,6 +176,15 @@ describe('fetchModels — live fetch with graceful fallback', () => {
     expect(models[0].free).toBe(true);
   });
 
+  it('includes models from later Anthropic pages and uses their display names', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 'first' }], has_more: true, last_id: 'first' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [null, { id: 'second', display_name: 'Second model' }], has_more: false }) });
+    vi.stubGlobal('fetch', fetch);
+    expect(await fetchModels('anthropic', 'fixture-pagination')).toContainEqual({ id: 'second', name: 'Second model', label: 'Second model' });
+    expect(new URL(fetch.mock.calls[1][0]).searchParams.get('after_id')).toBe('first');
+  });
+
   it('falls back to the curated list when the fetch fails (offline sandbox)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     // A key the previous test did not populate, so we exercise the fallback.

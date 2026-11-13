@@ -36,20 +36,30 @@ export default function Chart({
   select.current = onSelect;
   const host = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const instance = useRef<import("echarts/core").EChartsType | null>(null);
+  const view = useRef({ spec, fit, selected });
+  useEffect(() => {
+    view.current = { spec, fit, selected };
+    instance.current?.setOption(buildOption(spec, fit, selected), true);
+  }, [spec, fit, selected]);
   useEffect(() => {
     let disposed = false,
       chart: import("echarts/core").EChartsType | undefined;
     const resize = new ResizeObserver(() => chart?.resize());
-    const theme = new MutationObserver(() =>
-      chart?.setOption(buildOption(spec, fit, selected), true),
-    );
+    const redraw = () => {
+      const { spec, fit, selected } = view.current;
+      chart?.setOption(buildOption(spec, fit, selected), true);
+    };
+    const theme = new MutationObserver(redraw);
     setFailed(false);
     void import("./chart-runtime")
       .then(({ init }) => {
         if (disposed || !host.current) return;
         chart = init(host.current);
-        chart.setOption(buildOption(spec, fit, selected));
+        instance.current = chart;
+        redraw();
         chart.on("click", (params) => {
+          const { spec } = view.current;
           const data = params.data as { changeYear?: number } | undefined;
           const year =
             params.componentType === "markPoint"
@@ -85,8 +95,9 @@ export default function Chart({
       resize.disconnect();
       theme.disconnect();
       chart?.dispose();
+      instance.current = null;
     };
-  }, [spec, fit, selected]);
+  }, []);
   return (
     <figure className="cw-chart">
       <figcaption>

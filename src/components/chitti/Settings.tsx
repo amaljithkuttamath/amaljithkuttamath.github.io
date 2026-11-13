@@ -2,7 +2,7 @@ import ChatGPTConnection from "./ChatGPTConnection";
 import { useEffect, useRef, useState } from "react";
 import {
   PROVIDERS,
-  fetchModels,
+  loadModelCatalog,
   providerMeta,
   type ProviderId,
   type ModelOption,
@@ -17,11 +17,13 @@ const jevBase = classificationBase(
 export default function Settings({
   value,
   locked,
+  newChat,
   onSave,
   onClose,
 }: {
   value: Config;
   locked: boolean;
+  newChat: boolean;
   onSave: (value: Config, remember: boolean) => void;
   onClose: () => void;
 }) {
@@ -58,18 +60,19 @@ export default function Settings({
     setModels(providerMeta(id).models);
     setStatus("");
   };
-  const load = async () => {
+  const load = async (refresh = true) => {
     const version = ++loading.current;
     setStatus("Reading model catalog…");
     try {
-      const list = await fetchModels(
+      const { models: list, fallback } = await loadModelCatalog(
         draft.provider,
         draft.apiKey,
         draft.chatgptAccount,
+        refresh,
       );
       if (version === loading.current) {
         setModels(list);
-        setStatus(`${list.length} models available.`);
+        setStatus(fallback ? "Live catalog unavailable. Retry to load more models." : `${list.length} models available.`);
       }
     } catch {
       if (version === loading.current)
@@ -92,14 +95,14 @@ export default function Settings({
         }}
       >
         <header>
-          <h2>Model</h2>
+          <h2>Model connection</h2>
           <button type="button" onClick={onClose} aria-label="Close settings">
             ×
           </button>
         </header>
-        {locked && (
+        {newChat && (
           <p className="cw-notice">
-            This analysis keeps its model. Start a new analysis to switch.
+            Applying this connection starts a new chat. Your conversation stays in Recent chats.
           </p>
         )}
         <label>
@@ -144,9 +147,13 @@ export default function Settings({
                   type="password"
                   value={draft.apiKey}
                   autoComplete="off"
-                  onChange={(e) =>
-                    setDraft({ ...draft, apiKey: e.target.value })
-                  }
+                  onChange={(e) => {
+                    loading.current++;
+                    setModels(providerMeta(draft.provider).models);
+                    setStatus("");
+                    setDraft({ ...draft, apiKey: e.target.value });
+                  }}
+                  onBlur={() => { if (draft.apiKey.trim()) void load(false); }}
                 />
               </label>
               <label className="cw-check">
@@ -182,37 +189,34 @@ export default function Settings({
                   ))}
                 </select>
               ) : (
-                <>
-                  <input
-                    list="cw-models"
-                    value={draft.model}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        model: e.target.value,
-                        requestReasoning:
-                          models.find((m) => m.id === e.target.value)
-                            ?.reasoning === true,
-                      })
-                    }
-                  />
-                  <datalist id="cw-models">
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </datalist>
-                </>
+                <input
+                  list="cw-models"
+                  value={draft.model}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      model: e.target.value,
+                      requestReasoning:
+                        models.find((m) => m.id === e.target.value)
+                          ?.reasoning === true,
+                    })
+                  }
+                />
               )}
             </label>
+            <datalist id="cw-models">
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </datalist>
             <button
               type="button"
-              aria-label="Refresh models"
-              title="Refresh models"
+              aria-label="Load models"
               onClick={() => void load()}
             >
-              ↻
+              Load models
             </button>
           </div>
           {status && <p role="status">{status}</p>}
@@ -283,6 +287,7 @@ export default function Settings({
             type="submit"
             disabled={
               locked ||
+              (draft.provider !== "chatgpt" && !draft.apiKey.trim()) ||
               !draft.sources.length ||
               !draft.model.trim() ||
               (draft.provider === "chatgpt" &&
@@ -290,7 +295,7 @@ export default function Settings({
                   !models.some((m) => m.id === draft.model)))
             }
           >
-            Use model
+            {newChat ? "Start new chat" : "Use model"}
           </button>
         </footer>
       </form>

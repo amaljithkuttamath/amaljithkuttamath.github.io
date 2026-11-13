@@ -262,10 +262,14 @@ const MODELS_CACHE = new Map<string, { at: number; models: ModelOption[] }>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 
 export async function fetchModels(provider: ProviderId, apiKey?: string, account?: string): Promise<ModelOption[]> {
-  if (provider === 'chatgpt') return chatGPTModels(account);
-  const cacheKey = provider + ':' + (apiKey || '');
+  return (await loadModelCatalog(provider, apiKey, account)).models;
+}
+
+export async function loadModelCatalog(provider: ProviderId, apiKey?: string, account?: string, refresh = false): Promise<{ models: ModelOption[]; fallback: boolean }> {
+  if (provider === 'chatgpt') return { models: await chatGPTModels(account), fallback: false };
+  const cacheKey = provider === 'openrouter' ? provider : provider + ':' + (apiKey || '');
   const cached = MODELS_CACHE.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
+  if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return { models: cached.models, fallback: false };
 
   let models: ModelOption[] = [];
   try {
@@ -282,11 +286,11 @@ export async function fetchModels(provider: ProviderId, apiKey?: string, account
 
   // Fall back to the hardcoded list if the live fetch returned nothing.
   if (!models.length) {
-    models = providerMeta(provider).models;
+    return { models: cached?.models ?? providerMeta(provider).models, fallback: true };
   }
 
   MODELS_CACHE.set(cacheKey, { at: Date.now(), models });
-  return models;
+  return { models, fallback: false };
 }
 
 // ── OpenRouter catalog: pure, offline-testable parsing ─────────────────
@@ -344,7 +348,7 @@ export function parseOpenRouterCatalog(json: unknown): ModelOption[] {
 
   const opts: ModelOption[] = [];
   for (const m of raw) {
-    const id = typeof m.id === 'string' ? m.id : '';
+    const id = typeof m?.id === 'string' ? m.id : '';
     if (!id) continue;
     // Skip preview/deprecated models (prefixed with ~ on OpenRouter).
     if (id.startsWith('~')) continue;
@@ -420,26 +424,34 @@ async function fetchOpenAIModels(apiKey: string): Promise<ModelOption[]> {
 
 // Anthropic — needs the user's key. Every returned model supports tools.
 async function fetchAnthropicModels(apiKey: string): Promise<ModelOption[]> {
-  const resp = await fetchWithTimeout(
-    'https://api.anthropic.com/v1/models',
-    {
+  const opts: ModelOption[] = [];
+  const cursors = new Set<string>();
+  const url = new URL('https://api.anthropic.com/v1/models');
+  url.searchParams.set('limit', '1000');
+  for (;;) {
+    const resp = await fetchWithTimeout(url.href, {
       headers: {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-    },
-    CATALOG_TIMEOUT_MS
-  );
-  if (!resp.ok) return [];
-  const j = await resp.json();
-  const raw = (j.data || []) as any[];
-  const opts: ModelOption[] = raw.map((m: any) => ({
-    id: m.id,
-    label: (m.display_name ?? m.id) + ' (' + (m.id) + ')',
-  }));
-  opts.sort((a, b) => b.id.localeCompare(a.id));
-  return opts;
+    }, CATALOG_TIMEOUT_MS);
+    if (!resp.ok) throw new Error('Could not read the Anthropic model catalog.');
+    const page = await resp.json();
+    if (!Array.isArray(page?.data)) throw new Error('Invalid Anthropic model catalog.');
+    for (const model of page.data) {
+      if (typeof model?.id !== 'string' || !model.id) continue;
+      const name = typeof model.display_name === 'string' ? model.display_name : model.id;
+      opts.push({ id: model.id, label: name, name });
+    }
+    if (!page.has_more) return opts;
+    const cursor = page.last_id;
+    if (typeof cursor !== 'string' || !cursor || cursors.has(cursor)) {
+      throw new Error('Invalid Anthropic model catalog cursor.');
+    }
+    cursors.add(cursor);
+    url.searchParams.set('after_id', cursor);
+  }
 }
 
 // Approximate USD per 1M tokens (input / output), for the rough cost meter.

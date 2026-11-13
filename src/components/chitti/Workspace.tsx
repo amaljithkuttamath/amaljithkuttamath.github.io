@@ -7,7 +7,8 @@ import {
   type ChartChange,
 } from "../../lib/chitti/chart-insights";
 import { describeChange } from "../../lib/chitti/workspace/changes";
-import type { ViewEdit } from "../../lib/chitti/workspace/steering";
+import { chartTypes, type ViewEdit } from "../../lib/chitti/workspace/steering";
+import type { ChartSpec } from "../../lib/chitti/core";
 import { ChittiAgent } from "../../lib/chitti/workspace/agent";
 import { DEMOS } from "../../lib/chitti/demos";
 import {
@@ -26,6 +27,7 @@ import {
   PROVIDERS,
   providerMeta,
   type ProviderId,
+  type ModelOption,
 } from "../../lib/chitti/providers";
 import { SOURCES, rowsToCSV } from "../../lib/chitti/tools";
 import { buildFindingOkf } from "../../lib/chitti/okf";
@@ -78,6 +80,7 @@ export default function Workspace() {
     Record<string, { change: ChartChange; analysis: Analysis }>
   >({});
   const [turns, setTurns] = useState<Analysis[]>([]);
+  const [displayTypes, setDisplayTypes] = useState<Record<string, ChartSpec["type"]>>({});
   const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -178,17 +181,14 @@ export default function Workspace() {
     };
   }, []);
   const example = DEMOS.find((d) => selected === `example:${d.id}`);
-  const active = useMemo(
-    () =>
-      example
-        ? fromShared(example.state, "example", selected)
-        : turns.find((t) => t.id === selected),
-    [example, selected, turns],
-  );
-  const resolveTurn = (id: string) => {
+  const resolveTurn = useCallback((id: string) => {
     const demo = DEMOS.find(d => id === `example:${d.id}`);
-    return demo ? fromShared(demo.state, "example", id) : turns.find(t => t.id === id);
-  };
+    const turn = demo ? fromShared(demo.state, "example", id) : turns.find(t => t.id === id);
+    const type = displayTypes[id];
+    if (!type || !turn?.result?.spec || type === turn.result.spec.type) return turn;
+    return { ...turn, result: { ...turn.result, spec: { ...turn.result.spec, type } } };
+  }, [turns, displayTypes]);
+  const active = useMemo(() => resolveTurn(selected), [resolveTurn, selected]);
   const previousTurns = conversationPath(selected, parents.current).slice(0, -1)
     .map(resolveTurn).filter((t): t is Analysis => !!t);
   const recentChats = conversationHeads(turns.map(t => t.id), parents.current).map(resolveTurn).filter((t): t is Analysis => !!t);
@@ -201,21 +201,20 @@ export default function Workspace() {
     setSelected(id); setLatestRequest(""); setRedo([]); setReceipt(false);
     setUseCurrent(true); setNavigationNote(""); setDashboards(false);
   };
-  const connect = (provider?: ProviderId) => {
-    setSettingsDraft(provider && provider !== config.provider ? {
+  const connect = (provider?: ProviderId, model?: ModelOption) => {
+    const draft = provider && provider !== config.provider ? {
       ...config, provider, model: providerMeta(provider).models[0]?.id || "",
-      apiKey: "", chatgptAccount: undefined, directOnly: false,
-    } : { ...config, directOnly: false });
+      apiKey: "", chatgptAccount: undefined, directOnly: false, requestReasoning: false,
+    } : { ...config, directOnly: false };
+    setSettingsDraft(model ? { ...draft, model: model.id, requestReasoning: !!model.reasoning } : draft);
     setSettings(true);
   };
-  const operations = useMemo(
-    () =>
-      active?.origin === "view" && active.result
-        ? resultSurface({ ...active.result, answer: "" })
-        : surfaces[selected] ||
-          (active?.result ? resultSurface(active.result) : null),
-    [surfaces, selected, active?.result, active?.origin],
-  );
+  const operations = useMemo(() => {
+    if (active?.origin === "view" && active.result)
+      return resultSurface({ ...active.result, answer: "" });
+    if (active?.result && displayTypes[selected]) return resultSurface(active.result);
+    return surfaces[selected] || (active?.result ? resultSurface(active.result) : null);
+  }, [surfaces, displayTypes, selected, active?.result, active?.origin]);
   const respond = useCallback(
     (action: ActionPayload) => {
       if (
@@ -304,8 +303,14 @@ export default function Workspace() {
           void submit(`Show ${range.start}–${range.end}`, false, active.result, { kind: "years", start: range.start, end: range.end });
       } catch {}
     }
-    if (action.name === "chart-type" && typeof value === "string" && ["line", "bar", "grouped-bar"].includes(value))
-      void submit(`Show a ${value.replace('-', ' ')} chart`, false, active.result, { kind: "type", type: value as "line" | "bar" | "grouped-bar" });
+    if (action.name === "chart-type") {
+      const spec = active.result.spec;
+      const type = spec && chartTypes(spec).find(type => type === value);
+      if (type && type !== spec.type) {
+        setDisplayTypes(previous => ({ ...previous, [selected]: type }));
+      }
+      return;
+    }
     if (action.name === "highlight" && typeof value === "string")
       void submit(value ? `Highlight ${active.result.spec?.series.find(s => (s.id || s.name) === value)?.name || value}` : "Clear highlighting", false, active.result, { kind: "highlight", id: value });
     if (
@@ -883,8 +888,12 @@ export default function Workspace() {
       {settings && (
         <Settings
           value={settingsDraft || config}
-          locked={running || modelLocked}
-          onSave={saveConfig}
+          locked={running}
+          newChat={modelLocked}
+          onSave={(value, remember) => {
+            if (modelLocked) newAnalysis();
+            saveConfig(value, remember);
+          }}
           onClose={() => { setSettings(false); setSettingsDraft(null); }}
         />
       )}
