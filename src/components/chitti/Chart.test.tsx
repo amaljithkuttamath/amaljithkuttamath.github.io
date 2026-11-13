@@ -62,6 +62,18 @@ it("exposes a fitted axis, actual change and keyboard-accessible explanation act
   );
   expect(screen.getByText("Axis includes zero")).toBeTruthy();
 });
+it("updates the existing chart instance when switching between lines and bars", async () => {
+  const { rerender, unmount } = render(<Chart spec={spec} />);
+  await waitFor(() => expect(setOption).toHaveBeenCalled());
+  const canvas = screen.getByRole("img");
+  rerender(<Chart spec={{ ...spec, type: "bar" }} />);
+  await waitFor(() => expect(setOption.mock.calls.at(-1)![0].series[0].type).toBe("bar"));
+  expect(screen.getByRole("img")).toBe(canvas);
+  expect(dispose).not.toHaveBeenCalled();
+  expect(on).toHaveBeenCalledTimes(1);
+  unmount();
+  expect(dispose).toHaveBeenCalledTimes(1);
+});
 it("routes a plotted marker click to the same exact change question", async () => {
   const onAsk = vi.fn();
   render(<Chart spec={spec} onAsk={onAsk} />);

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Dialog, IconButton, Notice, Select, TextField } from "./ui/controls";
 import {
   PROVIDERS,
-  fetchModels,
+  loadModelCatalog,
   providerMeta,
   type ProviderId,
   type ModelOption,
@@ -20,11 +20,13 @@ const jevBase = classificationBase(
 export default function Settings({
   value,
   locked,
+  newChat,
   onSave,
   onClose,
 }: {
   value: Config;
   locked: boolean;
+  newChat: boolean;
   onSave: (value: Config, remember: boolean) => void;
   onClose: () => void;
 }) {
@@ -60,18 +62,19 @@ export default function Settings({
     setModels(providerMeta(id).models);
     setStatus("");
   };
-  const load = async () => {
+  const load = async (refresh = true) => {
     const version = ++loading.current;
     setStatus("Reading model catalog…");
     try {
-      const list = await fetchModels(
+      const {models: list, fallback} = await loadModelCatalog(
         draft.provider,
         draft.apiKey,
         draft.chatgptAccount,
+        refresh,
       );
       if (version === loading.current) {
         setModels(list);
-        setStatus(`${list.length} models available.`);
+        setStatus(fallback ? "Live catalog unavailable. Retry to load more models." : `${list.length} models available.`);
       }
     } catch {
       if (version === loading.current)
@@ -80,6 +83,7 @@ export default function Settings({
   };
   const canSave = !(
     locked ||
+    (draft.provider !== "chatgpt" && !draft.apiKey.trim()) ||
     !draft.sources.length ||
     !draft.model.trim() ||
     (draft.provider === "chatgpt" &&
@@ -98,12 +102,12 @@ export default function Settings({
       footer={
         <>
           <Button label="Cancel" variant="ghost" onClick={onClose} />
-          <Button type="submit" variant="primary" label="Save settings" disabled={!canSave} />
+          <Button type="submit" variant="primary" label={newChat ? "Start new chat" : "Save settings"} disabled={!canSave} />
         </>
       }
     >
-      {locked && (
-        <Notice title="This chat keeps its model">Start a new chat to switch model or provider.</Notice>
+      {newChat && (
+        <Notice title="This chat keeps its model">Applying changes starts a new chat. Your current conversation stays in Recent chats.</Notice>
       )}
       <Select
         label="Provider"
@@ -139,7 +143,13 @@ export default function Settings({
             disabled={locked}
             value={draft.apiKey}
             autoComplete="off"
-            onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+            onChange={(apiKey) => {
+              loading.current++;
+              setModels(providerMeta(draft.provider).models);
+              setStatus("");
+              setDraft({ ...draft, apiKey });
+            }}
+            onBlur={() => { if (draft.apiKey.trim()) void load(false); }}
           />
           <Checkbox label="Remember in this tab until it closes" disabled={locked} checked={remember} onChange={setRemember} />
         </>

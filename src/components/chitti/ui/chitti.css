@@ -618,6 +618,9 @@ button.cx-token:hover { background: var(--cx-raise); }
 .cx-preview + .cx-hint { margin-left: 0; }
 .cx-hint:first-of-type { margin-left: auto; }
 .cx-send { width: 34px; padding: 0; border-radius: 9px; }
+.cx-model-results { max-height: min(36svh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+.cx-model-results .cx-menu-text { overflow-wrap: anywhere; }
+.cx-model-results [aria-pressed="true"] { background: var(--cx-raise); }
 .cx-model-trigger .cx-btn-label { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .cx-model-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cx-faint); display: inline-block; }
 .cx-model-dot[data-on] { background: var(--cx-ok); }

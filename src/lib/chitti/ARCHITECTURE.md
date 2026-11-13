@@ -85,8 +85,9 @@ A rendered chart now emits an evidence-bearing draft immediately through `onPrev
 before the final finding and verification. Repeated A2UI updates reuse the surface
 processor so the current tab and filter stay open. Drafts carry no verification.
 
-The result's focus, type, highlight and time-range controls dispatch A2UI actions into AG-UI
-runs. They change the chart using recorded values, retain the full source rows
+The chart-type dropdown updates the existing chart in place. The workspace keeps the display
+type per answer for follow-ups, sharing and pinning. The answer and its evidence stay attached.
+The result's focus, highlight and time-range controls dispatch A2UI actions into AG-UI runs. They change the chart using recorded values, retain the full source rows
 and timestamps, and discard the old conclusion/verdict. Each revision links back
 to its exact parent view. The workspace shows a deterministic difference summary
 next to Undo, Redo and Steer. Undo/redo restores snapshots without rerunning the

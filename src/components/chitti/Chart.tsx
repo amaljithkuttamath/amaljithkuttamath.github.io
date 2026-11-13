@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useContext } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo, useContext } from "react";
 import { chartUnit } from "../../lib/chitti/chart-contract";
 import type { ChartSpec } from "../../lib/chitti/tools";
 import { buildOption, barLayout } from "../../lib/chitti/ui/chart-option";
@@ -53,26 +53,34 @@ export default function Chart({
   select.current = onSelect;
   const host = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const option = useCallback(() => {
+    const o = buildOption(spec, fit, selected) as Record<string, unknown>;
+    if (!zoom && Array.isArray(o.dataZoom) && o.dataZoom.length) {
+      o.dataZoom = [];
+      o.grid = { ...(o.grid as object), bottom: 8 };
+    }
+    return o;
+  }, [spec, fit, selected, zoom]);
+  const instance = useRef<import("echarts/core").EChartsType | null>(null);
+  const current = useRef({ option, spec });
+  useEffect(() => {
+    current.current = { option, spec };
+    instance.current?.setOption(option(), true);
+  }, [option, spec]);
   useEffect(() => {
     let disposed = false,
       chart: import("echarts/core").EChartsType | undefined;
     const resize = new ResizeObserver(() => chart?.resize());
-    const option = () => {
-      const o = buildOption(spec, fit, selected) as Record<string, unknown>;
-      if (!zoom && Array.isArray(o.dataZoom) && o.dataZoom.length) {
-        o.dataZoom = [];
-        o.grid = { ...(o.grid as object), bottom: 8 };
-      }
-      return o;
-    };
-    const theme = new MutationObserver(() => chart?.setOption(option(), true));
+    const theme = new MutationObserver(() => chart?.setOption(current.current.option(), true));
     setFailed(false);
     void import("./chart-runtime")
       .then(({ init }) => {
         if (disposed || !host.current) return;
         chart = init(host.current);
-        chart.setOption(option());
+        instance.current = chart;
+        chart.setOption(current.current.option());
         chart.on("click", (params) => {
+          const { spec } = current.current;
           const data = params.data as { changeYear?: number } | undefined;
           const year =
             params.componentType === "markPoint"
@@ -117,8 +125,9 @@ export default function Chart({
       resize.disconnect();
       theme.disconnect();
       chart?.dispose();
+      instance.current = null;
     };
-  }, [spec, fit, selected, zoom]);
+  }, []);
   return (
     <figure className="cx-chart">
       <figcaption className={showTitle ? "cx-chart-head" : "cx-sr-only"}>

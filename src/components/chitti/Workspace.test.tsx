@@ -75,8 +75,10 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 it("locks a chat's model, switches only in a new chat, and restores its original model", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
   sessionStorage.setItem("chitti:provider", "openrouter");
   sessionStorage.setItem("chitti:key", "test-key");
   sessionStorage.setItem("chitti:model", "original-model");
@@ -89,8 +91,7 @@ it("locks a chat's model, switches only in a new chat, and restores its original
   const modelMenu = (id: string) => screen.getByRole("button", { name: `Choose model: ${id}` });
   fireEvent.click(modelMenu("original-model"));
   const next = providerMeta("openrouter").models[0];
-  // Model choices are radio items in the menu (one is checked).
-  fireEvent.click(screen.getByRole("menuitemradio", { name: (name) => name.startsWith(next.label) }));
+  fireEvent.click(screen.getByRole("button", { name: (name) => name.startsWith(next.label) }));
   // The chat keeps its model until the user confirms a new chat.
   expect(modelMenu("original-model")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Start new chat" }));
@@ -103,6 +104,61 @@ it("locks a chat's model, switches only in a new chat, and restores its original
   await waitFor(() => expect(createSession).toHaveBeenCalledTimes(2));
   expect(vi.mocked(createSession).mock.calls[1][0].model).toBe("original-model");
 });
+it("finds a live model before connection and carries it through setup and the next request", async () => {
+  const id = "fixture/research-pro";
+  const catalog = [{ id, name: "Research Professional", supported_parameters: ["tools", "reasoning"] }];
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: catalog }) }));
+  const ask = vi.fn().mockResolvedValue({ finding: "Selected model ran.", chartSpec: null, rows: [], citations: [], verification: null, cost: 0 });
+  vi.mocked(createSession).mockReturnValue({ ask } as unknown as ChittiSession);
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose model: Direct queries" }));
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "professional" } });
+  fireEvent.click(await screen.findByRole("button", { name: /Research Professional/ }));
+  expect((screen.getByLabelText("Model", { exact: true }) as HTMLInputElement).value).toBe(id);
+  const submit = screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement;
+  expect(submit.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-key" } });
+  fireEvent.click(submit);
+  fireEvent.change(screen.getByLabelText("Ask a data question"), { target: { value: "Explain the limits of these indicators" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await screen.findByText("Selected model ran.");
+  expect(vi.mocked(createSession).mock.calls[0][0]).toMatchObject({ model: id, requestReasoning: true });
+});
+
+it("lists subscription models for the restored ChatGPT account", async () => {
+  sessionStorage.setItem("chitti:provider", "chatgpt");
+  sessionStorage.setItem("chitti:model", "original");
+  sessionStorage.setItem("chitti:account", "account-a");
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [{ id: "another", label: "Another model" }] }) });
+  vi.stubGlobal("fetch", fetch);
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose model: original" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Another model/ }));
+  expect(screen.getByRole("button", { name: "Choose model: another" })).toBeTruthy();
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ account: "account-a" });
+});
+it("changes chart type in place and preserves the current draft and answer", async () => {
+  render(<Workspace />);
+  const demo = DEMOS[2];
+  await openExample(demo);
+  const picker = await screen.findByRole("radiogroup", { name: "Chart type" });
+  const question = screen.getByRole("heading", { name: demo.question });
+  const finding = document.querySelector(".cx-finding")!.textContent;
+  const composer = screen.getByLabelText("Ask a data question") as HTMLTextAreaElement;
+  fireEvent.change(composer, { target: { value: "My next question" } });
+  for (const name of ["Bars", "Grouped", "Line"]) {
+    const radio = within(picker).getByRole("radio", { name });
+    fireEvent.click(radio);
+    await waitFor(() => expect((radio as HTMLInputElement).checked).toBe(true));
+    expect(screen.getByRole("radiogroup", { name: "Chart type" })).toBe(picker);
+    expect(screen.getByRole("heading", { name: demo.question })).toBe(question);
+    expect(document.querySelector(".cx-finding")!.textContent).toBe(finding);
+    expect(composer.value).toBe("My next question");
+  }
+  expect(createSession).not.toHaveBeenCalled();
+  expect(runFastPath).not.toHaveBeenCalled();
+});
+
 it("keeps the previous artifact visible while a new AG-UI run appends a new reply", async () => {
   let resolve!: (value: Awaited<ReturnType<typeof runFastPath>>) => void;
   vi.mocked(runFastPath).mockImplementation(

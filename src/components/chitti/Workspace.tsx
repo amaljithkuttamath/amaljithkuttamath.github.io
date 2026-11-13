@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExplanationContext } from "./ChangeExplanation";
 import { chartChanges, changeKey, changeQuestion, type ChartChange } from "../../lib/chitti/chart-insights";
 import { describeChange } from "../../lib/chitti/workspace/changes";
-import type { ViewEdit } from "../../lib/chitti/workspace/steering";
+import type { ChartSpec } from "../../lib/chitti/core";
+import { chartTypes, type ViewEdit } from "../../lib/chitti/workspace/steering";
 import { ChittiAgent } from "../../lib/chitti/workspace/agent";
 import { DEMOS } from "../../lib/chitti/demos";
 import { fromShared, resultSurface, type Analysis, type Settings as Config, type WorkspaceState } from "../../lib/chitti/workspace/model";
 import { decodeShareState, encodeShareState, type ShareStateV1 } from "../../lib/chitti/share";
-import { PROVIDERS, providerMeta, type ProviderId } from "../../lib/chitti/providers";
+import { PROVIDERS, providerMeta, type ProviderId, type ModelOption } from "../../lib/chitti/providers";
 import { SOURCES, rowsToCSV } from "../../lib/chitti/tools";
 import { buildFindingOkf } from "../../lib/chitti/okf";
 import type { FastPathPlan, SeriesCandidate } from "../../lib/chitti/fastpath";
@@ -80,6 +81,7 @@ export default function Workspace() {
   const [agent] = useState(() => new ChittiAgent(config));
   const explanationRuns = useRef<Record<string, { view: string; change: ChartChange }>>({});
   const [explanations, setExplanations] = useState<Record<string, { change: ChartChange; analysis: Analysis }>>({});
+  const [displayTypes, setDisplayTypes] = useState<Record<string, ChartSpec["type"]>>({});
   const [turns, setTurns] = useState<Analysis[]>([]);
   const [selected, setSelected] = useState("");
   const [question, setQuestion] = useState("");
@@ -167,15 +169,14 @@ export default function Workspace() {
       cancelled = true;
     };
   }, []);
-  const example = DEMOS.find((d) => selected === `example:${d.id}`);
-  const active = useMemo(
-    () => (example ? fromShared(example.state, "example", selected) : turns.find((t) => t.id === selected)),
-    [example, selected, turns],
-  );
-  const resolveTurn = (id: string) => {
-    const demo = DEMOS.find((d) => id === `example:${d.id}`);
-    return demo ? fromShared(demo.state, "example", id) : turns.find((t) => t.id === id);
-  };
+  const resolveTurn = useCallback((id: string) => {
+    const demo = DEMOS.find(d => id === `example:${d.id}`);
+    const turn = demo ? fromShared(demo.state, "example", id) : turns.find(t => t.id === id);
+    const type = displayTypes[id];
+    if (!type || !turn?.result?.spec || type === turn.result.spec.type) return turn;
+    return { ...turn, result: { ...turn.result, spec: { ...turn.result.spec, type } } };
+  }, [turns, displayTypes]);
+  const active = useMemo(() => resolveTurn(selected), [resolveTurn, selected]);
   const path = conversationPath(selected, parents.current);
   const previousTurns = path.slice(0, -1).map(resolveTurn).filter((t): t is Analysis => !!t);
   // An ambiguous lookup the user has not resolved yet is not a chat of its own.
@@ -228,21 +229,20 @@ export default function Workspace() {
     setNavigationNote("");
     setDashboards(false);
   };
-  const connect = (provider?: ProviderId) => {
-    setSettingsDraft(
-      provider && provider !== config.provider
-        ? { ...config, provider, model: providerMeta(provider).models[0]?.id || "", apiKey: "", chatgptAccount: undefined, directOnly: false }
-        : { ...config, directOnly: false },
-    );
+  const connect = (provider?: ProviderId, model?: ModelOption) => {
+    const draft = provider && provider !== config.provider ? {
+      ...config, provider, model: providerMeta(provider).models[0]?.id || "",
+      apiKey: "", chatgptAccount: undefined, directOnly: false, requestReasoning: false,
+    } : { ...config, directOnly: false };
+    setSettingsDraft(model ? { ...draft, model: model.id, requestReasoning: !!model.reasoning } : draft);
     setSettings(true);
   };
-  const operations = useMemo(
-    () =>
-      active?.origin === "view" && active.result
-        ? resultSurface({ ...active.result, answer: "" })
-        : surfaces[selected] || (active?.result ? resultSurface(active.result) : null),
-    [surfaces, selected, active?.result, active?.origin],
-  );
+  const operations = useMemo(() => {
+    if (active?.origin === "view" && active.result)
+      return resultSurface({ ...active.result, answer: "" });
+    if (active?.result && displayTypes[selected]) return resultSurface(active.result);
+    return surfaces[selected] || (active?.result ? resultSurface(active.result) : null);
+  }, [surfaces, displayTypes, selected, active?.result, active?.origin]);
   const respond = useCallback(
     (action: ActionPayload) => {
       if (action.name === "answer" && typeof action.context.requestId === "string" && typeof action.context.value === "string")
@@ -316,8 +316,14 @@ export default function Workspace() {
           void submit(`Show ${range.start}–${range.end}`, false, active.result, { kind: "years", start: range.start, end: range.end });
       } catch {}
     }
-    if (name === "chart-type" && ["line", "bar", "grouped-bar"].includes(value))
-      void submit(`Show a ${value.replace("-", " ")} chart`, false, active.result, { kind: "type", type: value as "line" | "bar" | "grouped-bar" });
+    if (name === "chart-type") {
+      const spec = active.result.spec;
+      const type = spec && chartTypes(spec).find(type => type === value);
+      if (type && type !== spec.type) {
+        setDisplayTypes(previous => ({ ...previous, [selected]: type }));
+      }
+      return;
+    }
     if (name === "highlight")
       void submit(
         value ? `Highlight ${active.result.spec?.series.find((s) => (s.id || s.name) === value)?.name || value}` : "Clear highlighting",
@@ -917,8 +923,12 @@ export default function Workspace() {
       {settings && (
         <Settings
           value={settingsDraft || config}
-          locked={running || modelLocked}
-          onSave={saveConfig}
+          locked={running}
+          newChat={modelLocked}
+          onSave={(value, remember) => {
+            if (modelLocked) newAnalysis();
+            saveConfig(value, remember);
+          }}
           onClose={() => {
             setSettings(false);
             setSettingsDraft(null);

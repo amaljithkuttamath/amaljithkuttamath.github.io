@@ -63,7 +63,7 @@ export function ChartPanel({
   const heading = useRef<HTMLHeadingElement>(null);
   const years = plottedYears(spec);
   const [range, setRange] = useState(years);
-  useEffect(() => setRange(plottedYears(spec)), [spec]);
+  useEffect(() => setRange(years), [turn.id, years?.start, years?.end]);
   useEffect(() => {
     heading.current?.focus();
   }, [turn.id]);

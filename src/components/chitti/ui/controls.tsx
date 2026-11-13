@@ -583,6 +583,7 @@ export function TextField({
   autoFocus,
   list,
   autoComplete,
+  onBlur,
   className = "",
 }: {
   label: string;
@@ -596,6 +597,7 @@ export function TextField({
   autoFocus?: boolean;
   list?: string;
   autoComplete?: string;
+  onBlur?: () => void;
   className?: string;
 }) {
   const id = useId();
@@ -614,6 +616,7 @@ export function TextField({
         autoFocus={autoFocus}
         list={list}
         autoComplete={autoComplete}
+        onBlur={onBlur}
         aria-describedby={description ? `${id}-d` : undefined}
         onChange={(e) => onChange(e.target.value)}
       />
