@@ -59,7 +59,6 @@ export default function ChatGPTConnection(props: {
     try {
       const result = await companion<Status>("status");
       if (!mounted.current) return;
-      setOnline(true);
       await accept(result);
     } catch (e) {
       if (mounted.current)
@@ -205,39 +204,12 @@ export default function ChatGPTConnection(props: {
       )}
       {!online && !busy && (
         <section className="cx-helper" aria-labelledby="cx-helper-title">
-          <h3 id="cx-helper-title">This option needs a helper app on your computer</h3>
-          <p>
-            ChatGPT completes this kind of sign-in only with a program running
-            on your own computer; it does not hand a login to a website. So a
-            small helper that you run yourself receives the login, keeps it on
-            this computer, and passes Chitti's requests to ChatGPT. It is not
-            running yet, or your browser blocked Chitti from reaching it.
-          </p>
-          <ol className="cx-steps">
-            <li>
-              <span>Get the code (needs Git and Node.js 22 or newer):</span>
-              <pre className="cx-pre">
-                <code>
-                  {"git clone https://github.com/amaljithkuttamath/amaljithkuttamath.github.io.git\ncd amaljithkuttamath.github.io\nnpm install"}
-                </code>
-              </pre>
-            </li>
-            <li>
-              <span>Start the helper and leave that window open:</span>
-              <pre className="cx-pre">
-                <code>npm run chitti:connect</code>
-              </pre>
-            </li>
-            <li>
-              <span>Come back here and check. A sign-in button appears once the helper answers.</span>
-              <Button label="Check connection" variant="primary" onClick={() => void check()} />
-              {/* The result of the last check sits beside the button that ran it. */}
-              <p className="cx-status-text" role="status">{status}</p>
-            </li>
-          </ol>
+          <h3 id="cx-helper-title">ChatGPT connection unavailable</h3>
+          <p>This version of Chitti connects to your ChatGPT subscription through a local companion.</p>
+          <p className="cx-status-text" role="status">{status}</p>
+          <Button label="Check connection" variant="primary" onClick={() => void check()} />
           {current.current.onUseApiKey && (
             <p className="cx-helper-alt">
-              <span>Rather not install anything?</span>
               <Button
                 size="sm"
                 label="Use an API key instead"
@@ -245,38 +217,13 @@ export default function ChatGPTConnection(props: {
               />
             </p>
           )}
-          <details className="cx-disclosure">
-            <summary>The helper is running but this still shows</summary>
-            <div className="cx-disclosure-body">
-              <p className="cx-status-text">
-                Some browsers stop a public website from talking to programs on
-                your computer. If your browser asked to allow local network
-                access, allow it and check again. Otherwise run Chitti itself
-                from the same folder, in a second window:
-              </p>
-              <pre className="cx-pre">
-                <code>
-                  npm run build &amp;&amp; npm run preview -- --host 127.0.0.1 --port 4323
-                </code>
-              </pre>
-              <p className="cx-row">
-                <a
-                  href="http://127.0.0.1:4323/apps/chitti/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open local Chitti
-                </a>
-                <a
-                  href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/blob/main/docs/chitti-chatgpt.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Setup guide
-                </a>
-              </p>
-            </div>
-          </details>
+          <a
+            href="https://github.com/amaljithkuttamath/amaljithkuttamath.github.io/blob/main/docs/chitti-chatgpt.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Local connection guide
+          </a>
         </section>
       )}
       {online && (

@@ -39,6 +39,6 @@ it("never supplies hardcoded subscription models on a disconnected catalog", asy
     }),
   );
   await expect(fetchModels("chatgpt", "", "issued")).rejects.toThrow(
-    "The helper app on this computer did not answer",
+    "Couldn’t reach the local Chitti companion",
   );
 });

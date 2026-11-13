@@ -18,20 +18,21 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
-it("explains how to start the companion without asking for an API key", async () => {
-  vi.mocked(companion).mockRejectedValue(new Error("Start the companion."));
+it("offers a retry without prescribing an install when the companion cannot be reached", async () => {
+  vi.mocked(companion)
+    .mockRejectedValueOnce(new Error("Local connection unavailable."))
+    .mockResolvedValueOnce({ accounts: [] });
   render(<ChatGPTConnection onAccount={vi.fn()} onModels={vi.fn()} />);
-  await screen.findByText("Start the companion.");
-  expect(screen.getByText(/npm run chitti:connect/)).toBeTruthy();
-  expect(screen.queryByLabelText("API key")).toBeNull();
+  await screen.findByText("Local connection unavailable.");
+  expect(screen.queryByText(/npm install/i)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+  expect(await screen.findByRole("button", { name: "Continue with ChatGPT" })).toBeTruthy();
 });
-it("says why a helper is needed and offers the no-install route", async () => {
+it("offers the API-key fallback while the local connection is unavailable", async () => {
   vi.mocked(companion).mockRejectedValue(new Error("The helper app on this computer did not answer."));
   const onUseApiKey = vi.fn();
   render(<ChatGPTConnection onAccount={vi.fn()} onModels={vi.fn()} onUseApiKey={onUseApiKey} />);
-  await screen.findByRole("heading", { name: "This option needs a helper app on your computer" });
-  expect(screen.getByText(/does not hand a login to a website/)).toBeTruthy();
-  expect(screen.getByText(/git clone/)).toBeTruthy();
+  await screen.findByRole("heading", { name: "ChatGPT connection unavailable" });
   // One clear next action, and no sign-in button until the helper answers.
   expect(screen.getAllByRole("button", { name: "Check connection" })).toHaveLength(1);
   expect(screen.queryByRole("button", { name: "Continue with ChatGPT" })).toBeNull();
